@@ -1,4 +1,4 @@
-// mbavio.grid — the grid introspection overlay as a plugin (decisions.md
+// mrbavio.grid — the grid introspection overlay as a plugin (decisions.md
 // #48, P6): DevTools-style track lines, gap hatching and line-number badges
 // for the selected grid, or the parent's grid of a selected child
 // (decisions.md #11). Everything it reads arrives through `dd`: the

@@ -1,7 +1,7 @@
 // The panel's CSS as a string (decisions.md #48: plugins ship no CSS
 // files). Mounted ONCE, as the first child of the panel root
 // (HtmlPanel.tsx). Class names carry a prefix derived from `dd.plugin.id`
-// (`mbavio.html-editor` → `daydream-html-editor-…`), so a copy of this
+// (`mrbavio.html-editor` → `daydream-html-editor-…`), so a copy of this
 // folder under another id styles its own nodes and never this one's. The
 // --panel-* tokens are scoped to the panel root, not :root, so nothing of
 // the app leaks into a rendered document.

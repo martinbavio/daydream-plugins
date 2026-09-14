@@ -44,7 +44,7 @@ const textDocument = (): DreamDocument => ({
   items: [
     {
       id: "text-1",
-      kind: "mbavio.text",
+      kind: "mrbavio.text",
       position: { x: 24, y: 32 },
       payload: { text: "Hello\nworld 🌎" },
     },
@@ -57,7 +57,7 @@ const twoItemDocument = (): DreamDocument => ({
     ...textDocument().items,
     {
       id: "text-2",
-      kind: "mbavio.text",
+      kind: "mrbavio.text",
       position: { x: 80, y: 96 },
       payload: { text: "Second" },
     },

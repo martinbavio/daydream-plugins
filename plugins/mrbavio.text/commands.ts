@@ -14,7 +14,7 @@ export function registerTextCommands(
     return item !== undefined && isTextItem(item) ? item.id : null;
   };
   dd.registerCommand({
-    id: "mbavio.text.edit",
+    id: "mrbavio.text.edit",
     title: "Edit text",
     scope: "canvas",
     when: () => soleSelectedText() !== null,
@@ -24,7 +24,7 @@ export function registerTextCommands(
       editing.begin(id);
     },
   });
-  dd.bindShortcut("mbavio.text.edit", "Enter");
+  dd.bindShortcut("mrbavio.text.edit", "Enter");
 
   for (const direction of [-1, 1]) {
     const name = direction > 0 ? "increase" : "decrease";
@@ -33,7 +33,7 @@ export function registerTextCommands(
     // editor-scoped command so the same chord preserves its caret and
     // belongs to the current text-edit transaction while typing.
     for (const scope of ["canvas", "editor"] as const) {
-      const id = `mbavio.text.${name}-font-size-${scope}`;
+      const id = `mrbavio.text.${name}-font-size-${scope}`;
       dd.registerCommand({
         id,
         title: `${direction > 0 ? "Increase" : "Decrease"} text size`,

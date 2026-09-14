@@ -78,13 +78,13 @@ describe("canvas text plugin", () => {
         items: [
           {
             id: "first",
-            kind: "mbavio.text",
+            kind: "mrbavio.text",
             position: { x: 0, y: 0 },
             payload: { text: "First" },
           },
           {
             id: "second",
-            kind: "mbavio.text",
+            kind: "mrbavio.text",
             position: { x: 0, y: 80 },
             payload: { text: "Second" },
           },
@@ -93,7 +93,7 @@ describe("canvas text plugin", () => {
     });
     appStore.setSelectedId("first");
     flush();
-    kernel.commands.runCommand("mbavio.text.edit");
+    kernel.commands.runCommand("mrbavio.text.edit");
     flush();
     await Promise.resolve();
     const first = host.querySelector<HTMLElement>(
@@ -102,7 +102,7 @@ describe("canvas text plugin", () => {
     inputText(first, "First changed");
     appStore.setSelectedId("second");
     flush();
-    kernel.commands.runCommand("mbavio.text.edit");
+    kernel.commands.runCommand("mrbavio.text.edit");
     flush();
     await Promise.resolve();
     expect(host.querySelectorAll("[data-text-editor]")).toHaveLength(1);
@@ -242,7 +242,7 @@ describe("canvas text plugin", () => {
     await new Promise((resolve) => setTimeout(resolve, 550));
     inputText(editor!, "Hello  world\n🌎");
     const item = appStore.document.items[0]!;
-    expect(item.kind).toBe("mbavio.text");
+    expect(item.kind).toBe("mrbavio.text");
     expect(item.payload).toEqual({ text: "Hello  world\n🌎" });
     expect(item.position.x).toBeCloseTo(expected.x, 4);
     expect(item.position.y).toBeCloseTo(expected.y, 4);
@@ -278,7 +278,7 @@ describe("canvas text plugin", () => {
         items: [
           {
             id: "text-1",
-            kind: "mbavio.text",
+            kind: "mrbavio.text",
             position: { x: 40, y: 50 },
             payload: { text: "Original" },
           },
@@ -344,7 +344,7 @@ describe("canvas text plugin", () => {
         items: [
           {
             id: "text-1",
-            kind: "mbavio.text",
+            kind: "mrbavio.text",
             position: { x: 40, y: 50 },
             frame: { width: 120, height: 40 },
             payload: { text: "A long line that wraps in a narrow frame" },
@@ -646,7 +646,7 @@ describe("canvas text plugin", () => {
         items: [
           {
             id: "text-1",
-            kind: "mbavio.text",
+            kind: "mrbavio.text",
             position: { x: 40, y: 50 },
             payload: { text: "Original" },
           },
@@ -706,7 +706,7 @@ describe("canvas text plugin", () => {
         items: [
           {
             id: "text-1",
-            kind: "mbavio.text",
+            kind: "mrbavio.text",
             position: { x: 0, y: 0 },
             payload: { text: "First" },
           },
@@ -744,7 +744,7 @@ describe("canvas text plugin", () => {
         items: [
           {
             id: "text-2",
-            kind: "mbavio.text",
+            kind: "mrbavio.text",
             position: { x: 10, y: 10 },
             payload: { text: "Loaded" },
           },
@@ -791,7 +791,7 @@ describe("canvas text plugin", () => {
         items: [
           {
             id: "text-1",
-            kind: "mbavio.text",
+            kind: "mrbavio.text",
             position: { x: 0, y: 0 },
             payload: { text },
           },
@@ -814,7 +814,7 @@ describe("canvas text plugin", () => {
         items: [
           {
             id: "old-text",
-            kind: "mbavio.text",
+            kind: "mrbavio.text",
             position: { x: 40, y: 50 },
             payload: { text: "Old" },
           },
@@ -844,7 +844,7 @@ describe("canvas text plugin", () => {
         items: [
           {
             id: "new-text",
-            kind: "mbavio.text",
+            kind: "mrbavio.text",
             position: { x: 700, y: 800 },
             payload: { text: "New" },
           },

@@ -2,7 +2,7 @@
 // files — runtime loading cannot serve them). Mounted ONCE, beside the svg
 // in the overlay root (GridOverlay.tsx). Class names and the hatch pattern
 // id carry a prefix DERIVED from `dd.plugin.id` (classPrefix —
-// `mbavio.grid` → `daydream-grid-…`), so a copy of this plugin under
+// `mrbavio.grid` → `daydream-grid-…`), so a copy of this plugin under
 // another id styles its own nodes, and its gap bands reference its own
 // <pattern>, never this plugin's.
 //

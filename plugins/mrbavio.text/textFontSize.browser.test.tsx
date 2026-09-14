@@ -87,7 +87,7 @@ function chord(
 function textItem(frame?: { width: number; height?: number }): DreamItem {
   return {
     id: "text",
-    kind: "mbavio.text",
+    kind: "mrbavio.text",
     position: { x: 40, y: 60 },
     payload: { text: "Same characters on each line. ".repeat(5) },
     ...(frame === undefined ? {} : { frame }),

@@ -87,7 +87,7 @@ test("reopening trailing-newline text restores its empty line and edits at the l
   const doc = createEmptyDocument();
   doc.items.push({
     id: "text-1",
-    kind: "mbavio.text",
+    kind: "mrbavio.text",
     position: { x: 40, y: 50 },
     payload: { text: "Hello\n" },
   });
@@ -138,7 +138,7 @@ test("a temporarily blank existing editor keeps valid document data until blank 
   const doc = createEmptyDocument();
   doc.items.push({
     id: "text-1",
-    kind: "mbavio.text",
+    kind: "mrbavio.text",
     position: { x: 40, y: 50 },
     payload: { text: "Keep this valid" },
   });
@@ -171,13 +171,13 @@ test("outside press commits the actively edited item when multiple text items ar
   doc.items.push(
     {
       id: "text-1",
-      kind: "mbavio.text",
+      kind: "mrbavio.text",
       position: { x: 40, y: 50 },
       payload: { text: "First" },
     },
     {
       id: "text-2",
-      kind: "mbavio.text",
+      kind: "mrbavio.text",
       position: { x: 240, y: 50 },
       payload: { text: "Second" },
     },

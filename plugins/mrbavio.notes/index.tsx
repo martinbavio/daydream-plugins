@@ -1,4 +1,4 @@
-// mbavio.notes — the notes pane as a plugin (decisions.md #48, P5): one
+// mrbavio.notes — the notes pane as a plugin (decisions.md #48, P5): one
 // panel that reads the selected item's viewport meta through the API. It
 // lifted out of the CSS editor to force the dock multi-panel before a
 // third party asks, and it is the smallest REAL plugin: an author reading

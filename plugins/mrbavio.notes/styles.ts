@@ -1,7 +1,7 @@
 // The panel's CSS as a string (decisions.md #48: plugins ship no CSS
 // files — runtime loading cannot serve them). Mounted ONCE, as the first
 // child of the panel root (NotesPanel.tsx). Class names carry a prefix
-// DERIVED from `dd.plugin.id` (classPrefix — `mbavio.notes` →
+// DERIVED from `dd.plugin.id` (classPrefix — `mrbavio.notes` →
 // `daydream-notes-…`), so a copy of this plugin under another id styles
 // its own nodes and never this plugin's. Values are literal: this panel
 // shares no tokens with any other.

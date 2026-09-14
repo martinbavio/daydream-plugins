@@ -1,6 +1,6 @@
 import type { DeepReadonly, DreamItem } from "@daydream/plugin-api";
 
-export const TEXT_KIND = "mbavio.text";
+export const TEXT_KIND = "mrbavio.text";
 export const DEFAULT_TEXT_FONT_SIZE = 24;
 export const TEXT_FONT_SIZE_STEP = 2;
 

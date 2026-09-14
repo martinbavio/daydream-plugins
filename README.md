@@ -9,11 +9,11 @@ workspace, one build, one folder per plugin.
 
 | Plugin               | What it adds                                                              |
 | -------------------- | ------------------------------------------------------------------------- |
-| `mbavio.text`        | plain canvas text as an item kind: type, edit, resize, paste a paragraph |
-| `mbavio.grid`        | a DevTools-style grid overlay for the selected grid container            |
-| `mbavio.notes`       | a notes pane in the dock, saved with the document                         |
-| `mbavio.html-editor` | the selected element's subtree as HTML source, structure only            |
-| `mbavio.html-paste`  | pasting HTML on the canvas lands it as a viewport                        |
+| `mrbavio.text`        | plain canvas text as an item kind: type, edit, resize, paste a paragraph |
+| `mrbavio.grid`        | a DevTools-style grid overlay for the selected grid container            |
+| `mrbavio.notes`       | a notes pane in the dock, saved with the document                         |
+| `mrbavio.html-editor` | the selected element's subtree as HTML source, structure only            |
+| `mrbavio.html-paste`  | pasting HTML on the canvas lands it as a viewport                        |
 
 Each is a folder under `plugins/`: `manifest.json`, `index.tsx`, `styles.ts`
 (CSS as a string), `icon.svg`, its own `package.json` for its runtime
@@ -27,7 +27,7 @@ Daydream host serves. The plugin API is documented in Daydream's
 ```
 pnpm install
 pnpm build            # every plugin → plugins/<id>/dist/index.js
-pnpm build plugins/mbavio.grid
+pnpm build plugins/mrbavio.grid
 ```
 
 `solid-js` and `@solidjs/web` stay bare imports in the built file; the
@@ -41,8 +41,8 @@ project's `.daydream/plugins/<id>/`. Link a built plugin there, trust it,
 and turn it on from the plugins page (⌥⌘P):
 
 ```
-ln -s "$PWD/plugins/mbavio.grid" ~/.daydream/plugins/mbavio.grid
-daydream trust mbavio.grid
+ln -s "$PWD/plugins/mrbavio.grid" ~/.daydream/plugins/mrbavio.grid
+daydream trust mrbavio.grid
 ```
 
 Trust is a disclosure of the folder and its declared permissions, recorded

@@ -39,7 +39,7 @@ test("ingest wraps long text at 60ch before relative placement, keeping short te
   await handlers.ingest({
     dream: {
       version: 5,
-      items: [{ kind: "mbavio.text", payload: { text: short } }],
+      items: [{ kind: "mrbavio.text", payload: { text: short } }],
     },
   });
   const target = store.document.items[0]!;
@@ -58,7 +58,7 @@ test("ingest wraps long text at 60ch before relative placement, keeping short te
   await handlers.ingest({
     dream: {
       version: 5,
-      items: [{ kind: "mbavio.text", payload: { text: long } }],
+      items: [{ kind: "mrbavio.text", payload: { text: long } }],
     },
     placement: { relation: "above", target: { itemId: target.id } },
   });
@@ -83,9 +83,9 @@ test("ingest preserves explicit text frames and counts Unicode characters, not U
     dream: {
       version: 5,
       items: [
-        { kind: "mbavio.text", payload: { text: "🌎".repeat(60) } },
+        { kind: "mrbavio.text", payload: { text: "🌎".repeat(60) } },
         {
-          kind: "mbavio.text",
+          kind: "mrbavio.text",
           frame: { width: 200 },
           payload: { text: "Long text ".repeat(20) },
         },
@@ -105,7 +105,7 @@ test.each([undefined, { relation: "above", target: { itemId: "missing" } }])(
         items: [
           {
             id: "long-label",
-            kind: "mbavio.text",
+            kind: "mrbavio.text",
             position: { x: 0, y: 100 },
             payload: { text: "A long label ".repeat(20) },
           },
@@ -120,7 +120,7 @@ test.each([undefined, { relation: "above", target: { itemId: "missing" } }])(
     ).ingest({
       dream: {
         version: 5,
-        items: [{ kind: "mbavio.text", payload: { text: "Next" } }],
+        items: [{ kind: "mrbavio.text", payload: { text: "Next" } }],
       },
       ...(placement === undefined ? {} : { placement }),
     });
@@ -155,7 +155,7 @@ test("auto-width text lands left-aligned above visible title chrome at the curre
   await handlers.ingest({
     dream: {
       version: 5,
-      items: [{ kind: "mbavio.text", payload: { text: "Hello\nworld" } }],
+      items: [{ kind: "mrbavio.text", payload: { text: "Hello\nworld" } }],
     },
     placement: { relation: "above", target: "selection" },
   });

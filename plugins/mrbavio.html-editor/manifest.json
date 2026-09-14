@@ -1,5 +1,5 @@
 {
-  "id": "mbavio.html-editor",
+  "id": "mrbavio.html-editor",
   "name": "HTML editor",
   "version": "0.1.0",
   "minCore": "0.1.0",
@@ -8,15 +8,15 @@
       "html-editor"
     ],
     "commands": [
-      "mbavio.html-editor.blur",
-      "mbavio.html-editor.undo",
-      "mbavio.html-editor.delete-element"
+      "mrbavio.html-editor.blur",
+      "mrbavio.html-editor.undo",
+      "mrbavio.html-editor.delete-element"
     ],
     "shortcuts": {
-      "Escape": "mbavio.html-editor.blur",
-      "Mod+Z": "mbavio.html-editor.undo",
-      "Delete": "mbavio.html-editor.delete-element",
-      "Backspace": "mbavio.html-editor.delete-element"
+      "Escape": "mrbavio.html-editor.blur",
+      "Mod+Z": "mrbavio.html-editor.undo",
+      "Delete": "mrbavio.html-editor.delete-element",
+      "Backspace": "mrbavio.html-editor.delete-element"
     }
   },
   "built": "dist/index.js"

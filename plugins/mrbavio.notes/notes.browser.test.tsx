@@ -79,9 +79,9 @@ function select(id: ElementId | null): void {
   flush();
 }
 
-describe("mbavio.notes in the shell", () => {
+describe("mrbavio.notes in the shell", () => {
   test("the manifest is first-party and declares the notes panel", () => {
-    expect(manifest.id).toBe("mbavio.notes");
+    expect(manifest.id).toBe("mrbavio.notes");
     expect(manifest.contributes?.panels).toEqual(["notes"]);
     expect(manifest.unstable).toBeUndefined();
   });

@@ -1,4 +1,4 @@
-// mbavio.html-paste — pasting HTML on the canvas lands it as a viewport
+// mrbavio.html-paste — pasting HTML on the canvas lands it as a viewport
 // (decisions.md #56). The first door for existing HTML: a fragment copied
 // from a browser, an element from devtools, a snippet from an editor.
 // Works against the model AS IT IS, downgrading what it cannot hold and

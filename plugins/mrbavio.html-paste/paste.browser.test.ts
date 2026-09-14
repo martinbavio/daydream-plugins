@@ -19,8 +19,8 @@ import { htmlSource, looksLikeMarkup, MAX_ELEMENTS, MAX_SOURCE } from "./paste";
 import { MAX_DEPTH } from "./convert";
 import { isSingleParagraph } from "./prose";
 
-const PLUGIN = "mbavio.html-paste";
-const PLUGINS = ["daydream.media", "mbavio.text", PLUGIN];
+const PLUGIN = "mrbavio.html-paste";
+const PLUGINS = ["daydream.media", "mrbavio.text", PLUGIN];
 
 type InfoSpy = { mock: { calls: unknown[][] }; mockRestore(): void };
 
@@ -281,8 +281,8 @@ describe("landing", () => {
     expect(
       shell.store.document.items.map((item) => [item.kind, item.payload]),
     ).toEqual([
-      ["mbavio.text", { text: "Copied from a page." }],
-      ["mbavio.text", { text: "a few words" }],
+      ["mrbavio.text", { text: "Copied from a page." }],
+      ["mrbavio.text", { text: "a few words" }],
       ["daydream.viewport", expect.anything()],
       ["daydream.viewport", expect.anything()],
       ["daydream.viewport", expect.anything()],
@@ -301,8 +301,8 @@ describe("landing", () => {
       "text/plain": "\n",
     });
     expect(shell.store.document.items.map((item) => item.kind)).toEqual([
-      "mbavio.text",
-      "mbavio.text",
+      "mrbavio.text",
+      "mrbavio.text",
       "daydream.viewport",
     ]);
     expect(shell.store.document.items[1]!.payload).toEqual({

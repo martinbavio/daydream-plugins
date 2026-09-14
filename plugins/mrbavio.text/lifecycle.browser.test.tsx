@@ -25,7 +25,7 @@ test.each([false, true])(
     const doc = createEmptyDocument();
     doc.items.push({
       id: "annotation",
-      kind: "mbavio.text",
+      kind: "mrbavio.text",
       position: { x: 125, y: 450 },
       ...(framed ? { frame: { width: 340 } } : {}),
       payload: { text: "A short annotation", fontSize: 28 },
@@ -61,7 +61,7 @@ test.each([null, { text: 17 }, { text: "Dormant", fontSize: "huge" }])(
     const doc = createEmptyDocument();
     doc.items.push({
       id: "dormant",
-      kind: "mbavio.text",
+      kind: "mrbavio.text",
       position: { x: 0, y: 0 },
       payload,
     });
@@ -76,10 +76,10 @@ test.each([null, { text: 17 }, { text: "Dormant", fontSize: "huge" }])(
     const before = JSON.stringify(store.document);
     expect(host.querySelector("[data-text-item]")).toBeNull();
     expect(
-      host.querySelector('[data-item-kind="mbavio.text"]'),
+      host.querySelector('[data-item-kind="mrbavio.text"]'),
     ).not.toBeNull();
     const titleBar = elementWithClass(host, "bar");
-    expect(titleBar.textContent).toContain("mbavio.text");
+    expect(titleBar.textContent).toContain("mrbavio.text");
     expect(titleBar.getBoundingClientRect().height).toBeGreaterThan(0);
     expect(host.querySelectorAll("[data-item-resize]")).toHaveLength(4);
     for (const key of ["+", "-", "Enter"]) {
@@ -109,7 +109,7 @@ test("disabling text keeps its data, removes interactions and styles, and re-ena
   const doc = createEmptyDocument();
   doc.items.push({
     id: "annotation",
-    kind: "mbavio.text",
+    kind: "mrbavio.text",
     position: { x: 12, y: 24 },
     frame: { width: 340 },
     payload: { text: "Keep this annotation", fontSize: 28 },
@@ -128,12 +128,12 @@ test("disabling text keeps its data, removes interactions and styles, and re-ena
   expect(getComputedStyle(item).lineHeight).toBe("39.2px");
   const before = JSON.stringify(store.document);
 
-  pluginHost.deactivate("mbavio.text");
+  pluginHost.deactivate("mrbavio.text");
   flush();
   expect(host.querySelector("[data-text-item]")).toBeNull();
   expect(
-    host.querySelector('[data-item-kind="mbavio.text"]')?.textContent,
-  ).toContain("mbavio.text");
+    host.querySelector('[data-item-kind="mrbavio.text"]')?.textContent,
+  ).toContain("mrbavio.text");
   expect(document.querySelector("[data-daydream-text-styles]")).toBeNull();
   expect(JSON.stringify(store.document)).toBe(before);
 
@@ -179,7 +179,7 @@ test("unloading during an editor session cancels its draft without losing the co
   const doc = createEmptyDocument();
   doc.items.push({
     id: "annotation",
-    kind: "mbavio.text",
+    kind: "mrbavio.text",
     position: { x: 0, y: 0 },
     payload: { text: "Committed" },
   });
@@ -202,7 +202,7 @@ test("unloading during an editor session cancels its draft without losing the co
   expect(mounted.store.document.items[0]!.payload).toEqual({
     text: "Uncommitted",
   });
-  mounted.pluginHost.deactivate("mbavio.text");
+  mounted.pluginHost.deactivate("mrbavio.text");
   flush();
   expect(mounted.store.document.items[0]!.payload).toEqual({
     text: "Committed",

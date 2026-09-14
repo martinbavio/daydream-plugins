@@ -1,4 +1,4 @@
-// mbavio.html-editor — the HTML pane as a plugin (decisions.md #58): the
+// mrbavio.html-editor — the HTML pane as a plugin (decisions.md #58): the
 // selected element's subtree as source, STRUCTURE ONLY — tag, attributes,
 // text, children; never a style, a class or an id — in CodeMirror, applied
 // LIVE as you type through an item transaction that commits as one undo
@@ -24,9 +24,9 @@ import type { DaydreamApi, ElementId } from "@daydream/plugin-api";
 import { removeElement, type ViewportPayload } from "./edit";
 import createHtmlPanel, { type Draft, type PanelState } from "./HtmlPanel";
 
-export const BLUR_COMMAND = "mbavio.html-editor.blur";
-export const UNDO_COMMAND = "mbavio.html-editor.undo";
-export const DELETE_COMMAND = "mbavio.html-editor.delete-element";
+export const BLUR_COMMAND = "mrbavio.html-editor.blur";
+export const UNDO_COMMAND = "mrbavio.html-editor.undo";
+export const DELETE_COMMAND = "mrbavio.html-editor.delete-element";
 
 /** A key typed into a text field or a plugin's own editor: the router
  * already routes those to editor scope, so a canvas-scope command never

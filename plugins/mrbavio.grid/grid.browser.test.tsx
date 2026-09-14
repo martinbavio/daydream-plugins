@@ -26,9 +26,9 @@ afterEach(() => {
   mounted = null;
 });
 
-describe("mbavio.grid", () => {
+describe("mrbavio.grid", () => {
   test("the manifest is first-party and declares the grid overlay", () => {
-    expect(manifest.id).toBe("mbavio.grid");
+    expect(manifest.id).toBe("mrbavio.grid");
     expect(manifest.minCore).toMatch(/^\d+\.\d+\.\d+$/);
     expect(manifest.contributes?.overlays).toEqual(["grid"]);
     expect(manifest.contributes?.panels).toBeUndefined();
@@ -53,7 +53,7 @@ describe("mbavio.grid", () => {
     mounted.store.setSelectedId(grid.id);
     flush();
     // Class names and the hatch pattern id derive from the plugin id
-    // (`mbavio.grid` → `daydream-grid-…`), so a copy under another id
+    // (`mrbavio.grid` → `daydream-grid-…`), so a copy under another id
     // collides with neither; the gap bands reference THIS pattern.
     expect(
       overlay!.querySelectorAll("line.daydream-grid-line").length,

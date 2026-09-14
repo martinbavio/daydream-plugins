@@ -20,9 +20,9 @@
     "**/node_modules",
     "**/dist",
     "**/*.browser.test.*",
-    "plugins/mbavio.html-editor/edit.test.ts",
-    "plugins/mbavio.html-editor/parse.test.ts",
-    "plugins/mbavio.html-editor/reconcile.test.ts",
-    "plugins/mbavio.html-editor/serialize.test.ts"
+    "plugins/mrbavio.html-editor/edit.test.ts",
+    "plugins/mrbavio.html-editor/parse.test.ts",
+    "plugins/mrbavio.html-editor/reconcile.test.ts",
+    "plugins/mrbavio.html-editor/serialize.test.ts"
   ]
 }
