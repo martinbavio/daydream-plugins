@@ -76,4 +76,5 @@ misleads a reader.
 
 Copy a folder, change the id (two dotted lowercase segments, never the
 `daydream.` prefix — that one is reserved for Daydream's own), and run the
-build. The `@daydream/plugin-api` types are a dev dependency at the root.
+build. The `@daydream/plugin-api` types are a dev dependency at the root,
+with `zod`, which its host-part contract types tool schemas with.
