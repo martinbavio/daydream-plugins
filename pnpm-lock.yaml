@@ -30,7 +30,7 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(vite@8.3.0)
 
-  plugins/mbavio.grid:
+  plugins/mrbavio.grid:
     dependencies:
       '@solidjs/web':
         specifier: 2.0.0-rc.0
@@ -39,7 +39,7 @@ importers:
         specifier: 2.0.0-rc.0
         version: 2.0.0-rc.0
 
-  plugins/mbavio.html-editor:
+  plugins/mrbavio.html-editor:
     dependencies:
       '@codemirror/autocomplete':
         specifier: ^6.20.3
@@ -69,7 +69,7 @@ importers:
         specifier: 2.0.0-rc.0
         version: 2.0.0-rc.0
 
-  plugins/mbavio.html-paste:
+  plugins/mrbavio.html-paste:
     dependencies:
       '@solidjs/web':
         specifier: 2.0.0-rc.0
@@ -78,7 +78,7 @@ importers:
         specifier: 2.0.0-rc.0
         version: 2.0.0-rc.0
 
-  plugins/mbavio.notes:
+  plugins/mrbavio.notes:
     dependencies:
       '@solidjs/web':
         specifier: 2.0.0-rc.0
@@ -87,7 +87,7 @@ importers:
         specifier: 2.0.0-rc.0
         version: 2.0.0-rc.0
 
-  plugins/mbavio.text:
+  plugins/mrbavio.text:
     dependencies:
       '@solidjs/web':
         specifier: 2.0.0-rc.0
