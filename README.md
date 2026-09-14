@@ -36,19 +36,25 @@ instance it runs. Everything else is bundled in.
 
 ## Install into Daydream
 
-Daydream discovers plugins in `~/.daydream/plugins/<id>/` and in the served
-project's `.daydream/plugins/<id>/`. Link a built plugin there, trust it,
-and turn it on from the plugins page (⌥⌘P):
+One line per plugin, from a built folder to a running plugin (Daydream
+0.1.9 or later):
 
 ```
-ln -s "$PWD/plugins/mrbavio.grid" ~/.daydream/plugins/mrbavio.grid
-daydream trust mrbavio.grid
+daydream plugin install plugins/mrbavio.grid
 ```
 
-Trust is a disclosure of the folder and its declared permissions, recorded
-as the folder's hash; every rebuild changes the hash, so trust it again
-after `pnpm build`. Under Daydream's dev host the same link serves the
-source with hot reload, no build needed.
+It links the folder into `~/.daydream/plugins/<id>`, records the trust
+(disclosing the folder and its declared permissions first) and enables the
+plugin in `~/Daydream/.daydream/plugins.json`; a running Daydream sees the
+file change and every tab picks the plugin up. `pnpm ship` builds every
+plugin here and installs them all that way. Run it again after a rebuild:
+the folder's hash changed, so the trust is recorded again. `daydream
+plugin remove <id>` undoes the three.
+
+Under Daydream's dev host the same link serves the source with hot reload,
+no build needed. On an older Daydream, copy the folder into
+`~/.daydream/plugins/` instead, run `daydream trust <id>`, and turn the
+plugin on from the plugins page (⌥⌘P).
 
 ## Tests
 
