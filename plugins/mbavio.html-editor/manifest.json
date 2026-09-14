@@ -1,0 +1,23 @@
+{
+  "id": "mbavio.html-editor",
+  "name": "HTML editor",
+  "version": "0.1.0",
+  "minCore": "0.1.0",
+  "contributes": {
+    "panels": [
+      "html-editor"
+    ],
+    "commands": [
+      "mbavio.html-editor.blur",
+      "mbavio.html-editor.undo",
+      "mbavio.html-editor.delete-element"
+    ],
+    "shortcuts": {
+      "Escape": "mbavio.html-editor.blur",
+      "Mod+Z": "mbavio.html-editor.undo",
+      "Delete": "mbavio.html-editor.delete-element",
+      "Backspace": "mbavio.html-editor.delete-element"
+    }
+  },
+  "built": "dist/index.js"
+}

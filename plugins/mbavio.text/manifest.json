@@ -1,0 +1,29 @@
+{
+  "id": "mbavio.text",
+  "name": "Text",
+  "version": "0.1.0",
+  "minCore": "0.1.0",
+  "contributes": {
+    "itemKinds": [
+      "mbavio.text"
+    ],
+    "overlays": [
+      "draft"
+    ],
+    "commands": [
+      "mbavio.text.edit",
+      "mbavio.text.increase-font-size-canvas",
+      "mbavio.text.decrease-font-size-canvas",
+      "mbavio.text.increase-font-size-editor",
+      "mbavio.text.decrease-font-size-editor"
+    ],
+    "shortcuts": {
+      "Enter": "mbavio.text.edit",
+      "Mod++": "mbavio.text.increase-font-size-canvas",
+      "Mod+=": "mbavio.text.increase-font-size-canvas",
+      "Mod+-": "mbavio.text.decrease-font-size-canvas"
+    },
+    "instructions": "Plain canvas annotations are provided by the Text plugin as kind mbavio.text, not HTML inside a viewport. Ingest them through the generic ingest tool with payload {text: \"Hello World\"}. The text string must contain non-whitespace content and preserves newlines, repeated spaces, emoji and non-Latin text exactly. Omit frame: text of 60 Unicode characters or fewer starts auto-width; longer ingested or pasted text starts with a browser-measured width-only frame capped at 60ch, wrapping without truncation. People may resize afterward. Double-click typing starts auto-width. Existing items are not changed retroactively. Use the generic ingest placement option for relational positioning, not a dedicated text action. Text uses Georgia with serif fallbacks, regular weight, full white, 1.4 line-height and a default 24px size. Cmd/Ctrl+plus (or equals) and Cmd/Ctrl+minus change selected or edited text by 2px down to 2px; fixed widths scale proportionally, explicit heights stay fixed and automatic heights follow the content. Keyboard-adjusted size persists as optional payload.fontSize (positive finite world pixels): omit it for new text and preserve it when round-tripping. No color, weight or typeface customization is available. canvas_state uses the exact text as the summary. The payload accepts only text and optional fontSize. Turning this plugin off preserves text items and their payloads as unknown-kind placeholders."
+  },
+  "built": "dist/index.js"
+}

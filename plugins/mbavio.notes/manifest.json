@@ -1,0 +1,12 @@
+{
+  "id": "mbavio.notes",
+  "name": "Notes",
+  "version": "0.1.0",
+  "minCore": "0.1.0",
+  "contributes": {
+    "panels": [
+      "notes"
+    ]
+  },
+  "built": "dist/index.js"
+}

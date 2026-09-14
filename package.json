@@ -1,0 +1,20 @@
+{
+  "name": "daydream-plugins",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@daydream/plugin-api": "github:mbavio-phota/daydream#path:packages/plugin-api",
+    "@solidjs/vite-plugin": "3.0.0-next.29",
+    "@solidjs/web": "2.0.0-rc.0",
+    "solid-js": "2.0.0-rc.0",
+    "typescript": "^5.9.0",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.11"
+  }
+}

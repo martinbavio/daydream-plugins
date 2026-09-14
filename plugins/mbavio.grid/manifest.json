@@ -1,0 +1,12 @@
+{
+  "id": "mbavio.grid",
+  "name": "Grid overlay",
+  "version": "0.1.0",
+  "minCore": "0.1.0",
+  "contributes": {
+    "overlays": [
+      "grid"
+    ]
+  },
+  "built": "dist/index.js"
+}

