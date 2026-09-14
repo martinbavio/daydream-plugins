@@ -14,6 +14,7 @@ workspace, one build, one folder per plugin.
 | `mrbavio.notes`       | a notes pane in the dock, saved with the document                         |
 | `mrbavio.html-editor` | the selected element's subtree as HTML source, structure only            |
 | `mrbavio.html-paste`  | pasting HTML on the canvas lands it as a viewport                        |
+| `mrbavio.css-author`  | the opinion about CSS: two lints as gates, the layout procedures, a technique corpus the knowledge tools serve, and a `procedures` resource — the `dream-author` workflow itself is Daydream's own |
 
 Each is a folder under `plugins/`: `manifest.json`, `index.tsx`, `styles.ts`
 (CSS as a string), `icon.svg`, its own `package.json` for its runtime
@@ -65,7 +66,11 @@ harness, which lives in the Daydream checkout and reaches into its source;
 they are kept beside the code as the specification and run from a Daydream
 checkout, not from here. The HTML editor's `edit`, `parse`, `reconcile` and
 `serialize` tests build a kernel through the same harness and are excluded
-for the same reason.
+for the same reason, as are the CSS author's `staticLint` and corpus
+tests. The CSS author's knowledge index (`knowledge/INDEX.md`) is
+regenerated with Daydream's `pnpm knowledge:index <folder>` from a
+Daydream checkout; the host renders the index live, so a stale file only
+misleads a reader.
 
 ## Your own
 

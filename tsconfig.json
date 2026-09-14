@@ -23,6 +23,8 @@
     "plugins/mrbavio.html-editor/edit.test.ts",
     "plugins/mrbavio.html-editor/parse.test.ts",
     "plugins/mrbavio.html-editor/reconcile.test.ts",
-    "plugins/mrbavio.html-editor/serialize.test.ts"
+    "plugins/mrbavio.html-editor/serialize.test.ts",
+    "plugins/mrbavio.css-author/staticLint.test.ts",
+    "plugins/mrbavio.css-author/bridge/corpus.test.ts"
   ]
 }
