@@ -97,7 +97,7 @@ export function sessionText(): string {
     "THE LOOP:",
     "1. Start the watch. Tell the user in one line that the session is on and they can pick a verb on the canvas.",
     "2. On wake-up: glaser_pick. It answers {pick, exit} and takes the pick (the canvas caption changes from waiting to building).",
-    "3. exit true → say the session ended; stop. pick null → step 1. Otherwise glaser_verb {verb, viewport, element} from the pick, follow it to the end (drafts landed, one line per direction), then step 1 — START THE WATCH AGAIN before anything else.",
+    "3. exit true → say the session ended; stop. pick null → step 1. Otherwise glaser_verb {verb, viewport, element} from the pick, follow it to the end (drafts landed, one line per direction), then glaser_done (the canvas stops saying building), then step 1 — START THE WATCH AGAIN before anything else.",
     "4. The user adopts a variant from the canvas; nothing for you to do there.",
     "",
     "Chat is overhead during a session: one line when the session starts, one line per round, one when it ends. Never run a verb the user did not pick.",

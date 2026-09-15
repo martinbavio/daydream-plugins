@@ -21,8 +21,10 @@ export type Phase =
   | { kind: "idle" }
   /** Picked on the canvas, no agent has taken it. */
   | { kind: "waiting"; pick: Pick }
-  /** An agent took it and is working; ends at the next landing. */
-  | { kind: "building"; pick: Pick };
+  /** An agent took it and is working; ends when the round is complete —
+   * every variant landed, the in-place rework landed, or the agent said
+   * so (glaser_done). `landed` counts a variant round's progress. */
+  | { kind: "building"; pick: Pick; landed: number; of: number | null };
 
 export interface Session {
   phase: () => Phase;
@@ -35,8 +37,11 @@ export interface Session {
   cancel(): void;
   /** The user ended the session from the canvas. */
   end(): void;
-  /** A landing happened: whatever was building is done. */
-  landed(): void;
+  /** The round is complete: whatever was building is done. */
+  done(): void;
+  /** A variant round's progress: `landed` of `of` variants are on the
+   * canvas. Reaching `of` completes the round. */
+  progress(landed: number, of: number): void;
   /** What the last session left in storage — restored at activation so a
    * reload keeps a waiting pick; `exit` is never restored. */
   restore(saved: unknown, viewportExists: (id: string) => boolean): void;
@@ -60,7 +65,9 @@ export function createSession(dd: DaydreamApi): Session {
     },
     take() {
       const taken = { pick: state.pick, exit: state.exit };
-      if (taken.pick !== null) setPhase({ kind: "building", pick: taken.pick });
+      if (taken.pick !== null) {
+        setPhase({ kind: "building", pick: taken.pick, landed: 0, of: null });
+      }
       write({ pick: null, exit: false });
       return taken;
     },
@@ -72,9 +79,15 @@ export function createSession(dd: DaydreamApi): Session {
       setPhase({ kind: "idle" });
       write({ pick: null, exit: true });
     },
-    landed() {
+    done() {
       // Called from a hook handler (an effect's apply phase): read, don't track.
       if (untrack(phase).kind === "building") setPhase({ kind: "idle" });
+    },
+    progress(landed, of) {
+      const current = untrack(phase);
+      if (current.kind !== "building") return;
+      if (landed >= of) setPhase({ kind: "idle" });
+      else setPhase({ ...current, landed, of });
     },
     restore(saved, viewportExists) {
       const s = sessionState(saved);

@@ -108,7 +108,7 @@ describe("glaser host part", () => {
     await activate(host);
     // The browser part registers glaser_pick; the host part these two.
     expect(tools.map((t) => t.name)).toEqual([VERB_TOOL, SESSION_TOOL]);
-    expect(manifest.contributes.tools).toEqual([VERB_TOOL, SESSION_TOOL, "glaser_pick"]);
+    expect(manifest.contributes.tools).toEqual([VERB_TOOL, SESSION_TOOL, "glaser_pick", "glaser_done"]);
     expect(tools.every((t) => t.annotations?.readOnlyHint === true)).toBe(true);
     expect(prompts.map((p) => p.name)).toEqual(VERBS.map((v) => promptName(v.verb)));
     expect(new Set(prompts.map((p) => p.name))).toEqual(new Set(manifest.contributes.prompts));
@@ -256,6 +256,7 @@ describe("glaser host part", () => {
     expect(watchCommand()).toMatch(/cksum/);
     expect(text).toContain("glaser_pick");
     expect(text).toContain("START THE WATCH AGAIN");
+    expect(text).toContain("glaser_done");
   });
 
   test("instructionsText and stateSlice are plain", () => {

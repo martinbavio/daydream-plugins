@@ -23,7 +23,8 @@
     "tools": [
       "glaser_verb",
       "glaser_session",
-      "glaser_pick"
+      "glaser_pick",
+      "glaser_done"
     ],
     "prompts": [
       "glaser-bolder",
@@ -38,7 +39,7 @@
       "glaser-animate",
       "glaser-adapt"
     ],
-    "instructions": "Glaser brings design verbs to a viewport on the canvas — Impeccable's playbooks (impeccable.style), read from the skill installed on this machine: bolder, quieter, typeset, layout, colorize, delight open three draft variants beside the source; distill, polish, clarify, animate, adapt rework the source in place as an edit draft. The user picks a verb ON THE CANVAS (a command on the selection), and the pick waits for you in the plugin's storage file. So: any Glaser request — a sentence like \"make this bolder\", a bare \"go\", or a wake-up from the watch — starts with glaser_pick, which answers the waiting pick (verb, viewport, element) and takes it; then glaser_verb {verb, viewport, element, brief?} answers the target, the deliverable and the playbook — follow it. With no pick, glaser_verb alone from the user's words, the selection as the target. A GLASER SESSION is the loop that needs no typing: when the user asks to start one — \"start a Glaser session\", \"start a design session in Daydream\", \"let me pick verbs on the canvas\", any wording that means it — call glaser_session — it answers a watch command that exits when the storage file changes; run it the way your harness runs a long wait (Claude Code: a background task that notifies you; Codex: a yielded foreground exec you keep reading; Cursor: a background terminal), and on every wake-up call glaser_pick, do the verb, then START THE WATCH AGAIN before anything else. A pick with exit: true ends the session: stop watching and say so. Never run a verb the user did not pick or ask for."
+    "instructions": "Glaser brings design verbs to a viewport on the canvas — Impeccable's playbooks (impeccable.style), read from the skill installed on this machine: bolder, quieter, typeset, layout, colorize, delight open three draft variants beside the source; distill, polish, clarify, animate, adapt rework the source in place as an edit draft. The user picks a verb ON THE CANVAS (a command on the selection), and the pick waits for you in the plugin's storage file. So: any Glaser request — a sentence like \"make this bolder\", a bare \"go\", or a wake-up from the watch — starts with glaser_pick, which answers the waiting pick (verb, viewport, element) and takes it; then glaser_verb {verb, viewport, element, brief?} answers the target, the deliverable and the playbook — follow it; when the round is complete (every variant landed, or the rework landed, or you stopped), glaser_done, so the canvas stops saying building. With no pick, glaser_verb alone from the user's words, the selection as the target. A GLASER SESSION is the loop that needs no typing: when the user asks to start one — \"start a Glaser session\", \"start a design session in Daydream\", \"let me pick verbs on the canvas\", any wording that means it — call glaser_session — it answers a watch command that exits when the storage file changes; run it the way your harness runs a long wait (Claude Code: a background task that notifies you; Codex: a yielded foreground exec you keep reading; Cursor: a background terminal), and on every wake-up call glaser_pick, do the verb, glaser_done, then START THE WATCH AGAIN before anything else. A pick with exit: true ends the session: stop watching and say so. Never run a verb the user did not pick or ask for."
   },
   "permissions": [
     {

@@ -20,7 +20,7 @@ import {
   type MountedPlugin,
 } from "@daydream/plugin-testing";
 
-import activate, { PICK_TOOL } from "./index";
+import activate, { DONE_TOOL, PICK_TOOL } from "./index";
 import rawManifest from "./manifest.json";
 import { SESSION_KEY } from "./session";
 import { variantMarker } from "./variants";
@@ -69,10 +69,21 @@ function select(id: string | null): void {
   flush();
 }
 const run = (id: string): boolean => mounted!.kernel.commands.runCommand(id);
-const pickTool = () =>
-  mounted!.kernel.registry.tools
-    .entries()
-    .find((e) => e.value.name === PICK_TOOL)!.value;
+const tool = (name: string) =>
+  mounted!.kernel.registry.tools.entries().find((e) => e.value.name === name)!.value;
+const pickTool = () => tool(PICK_TOOL);
+
+/** A variant of `source` for `verb`, `n` of `of`, as an agent lands it. */
+function variantOf(source: DreamViewport, verb: string, n: number, of: number): DreamViewport {
+  const v = fixtureDocument().items[0] as DreamViewport;
+  v.position = { x: 1000 * n, y: 0 };
+  v.payload.meta = {
+    title: `${source.payload.meta?.title ?? "Untitled"} · ${verb} ${n}/${of}`,
+    notes: `${variantMarker({ verb, n, of, sourceId: source.id })}\n\nDirection ${n}.`,
+  };
+  v.payload.root.children[0]!.styles["background"] = `rgb(${n}, 0, 0)`;
+  return v;
+}
 
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 30));
@@ -152,8 +163,62 @@ describe("mrbavio.glaser in the shell", () => {
     expect(caption()!.textContent).toBe("bolder · building");
     expect((await pickTool().run({})) as unknown).toMatchObject({ pick: null, exit: false });
 
-    // A landing (an item added) ends the building state.
+    // A variants round: an unrelated landing changes nothing; each variant
+    // that lands counts against the marker's `of`; the third ends it.
     mounted.store.landItems([fixtureDocument().items[0]!]);
+    await settle();
+    expect(caption()!.textContent).toBe("bolder · building");
+    mounted.store.landItems([variantOf(viewport, "bolder", 1, 3)]);
+    await settle();
+    expect(caption()!.textContent).toBe("bolder · 1 of 3");
+    mounted.store.landItems([variantOf(viewport, "bolder", 2, 3)]);
+    await settle();
+    expect(caption()!.textContent).toBe("bolder · 2 of 3");
+    mounted.store.landItems([variantOf(viewport, "bolder", 3, 3)]);
+    await settle();
+    expect(caption()).toBeNull();
+  });
+
+  test("an in-place round stays building through unrelated edits and ends when the source's page changes; glaser_done ends any round", async () => {
+    const doc = fixtureDocument();
+    const viewport = doc.items[0] as DreamViewport;
+    const { host } = fakeHost();
+    mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
+
+    select(viewport.payload.root.id);
+    run("mrbavio.glaser.pick");
+    await settle();
+    pickerEl()!.querySelector<HTMLElement>('[data-verb="polish"]')!.click();
+    await settle();
+    await pickTool().run({});
+    await settle();
+    expect(caption()!.textContent).toBe("polish · building");
+
+    // A move of the source and a landing elsewhere are not the rework.
+    mounted.store.setDocument((d) => {
+      d.items[0]!.position = { x: 40, y: 40 };
+    });
+    mounted.store.landItems([fixtureDocument().items[0]!]);
+    await settle();
+    expect(caption()!.textContent).toBe("polish · building");
+    // The source's page changing is.
+    mounted.store.setDocument((d) => {
+      (d.items[0] as DreamViewport).payload.root.children[0]!.styles["background"] = "papayawhip";
+    });
+    await settle();
+    expect(caption()).toBeNull();
+
+    // glaser_done: the agent's word ends a round the canvas cannot see the
+    // end of (a round that stopped short).
+    run("mrbavio.glaser.pick");
+    await settle();
+    pickerEl()!.querySelector<HTMLElement>('[data-verb="bolder"]')!.click();
+    await settle();
+    await pickTool().run({});
+    mounted.store.landItems([variantOf(viewport, "bolder", 1, 3)]);
+    await settle();
+    expect(caption()!.textContent).toBe("bolder · 1 of 3");
+    expect(await tool(DONE_TOOL).run({})).toEqual({ done: true });
     await settle();
     expect(caption()).toBeNull();
   });
@@ -213,16 +278,7 @@ describe("mrbavio.glaser in the shell", () => {
     const doc: DreamDocument = fixtureDocument();
     const source = doc.items[0] as DreamViewport;
     source.payload.meta = { title: "Pricing" };
-    const variants = [1, 2, 3].map((n) => {
-      const v = fixtureDocument().items[0] as DreamViewport;
-      v.position = { x: 1000 * n, y: 0 };
-      v.payload.meta = {
-        title: `Pricing · bolder ${n}/3`,
-        notes: `${variantMarker({ verb: "bolder", n, of: 3, sourceId: source.id })}\n\nDirection ${n}.`,
-      };
-      v.payload.root.children[0]!.styles["background"] = `rgb(${n}, 0, 0)`;
-      return v;
-    });
+    const variants = [1, 2, 3].map((n) => variantOf(source, "bolder", n, 3));
     doc.items.push(...variants);
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
     await settle();

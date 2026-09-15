@@ -12,34 +12,27 @@
 // agent in a session watches that file (glaser_session). The canvas never
 // calls an agent; it leaves a note where the agent is already looking.
 
-import { createSignal, onCleanup } from "solid-js";
+import { createSignal, onCleanup, untrack } from "solid-js";
 
 import type { DaydreamApi } from "@daydream/plugin-api";
 
-import { adoptInto, roundOf } from "./adopt";
+import { adoptInto, markerOf, roundOf } from "./adopt";
+import { VERBS as VERB_SPECS } from "./bridge/verbs";
 import createCaption from "./Caption";
 import createPicker, { type PickerEntry } from "./Picker";
 import { createSession, SESSION_KEY } from "./session";
 import { css } from "./styles";
 
 const ID = "mrbavio.glaser";
-const VERBS = [
-  "bolder",
-  "quieter",
-  "typeset",
-  "layout",
-  "colorize",
-  "delight",
-  "distill",
-  "polish",
-  "clarify",
-  "animate",
-  "adapt",
-] as const;
+/** The verbs, in the picker's order — the host part's list, shared. */
+const VERBS = VERB_SPECS.map((v) => v.verb);
+const isVariantsVerb = (verb: string): boolean =>
+  VERB_SPECS.find((v) => v.verb === verb)?.mode === "variants";
 /** The picker's last entry: the session's exit, beside the verbs. */
 const END_SESSION = "end session";
 
 export const PICK_TOOL = "glaser_pick";
+export const DONE_TOOL = "glaser_done";
 
 export default async function activate(dd: DaydreamApi): Promise<void> {
   const style = document.createElement("style");
@@ -144,6 +137,19 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     render: () => createPicker(dd, entries, picker),
   });
 
+  // What the canvas can see of a round's progress (the agent's glaser_done
+  // is the explicit end). A VARIANTS round: every variant carries the
+  // source and the verb in its notes marker, so the count on the canvas
+  // against the marker's `of` is the progress, and reaching it is the end.
+  // An IN-PLACE round lands as one change to the source's page: the root
+  // as text, compared before and after — a move or a rename elsewhere is
+  // not it.
+  const rootText = (viewportId: string): string | null => {
+    const item = dd.items().find((i) => i.id === viewportId);
+    return item === undefined ? null : JSON.stringify((item as { payload: { root: unknown } }).payload.root);
+  };
+  let sourceBefore: string | null = null;
+
   dd.registerTool({
     name: PICK_TOOL,
     title: "Glaser pick",
@@ -151,17 +157,50 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
       "Take the verb the user picked on the canvas: answers {pick: {verb, viewportId, elementId, at} | null, exit} and clears it (the canvas shows the pick as building). Call it first on any Glaser request and on every wake-up of a session's watch; then glaser_verb with the pick's verb, viewport and element. exit true means the user ended the session.",
     inputSchema: { type: "object", properties: {}, required: [] },
     annotations: { idempotentHint: false, destructiveHint: false },
-    run: () => session.take(),
+    run: () => {
+      const taken = session.take();
+      sourceBefore = taken.pick === null ? null : rootText(taken.pick.viewportId);
+      return taken;
+    },
   });
 
-  // A landing ends the building state: a variant round lands item by item
-  // (the first one is enough to say the agent is delivering), an in-place
-  // rework lands as one document change.
-  dd.on("items", ({ added }) => {
-    if (added.length > 0) session.landed();
+  dd.registerTool({
+    name: DONE_TOOL,
+    title: "Glaser done",
+    description:
+      "Tell the canvas the round is complete: every variant landed, or the in-place rework landed, or you stopped. The canvas infers most of this from what lands, but call it at the end of every round anyway — a round that stopped short would otherwise read as still building.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+    annotations: { idempotentHint: true, destructiveHint: false },
+    run: () => {
+      session.done();
+      return { done: true };
+    },
   });
+
+  const trackBuilding = (): void => {
+    const phase = untrack(session.phase);
+    if (phase.kind !== "building") return;
+    const { verb, viewportId } = phase.pick;
+    if (isVariantsVerb(verb)) {
+      let landed = 0;
+      let of: number | null = null;
+      for (const item of dd.items()) {
+        const m = markerOf(item);
+        if (m !== null && m.sourceId === viewportId && m.verb === verb) {
+          landed += 1;
+          of = Math.max(of ?? 0, m.of);
+        }
+      }
+      if (of !== null) session.progress(landed, of);
+    } else {
+      const now = rootText(viewportId);
+      if (now === null) session.done(); // the source is gone
+      else if (sourceBefore !== null && now !== sourceBefore) session.done();
+    }
+  };
+  dd.on("items", () => trackBuilding());
   dd.on("document", ({ restored }) => {
-    if (!restored) session.landed();
+    if (!restored) trackBuilding();
   });
 
   // After the await: a reload keeps a waiting pick whose viewport is still
