@@ -38,7 +38,6 @@ import {
   VERBS,
   type VerbSpec,
 } from "./bridge/verbs.ts";
-import { STORAGE_FILE } from "./variants.ts";
 
 export const VERB_TOOL = "glaser_verb";
 export const SESSION_TOOL = "glaser_session";
@@ -76,29 +75,31 @@ const TARGET_ARGS = {
 /** The shell loop that exits when the storage file's contents change (or
  * appear): a checksum compared once a second — POSIX, no fswatch, and
  * immune to a filesystem's one-second mtime. Prints the file on exit so
- * the wake-up already shows the pick. */
-export function watchCommand(file: string = STORAGE_FILE): string {
+ * the wake-up already shows the pick. `file` is ABSOLUTE (the host names
+ * it, decisions.md #69), so the agent's working directory never matters. */
+export function watchCommand(file: string): string {
   return `f='${file}'; s=$(cksum < "$f" 2>/dev/null); while [ "$(cksum < "$f" 2>/dev/null)" = "$s" ]; do sleep 1; done; cat "$f"`;
 }
 
 /** What glaser_session answers: the watch command and the loop. */
-export function sessionText(): string {
+export function sessionText(dataFile: string): string {
   return [
     "GLASER SESSION: the user picks verbs on the canvas; you wait, wake, do the verb, wait again. No typing in between.",
     "",
-    `THE WATCH — run from the project Daydream serves (the folder holding .mcp.json and .daydream/); it exits when \`${STORAGE_FILE}\` changes, printing it:`,
+    `THE WATCH — it exits when the plugin's storage file changes, printing it. The path is absolute; run it from anywhere:`,
     "",
     "```sh",
-    watchCommand(),
+    watchCommand(dataFile),
     "```",
     "",
     "Run it the way your harness runs a long wait: Claude Code — a background task (the harness notifies you when it exits; never a short timeout); Codex — a yielded foreground exec you keep reading until it returns; Cursor — a background terminal with notify; anything else — a foreground call.",
     "",
-    "THE LOOP:",
-    "1. Start the watch. Tell the user in one line that the session is on and they can pick a verb on the canvas.",
-    "2. On wake-up: glaser_pick. It answers {pick, exit} and takes the pick (the canvas caption changes from waiting to building).",
-    "3. exit true → say the session ended; stop. pick null → step 1. Otherwise glaser_verb {verb, viewport, element} from the pick, follow it to the end (drafts landed, one line per direction), then glaser_done (the canvas stops saying building), then step 1 — START THE WATCH AGAIN before anything else.",
-    "4. The user adopts a variant from the canvas; nothing for you to do there.",
+    "THE LOOP — one state at a time, never two:",
+    "1. WAITING: start the watch (and nothing else). Tell the user in one line that the session is on and they can pick a verb on the canvas.",
+    "2. WOKEN: the watch exited. Call glaser_pick; it answers {pick, exit} and takes the pick (the canvas caption changes from waiting to building). exit true → say the session ended and stop, no watch. pick null → back to 1.",
+    "3. WORKING: glaser_verb {verb, viewport, element} from the pick and follow it TO THE END — every draft landed, one line per direction, then glaser_done (the canvas stops saying building). THE WATCH DOES NOT RUN DURING THIS STATE: a watch started here waits for a pick the user cannot make while you are still building, and stalls the round.",
+    "4. Only when the round is done: back to 1 — start the watch again.",
+    "The user adopts a variant from the canvas; nothing for you to do there.",
     "",
     "Chat is overhead during a session: one line when the session starts, one line per round, one when it ends. Never run a verb the user did not pick.",
   ].join("\n");
@@ -152,7 +153,7 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
       "Start a Glaser session: answers the watch command that wakes you when the user picks a verb on the canvas, and the loop to run — wait, glaser_pick, glaser_verb, wait again. Call it when the user asks for a session; then run the watch.",
     inputSchema: {},
     annotations: { readOnlyHint: true },
-    run: () => ({ text: sessionText() }),
+    run: () => ({ text: sessionText(host.plugin.dataFile) }),
   });
 
   for (const spec of VERBS) {

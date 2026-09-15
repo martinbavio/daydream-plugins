@@ -198,24 +198,26 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
       else if (sourceBefore !== null && now !== sourceBefore) session.done();
     }
   };
-  // A variant's title bar must say which one it is: `<source> · <verb>
-  // n/N`. The agent is asked for that title, but a copied root label wins
-  // over meta.title in the bar — so on landing, a variant whose bar would
-  // not show `n/N` gets its label set from the marker, the one truth.
+  // A variant's title bar says which one it is — `<source> · <verb> n/N`,
+  // from the marker and the source's own shown name — whatever title the
+  // agent gave it: the marker is the one truth, and an agent handing a
+  // sub-agent a stale base title was the first thing that went wrong.
+  const shownTitle = (vp: { payload: { root: { label?: string }; meta?: { title?: string } } }): string =>
+    vp.payload.root.label ?? vp.payload.meta?.title ?? "Untitled";
   const titleVariants = (added: string[]): void => {
     for (const id of added) {
       const item = dd.items().find((i) => i.id === id);
       if (item === undefined) continue;
       const m = markerOf(item);
       if (m === null) continue;
-      const vp = item as { payload: { root: { label?: string }; meta?: { title?: string } } };
-      const shown = vp.payload.root.label ?? vp.payload.meta?.title ?? "";
-      if (shown.includes(`${m.n}/${m.of}`)) continue;
-      const source = dd.items().find((i) => i.id === m.sourceId) as typeof vp | undefined;
-      const sourceTitle = source?.payload.root.label ?? source?.payload.meta?.title ?? "Untitled";
-      const title = `${sourceTitle} · ${m.verb} ${m.n}/${m.of}`;
+      type VP = { payload: { root: { label?: string }; meta?: { title?: string } } };
+      const source = dd.items().find((i) => i.id === m.sourceId) as VP | undefined;
+      const base = source === undefined ? "Untitled" : shownTitle(source);
+      const title = `${base} · ${m.verb} ${m.n}/${m.of}`;
+      const vp = item as VP;
+      if (vp.payload.root.label === title && vp.payload.meta?.title === title) continue;
       dd.updateItem(id, (working) => {
-        const w = working as unknown as typeof vp;
+        const w = working as unknown as VP;
         w.payload.root.label = title;
         w.payload.meta = { ...(w.payload.meta ?? {}), title };
       });

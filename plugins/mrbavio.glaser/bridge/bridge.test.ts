@@ -10,7 +10,7 @@ import type {
 } from "@daydream/plugin-api/host";
 
 import activate, { instructionsText, SESSION_TOOL, VERB_TOOL, watchCommand } from "../bridge.ts";
-import { parseVariantMarker, STORAGE_FILE } from "../variants.ts";
+import { parseVariantMarker } from "../variants.ts";
 import manifest from "../manifest.json" with { type: "json" };
 import { candidateSkillDirs, findSkillDir, SKILL_MISSING, skillVersion } from "./skill.ts";
 import {
@@ -40,6 +40,7 @@ function fakeHost(
     plugin: {
       id: manifest.id,
       dir: "/nowhere",
+      dataFile: "/served/.daydream/plugin-data/mrbavio.glaser.json",
       manifest: manifest as DaydreamHostApi["plugin"]["manifest"],
     },
     registerTool: (t) => void tools.push(t as HostToolRegistration),
@@ -262,11 +263,13 @@ describe("glaser host part", () => {
     await activate(host);
     const session = tools.find((t) => t.name === SESSION_TOOL)!;
     const { text } = await (session.run as () => Promise<{ text: string }>)();
-    expect(text).toContain(watchCommand());
-    expect(watchCommand()).toContain(STORAGE_FILE);
-    expect(watchCommand()).toMatch(/cksum/);
+    // The watch names the host's absolute path (decisions.md #69): the
+    // agent's working directory never matters.
+    expect(text).toContain(watchCommand("/served/.daydream/plugin-data/mrbavio.glaser.json"));
+    expect(text).toContain("f='/served/.daydream/plugin-data/mrbavio.glaser.json'");
+    expect(text).toMatch(/cksum/);
     expect(text).toContain("glaser_pick");
-    expect(text).toContain("START THE WATCH AGAIN");
+    expect(text).toContain("THE WATCH DOES NOT RUN DURING THIS STATE");
     expect(text).toContain("glaser_done");
   });
 

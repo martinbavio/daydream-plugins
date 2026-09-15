@@ -33,6 +33,7 @@ function fakeHost(dir: string): { host: DaydreamHostApi; got: Recorded } {
     plugin: {
       id: "mrbavio.css-author",
       dir,
+      dataFile: path.join(dir, "mrbavio.css-author.json"),
       manifest: {
         id: "mrbavio.css-author",
         name: "CSS author",

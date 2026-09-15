@@ -274,29 +274,29 @@ describe("mrbavio.glaser in the shell", () => {
     expect((await pickTool().run({})) as unknown).toMatchObject({ pick: { verb: "typeset" }, exit: false });
   });
 
-  test("a variant that lands with the source's root label gets titled from its marker", async () => {
+  test("a variant is titled from its marker and the source's shown name, whatever the agent called it", async () => {
     const doc = fixtureDocument();
     const source = doc.items[0] as DreamViewport;
     source.payload.root.label = "Pricing";
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
     await settle();
-    // The agent copied the root, label included, and titled the meta right.
+    // The agent copied the root, label included, and gave a stale base title.
     const v = variantOf(source, "bolder", 2, 3);
     v.payload.root.label = "Pricing";
+    v.payload.meta!.title = "Pricing · delight 1/3 · bolder 2/3";
     mounted.store.landItems([v]);
     await settle();
     const landed = mounted.store.document.items.find((i) => i.id === v.id) as DreamViewport;
     expect(landed.payload.root.label).toBe("Pricing · bolder 2/3");
     expect(landed.payload.meta?.title).toBe("Pricing · bolder 2/3");
+    expect(landed.payload.meta?.notes).toBe(v.payload.meta!.notes); // the marker stays
     const bars = Array.from(mounted.host.querySelectorAll("[class*='bar'] span")).map((s) => s.textContent);
     expect(bars).toContain("Pricing · bolder 2/3");
-    // One already right (no root label, the meta title carrying n/N) is
-    // left alone.
-    const ok = variantOf(source, "bolder", 3, 3);
-    delete ok.payload.root.label;
+    // A variant of a variant chains from its own source's shown name.
+    const ok = variantOf(landed, "layout", 1, 1);
     mounted.store.landItems([ok]);
     await settle();
-    expect((mounted.store.document.items.find((i) => i.id === ok.id) as DreamViewport).payload.root.label).toBeUndefined();
+    expect((mounted.store.document.items.find((i) => i.id === ok.id) as DreamViewport).payload.root.label).toBe("Pricing · bolder 2/3 · layout 1/1");
   });
 
   test("adopt sits in a variant's title bar: its page replaces the source, the round is removed, one undo step", async () => {

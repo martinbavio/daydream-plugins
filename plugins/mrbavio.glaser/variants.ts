@@ -41,10 +41,6 @@ export function parseVariantMarker(
   };
 }
 
-/** The storage file the pick waits in, relative to the project Daydream
- * serves — what the watch command reads. */
-export const STORAGE_FILE = ".daydream/plugin-data/mrbavio.glaser.json";
-
 /** What the browser part keeps under the `session` storage key. `seq`
  * changes on every write so a watcher comparing file contents wakes even
  * when the same verb is picked twice. */
