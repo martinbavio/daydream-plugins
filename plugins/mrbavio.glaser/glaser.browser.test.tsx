@@ -79,30 +79,61 @@ async function settle(): Promise<void> {
   flush();
 }
 
+const pickerEl = (): HTMLElement | null =>
+  mounted!.host.querySelector('[role="dialog"][aria-label="Glaser"]');
+const verbs = (): string[] =>
+  Array.from(pickerEl()!.querySelectorAll<HTMLElement>("[data-verb]"), (li) => li.dataset["verb"]!);
+
+function type(text: string): void {
+  const input = pickerEl()!.querySelector("input")!;
+  input.value = text;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flush();
+}
+function key(target: EventTarget, init: KeyboardEventInit): void {
+  target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+  flush();
+}
+
 describe("mrbavio.glaser in the shell", () => {
   test("the manifest declares what the entry registers", () => {
     expect(manifest.id).toBe("mrbavio.glaser");
-    expect(manifest.contributes?.overlays).toEqual(["caption"]);
-    expect(manifest.contributes?.commands).toContain("mrbavio.glaser.bolder");
-    expect(manifest.contributes?.commands).toContain("mrbavio.glaser.adopt");
-    expect(manifest.contributes?.shortcuts).toEqual({ Escape: "mrbavio.glaser.cancel" });
+    expect(manifest.contributes?.overlays).toEqual(["caption", "picker"]);
+    expect(manifest.contributes?.commands).toEqual(["mrbavio.glaser.pick", "mrbavio.glaser.cancel", "mrbavio.glaser.end-session"]);
+    expect(manifest.contributes?.shortcuts).toEqual({ "Mod+P": "mrbavio.glaser.pick", Escape: "mrbavio.glaser.cancel" });
+    expect(manifest.contributes?.itemActions).toEqual(["adopt"]);
     expect(manifest.contributes?.tools).toContain(PICK_TOOL);
     expect(manifest.unstable).toBeUndefined();
   });
 
-  test("a verb on the selection writes the pick to storage and captions the target; the agent takes it; a landing ends it", async () => {
+  test("⌘P on a selection opens the picker beside it; a verb chosen writes the pick and captions the target; the agent takes it; a landing ends it", async () => {
     const doc = fixtureDocument();
     const viewport = doc.items[0] as DreamViewport;
     const grid = fixtureRoot(doc).children[0]!.children[0]!.id;
     const { host, files } = fakeHost();
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
 
-    // Nothing selected: the verb commands decline.
-    expect(run("mrbavio.glaser.bolder")).toBe(false);
-    expect(caption()).toBeNull();
+    // Nothing selected: the picker declines.
+    expect(run("mrbavio.glaser.pick")).toBe(false);
+    expect(pickerEl()).toBeNull();
 
     select(grid);
-    expect(run("mrbavio.glaser.bolder")).toBe(true);
+    key(document.body, { key: "p", metaKey: true });
+    await settle();
+    expect(pickerEl()).not.toBeNull();
+    expect(pickerEl()!.closest("[data-plugin-overlay-slot]")!.getAttribute("data-plugin-overlay-slot")).toBe("overlay.interactive");
+    expect(verbs()).toEqual([
+      "bolder", "quieter", "typeset", "layout", "colorize", "delight",
+      "distill", "polish", "clarify", "animate", "adapt", "end session",
+    ]);
+    expect(document.activeElement).toBe(pickerEl()!.querySelector("input"));
+
+    type("bold");
+    expect(verbs()).toEqual(["bolder"]);
+    key(pickerEl()!.querySelector("input")!, { key: "Enter" });
+    await settle();
+    expect(pickerEl()).toBeNull();
+
     const waiting = await stored(files, 1);
     expect(waiting).toMatchObject({
       seq: 1,
@@ -127,16 +158,26 @@ describe("mrbavio.glaser in the shell", () => {
     expect(caption()).toBeNull();
   });
 
-  test("the whole page is the target when the viewport item is selected; Escape cancels; end-session writes exit", async () => {
+  test("the whole page is the target when the viewport item is selected; Escape closes the picker, then cancels a waiting pick; end session from the picker writes exit", async () => {
     const doc = fixtureDocument();
     const viewport = doc.items[0] as DreamViewport;
     const { host, files } = fakeHost();
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
 
     select(viewport.payload.root.id);
-    expect(run("mrbavio.glaser.polish")).toBe(true);
-    expect(await stored(files, 1)).toMatchObject({ pick: { verb: "polish", viewportId: viewport.id, elementId: null } });
+    expect(run("mrbavio.glaser.pick")).toBe(true);
     await settle();
+    // Escape in the field closes the picker and picks nothing.
+    key(pickerEl()!.querySelector("input")!, { key: "Escape" });
+    await settle();
+    expect(pickerEl()).toBeNull();
+    expect(files[manifest.id]).toBeUndefined();
+
+    run("mrbavio.glaser.pick");
+    await settle();
+    pickerEl()!.querySelector<HTMLElement>('[data-verb="polish"]')!.click();
+    await settle();
+    expect(await stored(files, 1)).toMatchObject({ pick: { verb: "polish", viewportId: viewport.id, elementId: null } });
     expect(caption()!.textContent).toBe("polish · waiting for an agent");
 
     expect(run("mrbavio.glaser.cancel")).toBe(true);
@@ -145,7 +186,9 @@ describe("mrbavio.glaser in the shell", () => {
     expect(caption()).toBeNull();
     expect(run("mrbavio.glaser.cancel")).toBe(false); // nothing to cancel
 
-    expect(run("mrbavio.glaser.end-session")).toBe(true);
+    run("mrbavio.glaser.pick");
+    await settle();
+    pickerEl()!.querySelector<HTMLElement>('[data-verb="end session"]')!.click();
     expect(await stored(files, 3)).toMatchObject({ pick: null, exit: true });
     expect((await pickTool().run({})) as unknown).toEqual({ pick: null, exit: true });
     expect(await stored(files, 4)).toMatchObject({ exit: false });
@@ -166,7 +209,7 @@ describe("mrbavio.glaser in the shell", () => {
     expect((await pickTool().run({})) as unknown).toMatchObject({ pick: { verb: "typeset" }, exit: false });
   });
 
-  test("adopt: the selected variant's page replaces its source, the round is removed, one undo step", async () => {
+  test("adopt sits in a variant's title bar: its page replaces the source, the round is removed, one undo step", async () => {
     const doc: DreamDocument = fixtureDocument();
     const source = doc.items[0] as DreamViewport;
     source.payload.meta = { title: "Pricing" };
@@ -182,12 +225,13 @@ describe("mrbavio.glaser in the shell", () => {
     });
     doc.items.push(...variants);
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
+    await settle();
 
-    // On the source, adopt declines; on a variant it applies.
-    select(source.payload.root.id);
-    expect(run("mrbavio.glaser.adopt")).toBe(false);
-    select(variants[1]!.payload.root.children[0]!.id);
-    expect(run("mrbavio.glaser.adopt")).toBe(true);
+    const buttons = Array.from(mounted.host.querySelectorAll<HTMLElement>('[data-item-action="mrbavio.glaser:adopt"]'));
+    expect(buttons.length).toBe(3); // the source carries none
+    expect(buttons.map((b) => b.textContent)).toEqual(["adopt", "adopt", "adopt"]);
+    // The second variant's bar: the bars come in item order.
+    buttons[1]!.click();
     flush();
 
     const items = mounted.store.document.items;

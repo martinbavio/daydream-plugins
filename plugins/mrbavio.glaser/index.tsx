@@ -1,22 +1,24 @@
 // mrbavio.glaser — design verbs on the canvas. The BROWSER PART is the
-// session's canvas side: a command per verb on the selection (the pick),
+// session's canvas side: the picker (⌘P on a selection, decisions.md #67:
+// Glaser's own list in the interactive overlay slot, beside the target),
 // the caption that says a pick is waiting or building, the glaser_pick
-// tool an agent takes the pick with, the adopt command that folds a
-// chosen variant back into its source, and cancel / end-session. The
-// verbs themselves — Impeccable's playbooks over a viewport — are the
-// host part's (bridge.ts): glaser_verb and one prompt each.
+// tool an agent takes the pick with, `adopt` in a variant's title bar
+// (a title-bar action), and cancel / end-session. The verbs themselves —
+// Impeccable's playbooks over a viewport — are the host part's
+// (bridge.ts): glaser_verb and one prompt each.
 //
 // How a pick reaches an agent: through dd.storage. Every change here is
 // written to `.daydream/plugin-data/mrbavio.glaser.json` at once, and an
 // agent in a session watches that file (glaser_session). The canvas never
 // calls an agent; it leaves a note where the agent is already looking.
 
-import { onCleanup } from "solid-js";
+import { createSignal, onCleanup } from "solid-js";
 
 import type { DaydreamApi } from "@daydream/plugin-api";
 
 import { adoptInto, roundOf } from "./adopt";
 import createCaption from "./Caption";
+import createPicker, { type PickerEntry } from "./Picker";
 import { createSession, SESSION_KEY } from "./session";
 import { css } from "./styles";
 
@@ -34,6 +36,8 @@ const VERBS = [
   "animate",
   "adapt",
 ] as const;
+/** The picker's last entry: the session's exit, beside the verbs. */
+const END_SESSION = "end session";
 
 export const PICK_TOOL = "glaser_pick";
 
@@ -47,7 +51,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   const session = createSession(dd);
 
   /** The selection's viewport and, unless the viewport item itself is
-   * selected, the element — the target a verb command picks. */
+   * selected, the element — the target a verb is picked for. */
   const target = (): { viewportId: string; elementId: string | null } | null => {
     const selected = dd.selection();
     if (selected === null) return null;
@@ -57,42 +61,39 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     return { viewportId: viewport.id, elementId: whole ? null : selected };
   };
 
-  for (const verb of VERBS) {
-    dd.registerCommand({
-      id: `${ID}.${verb}`,
-      title: `Glaser: ${verb}`,
-      scope: "canvas",
-      when: () => target() !== null,
-      run: () => {
-        const t = target();
-        if (t === null) return false;
-        session.pick(verb, t.viewportId, t.elementId);
-      },
-    });
-  }
+  // The picker: opened on the current target by ⌘P, closed by Escape, a
+  // press outside, or a choice — which becomes the pick.
+  const [pickerTarget, setPickerTarget] = createSignal<ReturnType<typeof target>>(null);
+  const entries: PickerEntry[] = [
+    ...VERBS.map((verb) => ({ id: verb, title: verb })),
+    { id: END_SESSION, title: END_SESSION },
+  ];
+  const picker = {
+    open: pickerTarget,
+    close: () => {
+      setPickerTarget(null);
+    },
+    choose: (id: string) => {
+      const t = pickerTarget();
+      setPickerTarget(null);
+      if (t === null) return;
+      if (id === END_SESSION) session.end();
+      else session.pick(id, t.viewportId, t.elementId);
+    },
+  };
 
   dd.registerCommand({
-    id: `${ID}.adopt`,
-    title: "Glaser: adopt this variant",
+    id: `${ID}.pick`,
+    title: "Glaser: pick a verb",
     scope: "canvas",
-    when: () => {
-      const t = target();
-      return t !== null && roundOf(dd.items(), t.viewportId) !== null;
-    },
+    when: () => target() !== null,
     run: () => {
       const t = target();
       if (t === null) return false;
-      const round = roundOf(dd.items(), t.viewportId);
-      if (round === null) return false;
-      // The source's page IS the variant's after this, ids included.
-      const adoptedRoot = round.variants.find((v) => v.id === t.viewportId)!
-        .payload.root.id;
-      dd.mutateItems((items) => {
-        adoptInto(items, t.viewportId);
-      });
-      dd.select(adoptedRoot);
+      setPickerTarget(pickerTarget() === null ? t : null);
     },
   });
+  dd.bindShortcut(`${ID}.pick`, "Mod+P");
 
   dd.registerCommand({
     id: `${ID}.cancel`,
@@ -114,10 +115,33 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     },
   });
 
+  // `adopt`, one word in a variant's title bar: the source takes the
+  // variant's page, the round goes, one undo step (adopt.ts).
+  dd.registerItemAction({
+    id: "adopt",
+    title: "adopt",
+    when: (item) => roundOf(dd.items(), item.id) !== null,
+    run: (item) => {
+      const round = roundOf(dd.items(), item.id);
+      if (round === null) return;
+      // The source's page IS the variant's after this, ids included.
+      const adoptedRoot = round.variants.find((v) => v.id === item.id)!.payload.root.id;
+      dd.mutateItems((items) => {
+        adoptInto(items, item.id);
+      });
+      dd.select(adoptedRoot);
+    },
+  });
+
   dd.registerOverlay({
     id: "caption",
     slot: "overlay.screen",
     render: () => createCaption(dd, session),
+  });
+  dd.registerOverlay({
+    id: "picker",
+    slot: "overlay.interactive",
+    render: () => createPicker(dd, entries, picker),
   });
 
   dd.registerTool({
@@ -145,4 +169,3 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   const saved = await dd.storage.get(SESSION_KEY);
   session.restore(saved, (id) => dd.items().some((item) => item.id === id));
 }
-

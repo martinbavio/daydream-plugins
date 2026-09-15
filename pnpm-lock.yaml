@@ -10,7 +10,7 @@ importers:
     devDependencies:
       '@daydream/plugin-api':
         specifier: github:mbavio-phota/daydream#path:packages/plugin-api
-        version: git+https://github.com/mbavio-phota/daydream.git#2e617d07686a29b3591d16f091226bd929221e4e&path:packages/plugin-api(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        version: git+https://github.com/mbavio-phota/daydream.git#688aea32230b15e2f2f2dffae385c10976da912a&path:packages/plugin-api(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
       '@solidjs/vite-plugin':
         specifier: 3.0.0-next.29
         version: 3.0.0-next.29(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(vite@8.3.0(@types/node@24.13.4))
@@ -237,8 +237,8 @@ packages:
   '@codemirror/view@6.43.11':
     resolution: {integrity: sha512-2+esucbQX6wB2JYi1eDvdCPFTA31BN8oSy6xCmk3G6CloV11yOvEjYk+gH7kLrP0MuHG94E8WDhjs5oMiu3+Wg==}
 
-  '@daydream/plugin-api@git+https://github.com/mbavio-phota/daydream.git#2e617d07686a29b3591d16f091226bd929221e4e&path:packages/plugin-api':
-    resolution: {commit: 2e617d07686a29b3591d16f091226bd929221e4e, path: packages/plugin-api, repo: https://github.com/mbavio-phota/daydream.git, type: git}
+  '@daydream/plugin-api@git+https://github.com/mbavio-phota/daydream.git#688aea32230b15e2f2f2dffae385c10976da912a&path:packages/plugin-api':
+    resolution: {commit: 688aea32230b15e2f2f2dffae385c10976da912a, path: packages/plugin-api, repo: https://github.com/mbavio-phota/daydream.git, type: git}
     version: 0.1.0
     peerDependencies:
       '@solidjs/web': 2.0.0-rc.0
@@ -1115,7 +1115,7 @@ snapshots:
       style-mod: 4.1.3
       w3c-keyname: 2.2.8
 
-  '@daydream/plugin-api@git+https://github.com/mbavio-phota/daydream.git#2e617d07686a29b3591d16f091226bd929221e4e&path:packages/plugin-api(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)':
+  '@daydream/plugin-api@git+https://github.com/mbavio-phota/daydream.git#688aea32230b15e2f2f2dffae385c10976da912a&path:packages/plugin-api(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)':
     dependencies:
       '@solidjs/web': 2.0.0-rc.0(solid-js@2.0.0-rc.0)
       solid-js: 2.0.0-rc.0

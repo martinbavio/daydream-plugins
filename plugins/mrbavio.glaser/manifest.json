@@ -5,26 +5,20 @@
   "minCore": "0.1.0",
   "contributes": {
     "commands": [
-      "mrbavio.glaser.bolder",
-      "mrbavio.glaser.quieter",
-      "mrbavio.glaser.typeset",
-      "mrbavio.glaser.layout",
-      "mrbavio.glaser.colorize",
-      "mrbavio.glaser.delight",
-      "mrbavio.glaser.distill",
-      "mrbavio.glaser.polish",
-      "mrbavio.glaser.clarify",
-      "mrbavio.glaser.animate",
-      "mrbavio.glaser.adapt",
-      "mrbavio.glaser.adopt",
+      "mrbavio.glaser.pick",
       "mrbavio.glaser.cancel",
       "mrbavio.glaser.end-session"
     ],
     "shortcuts": {
+      "Mod+P": "mrbavio.glaser.pick",
       "Escape": "mrbavio.glaser.cancel"
     },
     "overlays": [
-      "caption"
+      "caption",
+      "picker"
+    ],
+    "itemActions": [
+      "adopt"
     ],
     "tools": [
       "glaser_verb",
