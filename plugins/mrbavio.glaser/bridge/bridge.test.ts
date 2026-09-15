@@ -135,6 +135,12 @@ describe("glaser host part", () => {
     expect(text).toContain("`Glaser bolder · variant n of 3 of vp_pricing`");
     expect(parseVariantMarker("Glaser bolder · variant 2 of 3 of vp_pricing\n\nA denser card.")).toEqual({ verb: "bolder", n: 2, of: 3, sourceId: "vp_pricing" });
     expect(text).not.toContain("draft_open {from:");
+    // A variant is a copy plus one replace (decisions.md #68), fanned out
+    // to sub-agents where the harness has them.
+    expect(text).toContain('draft_open {copyOf: "vp_pricing"');
+    expect(text).toContain("THREE CALLS");
+    expect(text).toContain("IN PARALLEL");
+    expect(text).toContain("Never send the whole page");
     // Then Impeccable's own text, verbatim, in order.
     const playbook = text.indexOf("# Impeccable's playbook: bolder");
     const floor = text.indexOf("# Impeccable's craft floor");
