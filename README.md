@@ -51,7 +51,8 @@ OFF: turn it on from the plugins page (⌥⌘P), or install with `--enable`.
 `pnpm ship` builds every plugin here and installs them all; a plugin
 already on stays on, so after a rebuild `pnpm ship` re-trusts and nothing
 else moves — a running Daydream sees the change and every tab picks it
-up. `daydream plugin uninstall <id>` removes the link, the trust and the
+up. Name folders to ship only those, and pass install's flags through:
+`pnpm ship plugins/mrbavio.impeccable --enable`. `daydream plugin uninstall <id>` removes the link, the trust and the
 enabled entry.
 
 Under Daydream's dev host the same link serves the source with hot reload,

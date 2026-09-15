@@ -7,7 +7,7 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc",
     "test": "vitest run",
-    "ship": "node scripts/build.mjs && daydream plugin install plugins/*"
+    "ship": "node scripts/ship.mjs"
   },
   "devDependencies": {
     "@daydream/plugin-api": "github:mbavio-phota/daydream#path:packages/plugin-api",
