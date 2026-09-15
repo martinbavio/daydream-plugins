@@ -138,11 +138,13 @@ describe("glaser host part", () => {
     // A variant is a copy plus one replace (decisions.md #68), fanned out
     // to sub-agents where the harness has them.
     expect(text).toContain('draft_open {copyOf: "vp_pricing"');
-    expect(text).toContain("ONE ACTOR'S THREE CALLS");
-    expect(text).toContain("draft_finalize, IMMEDIATELY");
-    expect(text).toContain("never hold finalizes for the end");
+    expect(text).toContain("OPEN ALL 3 COPIES FIRST");
+    expect(text).toContain("draft_finalize IMMEDIATELY");
+    expect(text).toContain("Never hold finalizes for the end");
+    expect(text).toContain("THE TARGET ELEMENT'S JSON");
+    expect(text).toContain("a fast model handles well");
     expect(text).toContain("IN PARALLEL");
-    expect(text).toContain("let each DESIGN ITS OWN");
+    expect(text).toContain("writes its own rewrite");
     expect(text).toContain("never send the whole page");
     // Then Impeccable's own text, verbatim, in order.
     const playbook = text.indexOf("# Impeccable's playbook: bolder");
