@@ -1,0 +1,32 @@
+{
+  "id": "mrbavio.impeccable",
+  "name": "Impeccable",
+  "version": "0.1.0",
+  "minCore": "0.1.0",
+  "contributes": {
+    "tools": [
+      "impeccable_verb"
+    ],
+    "prompts": [
+      "impeccable-bolder",
+      "impeccable-quieter",
+      "impeccable-typeset",
+      "impeccable-layout",
+      "impeccable-colorize",
+      "impeccable-delight",
+      "impeccable-distill",
+      "impeccable-polish",
+      "impeccable-clarify",
+      "impeccable-animate",
+      "impeccable-adapt"
+    ],
+    "instructions": "The Impeccable plugin brings Impeccable's design verbs (impeccable.style) to a viewport on the canvas: bolder, quieter, typeset, layout, colorize, delight open three draft variants beside the source; distill, polish, clarify, animate, adapt rework the source in place as an edit draft. When the user asks for one of these verbs \u2014 by name or in plain words (\"make this bolder\", \"the type needs work\") \u2014 call impeccable_verb {verb} FIRST: it answers with the target (the canvas selection unless viewport / element are given), the deliverable, and Impeccable's own playbook and craft floor, read from the skill installed on this machine; then follow it. The same text is offered as MCP prompts (impeccable-<verb>) for a client that picks prompts from a menu. Run a verb only when the user asks for it; never on a landing by itself."
+  },
+  "permissions": [
+    {
+      "name": "reads the installed Impeccable skill",
+      "reason": "each prompt reads reference/<verb>.md and reference/craft-floor.md from ~/.agents/skills/impeccable (or the project's .agents/skills/impeccable) at request time, so the plugin follows whatever version is installed"
+    }
+  ],
+  "built": "dist/index.js"
+}

@@ -15,6 +15,7 @@ workspace, one build, one folder per plugin.
 | `mrbavio.html-editor` | the selected element's subtree as HTML source, structure only            |
 | `mrbavio.html-paste`  | pasting HTML on the canvas lands it as a viewport                        |
 | `mrbavio.css-author`  | the opinion about CSS: two lints as gates, the layout procedures, a technique corpus the knowledge tools serve, and a `procedures` resource — the `dream-author` workflow itself is Daydream's own |
+| `mrbavio.impeccable`  | [Impeccable](https://impeccable.style)'s design verbs over a viewport: bolder, quieter, typeset, layout, colorize, delight open three draft variants beside the source; distill, polish, clarify, animate, adapt rework it in place. "Make this bolder" with something selected is enough — the agent calls `impeccable_verb`; the same text is an MCP prompt per verb for a client with a menu. The playbook and craft floor are read from the Impeccable skill installed on the machine (`npx impeccable install`), never vendored |
 
 Each is a folder under `plugins/`: `manifest.json`, `index.tsx`, `styles.ts`
 (CSS as a string), `icon.svg`, its own `package.json` for its runtime
