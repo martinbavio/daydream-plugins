@@ -144,6 +144,8 @@ describe("glaser host part", () => {
     expect(text).toContain("Never hold finalizes for the end");
     expect(text).toContain("THE TARGET ELEMENT'S JSON");
     expect(text).toContain("a fast model handles well");
+    expect(text).toContain("There is NO `@keyframes`");
+    expect(text).toContain("do not search one");
     expect(text).toContain("IN PARALLEL");
     expect(text).toContain("writes its own rewrite");
     expect(text).toContain("never send the whole page");
