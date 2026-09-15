@@ -141,6 +141,11 @@ describe("mrbavio.glaser in the shell", () => {
 
     type("bold");
     expect(verbs()).toEqual(["bolder"]);
+    // The rest of the line is the brief, shown under the field, and the
+    // list stays pinned to the verb.
+    type("bolder keep the photo, louder CTA");
+    expect(verbs()).toEqual(["bolder"]);
+    expect(pickerEl()!.querySelector<HTMLElement>(".glaser-picker-brief")!.textContent).toBe("keep the photo, louder CTA");
     key(pickerEl()!.querySelector("input")!, { key: "Enter" });
     await settle();
     expect(pickerEl()).toBeNull();
@@ -149,7 +154,7 @@ describe("mrbavio.glaser in the shell", () => {
     expect(waiting).toMatchObject({
       seq: 1,
       exit: false,
-      pick: { verb: "bolder", viewportId: viewport.id, elementId: grid },
+      pick: { verb: "bolder", viewportId: viewport.id, elementId: grid, brief: "keep the photo, louder CTA" },
     });
     await settle();
     expect(caption()!.textContent).toBe("bolder · waiting for an agent");
@@ -157,7 +162,7 @@ describe("mrbavio.glaser in the shell", () => {
 
     // The agent takes it: the pick is answered once and cleared.
     const taken = (await pickTool().run({})) as { pick: unknown; exit: boolean };
-    expect(taken).toMatchObject({ pick: { verb: "bolder", elementId: grid }, exit: false });
+    expect(taken).toMatchObject({ pick: { verb: "bolder", elementId: grid, brief: "keep the photo, louder CTA" }, exit: false });
     expect(await stored(files, 2)).toMatchObject({ pick: null, exit: false });
     await settle();
     expect(caption()!.textContent).toBe("bolder · building");
@@ -242,7 +247,9 @@ describe("mrbavio.glaser in the shell", () => {
     await settle();
     pickerEl()!.querySelector<HTMLElement>('[data-verb="polish"]')!.click();
     await settle();
-    expect(await stored(files, 1)).toMatchObject({ pick: { verb: "polish", viewportId: viewport.id, elementId: null } });
+    const polished = await stored(files, 1);
+    expect(polished).toMatchObject({ pick: { verb: "polish", viewportId: viewport.id, elementId: null } });
+    expect((polished["pick"] as { brief?: string }).brief).toBeUndefined();
     expect(caption()!.textContent).toBe("polish · waiting for an agent");
 
     expect(run("mrbavio.glaser.cancel")).toBe(true);

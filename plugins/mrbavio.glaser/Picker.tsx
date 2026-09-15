@@ -4,27 +4,16 @@ import type { DaydreamApi, OverlayRect } from "@daydream/plugin-api";
 
 import { classPrefix } from "./styles";
 
-export interface PickerEntry {
-  id: string;
-  title: string;
-}
+import { matchEntries, parseQuery, type PickerEntry } from "./pickerQuery";
+
+export type { PickerEntry };
 
 export interface PickerState {
   /** The target the picker opened on, or null when closed. */
   open: () => { viewportId: string; elementId: string | null } | null;
   close(): void;
-  choose(id: string): void;
-}
-
-/** The verbs matching a query: every word typed must appear in the id or
- * the title, case-insensitively; an empty query matches all. */
-export function matchEntries(entries: readonly PickerEntry[], query: string): PickerEntry[] {
-  const words = query.toLowerCase().split(/\s+/).filter((w) => w !== "");
-  if (words.length === 0) return [...entries];
-  return entries.filter((e) => {
-    const hay = `${e.id} ${e.title}`.toLowerCase();
-    return words.every((w) => hay.includes(w));
-  });
+  /** The chosen entry, with what was typed after the verb as the brief. */
+  choose(id: string, brief: string): void;
 }
 
 /** Glaser's own picker, drawn in the interactive slot beside the target
@@ -84,7 +73,7 @@ export default function createPicker(dd: DaydreamApi, entries: readonly PickerEn
     } else if (event.key === "Enter") {
       event.preventDefault();
       const chosen = list[index()];
-      if (chosen !== undefined) state.choose(chosen.id);
+      if (chosen !== undefined) state.choose(chosen.id, parseQuery(query()).brief);
     } else if (event.key === "Escape" || ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "p")) {
       // Escape closes; ⌘P inside the field closes too, instead of printing.
       event.preventDefault();
@@ -107,7 +96,7 @@ export default function createPicker(dd: DaydreamApi, entries: readonly PickerEn
             ref={(el) => (inputEl = el)}
             class={`${classPrefix}-picker-input`}
             type="text"
-            placeholder="Verb"
+            placeholder="Verb, then a brief"
             aria-label="Verb"
             value={query()}
             onInput={(event) => {
@@ -116,6 +105,11 @@ export default function createPicker(dd: DaydreamApi, entries: readonly PickerEn
             }}
             onKeyDown={onKeyDown}
           />
+          <Show when={parseQuery(query()).brief !== ""}>
+            <div class={`${classPrefix}-picker-brief`} data-brief={parseQuery(query()).brief}>
+              {parseQuery(query()).brief}
+            </div>
+          </Show>
           <ul class={`${classPrefix}-picker-list`} role="listbox">
             <For each={matches()}>
               {(entry, i) => (
@@ -125,7 +119,7 @@ export default function createPicker(dd: DaydreamApi, entries: readonly PickerEn
                   aria-selected={i() === index() ? "true" : "false"}
                   data-verb={entry.id}
                   onPointerEnter={() => setIndex(i())}
-                  onClick={() => state.choose(entry.id)}
+                  onClick={() => state.choose(entry.id, parseQuery(query()).brief)}
                 >
                   {entry.title}
                 </li>

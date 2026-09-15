@@ -40,6 +40,12 @@ export const css = `
 .${classPrefix}-picker-input::placeholder {
   color: #6f6f76;
 }
+.${classPrefix}-picker-brief {
+  padding: 4px 8px 0;
+  color: #6f6f76;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .${classPrefix}-picker-list {
   margin: 0;
   padding: 4px 0;

@@ -97,7 +97,7 @@ export function sessionText(dataFile: string): string {
     "THE LOOP — one state at a time, never two:",
     "1. WAITING: call glaser_pick FIRST — a pick made before you were watching is already in the file, and a watch started now would never wake for it. A pick → step 3. exit → stop. Nothing → start the watch (and nothing else) and tell the user in one line that the session is on and they can pick a verb on the canvas.",
     "2. WOKEN: the watch exited. Call glaser_pick; it answers {pick, exit} and takes the pick (the canvas caption changes from waiting to building). exit true → say the session ended and stop, no watch. pick null → back to 1.",
-    "3. WORKING: glaser_verb {verb, viewport, element} from the pick and follow it TO THE END — every draft landed, one line per direction, then glaser_done (the canvas stops saying building). THE WATCH DOES NOT RUN DURING THIS STATE: a watch started here waits for a pick the user cannot make while you are still building, and stalls the round.",
+    "3. WORKING: glaser_verb {verb, viewport, element, brief} from the pick (brief when the pick carries one — the user's words, which outrank the playbook's defaults) and follow it TO THE END — every draft landed, one line per direction, then glaser_done (the canvas stops saying building). THE WATCH DOES NOT RUN DURING THIS STATE: a watch started here waits for a pick the user cannot make while you are still building, and stalls the round.",
     "4. Only when the round is done: back to 1 — start the watch again.",
     "The user adopts a variant from the canvas; nothing for you to do there.",
     "",

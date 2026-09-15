@@ -28,8 +28,9 @@ export type Phase =
 
 export interface Session {
   phase: () => Phase;
-  /** The user picked a verb for the selection. */
-  pick(verb: string, viewportId: string, elementId: string | null): void;
+  /** The user picked a verb for the selection, with what they typed after
+   * it as the brief (empty: none). */
+  pick(verb: string, viewportId: string, elementId: string | null, brief?: string): void;
   /** An agent takes what waits (glaser_pick): the pick and the exit flag,
    * both cleared. */
   take(): { pick: Pick | null; exit: boolean };
@@ -58,8 +59,15 @@ export function createSession(dd: DaydreamApi): Session {
 
   return {
     phase,
-    pick(verb, viewportId, elementId) {
-      const pick: Pick = { verb, viewportId, elementId, at: Date.now() };
+    pick(verb, viewportId, elementId, brief) {
+      const trimmed = brief?.trim() ?? "";
+      const pick: Pick = {
+        verb,
+        viewportId,
+        elementId,
+        ...(trimmed === "" ? {} : { brief: trimmed }),
+        at: Date.now(),
+      };
       setPhase({ kind: "waiting", pick });
       write({ pick, exit: false });
     },

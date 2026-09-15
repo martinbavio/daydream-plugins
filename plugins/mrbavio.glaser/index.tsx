@@ -66,12 +66,12 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     close: () => {
       setPickerTarget(null);
     },
-    choose: (id: string) => {
+    choose: (id: string, brief: string) => {
       const t = pickerTarget();
       setPickerTarget(null);
       if (t === null) return;
       if (id === END_SESSION) session.end();
-      else session.pick(id, t.viewportId, t.elementId);
+      else session.pick(id, t.viewportId, t.elementId, brief);
     },
   };
 
@@ -154,7 +154,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     name: PICK_TOOL,
     title: "Glaser pick",
     description:
-      "Take the verb the user picked on the canvas: answers {pick: {verb, viewportId, elementId, at} | null, exit} and clears it (the canvas shows the pick as building). Call it first on any Glaser request and on every wake-up of a session's watch; then glaser_verb with the pick's verb, viewport and element. exit true means the user ended the session.",
+      "Take the verb the user picked on the canvas: answers {pick: {verb, viewportId, elementId, brief?, at} | null, exit} and clears it (the canvas shows the pick as building). Call it first on any Glaser request and on every wake-up of a session's watch; then glaser_verb with the pick's verb, viewport, element and — when present — brief, the user's own words about this round, which outrank the playbook's defaults. exit true means the user ended the session.",
     inputSchema: { type: "object", properties: {}, required: [] },
     annotations: { idempotentHint: false, destructiveHint: false },
     run: () => {

@@ -58,6 +58,9 @@ export interface Pick {
   viewportId: string;
   /** The element inside it, or null for the whole page. */
   elementId: string | null;
+  /** What the user typed after the verb — the brief, which outranks the
+   * playbook's defaults; absent when nothing was typed. */
+  brief?: string;
   /** Epoch ms. */
   at: number;
 }
@@ -82,6 +85,7 @@ function isPick(raw: unknown): raw is Pick {
     typeof r["verb"] === "string" &&
     typeof r["viewportId"] === "string" &&
     (typeof r["elementId"] === "string" || r["elementId"] === null) &&
+    (r["brief"] === undefined || typeof r["brief"] === "string") &&
     typeof r["at"] === "number"
   );
 }
