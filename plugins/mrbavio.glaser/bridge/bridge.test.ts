@@ -142,6 +142,7 @@ describe("glaser host part", () => {
     expect(text).toContain("draft_finalize, IMMEDIATELY");
     expect(text).toContain("never hold finalizes for the end");
     expect(text).toContain("IN PARALLEL");
+    expect(text).toContain("let each DESIGN ITS OWN");
     expect(text).toContain("never send the whole page");
     // Then Impeccable's own text, verbatim, in order.
     const playbook = text.indexOf("# Impeccable's playbook: bolder");
