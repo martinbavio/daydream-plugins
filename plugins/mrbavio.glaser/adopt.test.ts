@@ -78,22 +78,27 @@ describe("adopt", () => {
     expect(roundOf(fan().filter((i) => i.id !== "src"), "v2")).toBeNull();
   });
 
-  test("adopting keeps the source's envelope and meta, takes the variant's page and fonts, drops the round", () => {
+  test("adopting keeps the source's envelope, meta and name, takes the variant's page and fonts, drops the round", () => {
     const items = fan();
+    (items[0] as DreamViewport).payload.root.label = "Pricing";
+    (items[2] as DreamViewport).payload.root.label = "Pricing · bolder 2/3";
     expect(adoptInto(items, "v2")).toBe(true);
     expect(items.map((i) => i.id)).toEqual(["src", "q1", "other"]);
     const src = items[0] as DreamViewport;
     expect(src.position).toEqual({ x: 0, y: 0 });
     expect(src.payload.meta).toEqual({ title: "Pricing", notes: "The source's own notes.", sourceUrl: "https://x" });
+    expect(src.payload.root.label).toBe("Pricing"); // the variant's name does not come along
     expect(src.payload.root.children[0]!.styles["background"]).toBe("blue");
     expect(src.payload.fonts).toEqual([{ "font-family": "Fraunces", src: "url(https://f/x.woff2)" }]);
   });
 
-  test("a variant without fonts clears the source's", () => {
+  test("a variant without fonts clears the source's; a source without a name takes none from the variant", () => {
     const items = fan();
+    (items[1] as DreamViewport).payload.root.label = "Pricing · bolder 1/3";
     (items[0] as DreamViewport).payload.fonts = [{ "font-family": "Old", src: "url(https://f/o.woff2)" }];
     adoptInto(items, "v1");
     expect((items[0] as DreamViewport).payload.fonts).toBeUndefined();
+    expect((items[0] as DreamViewport).payload.root.label).toBeUndefined();
     expect(adoptInto(items, "v1")).toBe(false); // gone now
     expect(items.length).toBe(3);
   });

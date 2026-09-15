@@ -42,16 +42,21 @@ export function roundOf(items: readonly DreamItem[], variantId: string): Round |
   return { source: source as DreamViewport, variants };
 }
 
-/** The mutation: the source keeps its envelope (id, position, frame) and
- * its meta — title, notes, sourceUrl — and takes the variant's root and
- * fonts; the round's variants are spliced out. False when nothing applies. */
+/** The mutation: the source keeps its envelope (id, position, frame), its
+ * meta — title, notes, sourceUrl — and its NAME (the root's label, what
+ * the title bar shows; a variant's root carries the variant's name), and
+ * takes the variant's root and fonts; the round's variants are spliced
+ * out. False when nothing applies. */
 export function adoptInto(items: DreamItem[], variantId: string): boolean {
   const round = roundOf(items, variantId);
   if (round === null) return false;
   const chosen = round.variants.find((v) => v.id === variantId)!;
+  const root = { ...chosen.payload.root };
+  if (round.source.payload.root.label === undefined) delete root.label;
+  else root.label = round.source.payload.root.label;
   round.source.payload = {
     ...round.source.payload,
-    root: chosen.payload.root,
+    root,
     ...(chosen.payload.fonts === undefined
       ? { fonts: undefined }
       : { fonts: chosen.payload.fonts }),
