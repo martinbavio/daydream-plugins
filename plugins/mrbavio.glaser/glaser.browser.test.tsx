@@ -274,6 +274,31 @@ describe("mrbavio.glaser in the shell", () => {
     expect((await pickTool().run({})) as unknown).toMatchObject({ pick: { verb: "typeset" }, exit: false });
   });
 
+  test("a variant that lands with the source's root label gets titled from its marker", async () => {
+    const doc = fixtureDocument();
+    const source = doc.items[0] as DreamViewport;
+    source.payload.root.label = "Pricing";
+    mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
+    await settle();
+    // The agent copied the root, label included, and titled the meta right.
+    const v = variantOf(source, "bolder", 2, 3);
+    v.payload.root.label = "Pricing";
+    mounted.store.landItems([v]);
+    await settle();
+    const landed = mounted.store.document.items.find((i) => i.id === v.id) as DreamViewport;
+    expect(landed.payload.root.label).toBe("Pricing · bolder 2/3");
+    expect(landed.payload.meta?.title).toBe("Pricing · bolder 2/3");
+    const bars = Array.from(mounted.host.querySelectorAll("[class*='bar'] span")).map((s) => s.textContent);
+    expect(bars).toContain("Pricing · bolder 2/3");
+    // One already right (no root label, the meta title carrying n/N) is
+    // left alone.
+    const ok = variantOf(source, "bolder", 3, 3);
+    delete ok.payload.root.label;
+    mounted.store.landItems([ok]);
+    await settle();
+    expect((mounted.store.document.items.find((i) => i.id === ok.id) as DreamViewport).payload.root.label).toBeUndefined();
+  });
+
   test("adopt sits in a variant's title bar: its page replaces the source, the round is removed, one undo step", async () => {
     const doc: DreamDocument = fixtureDocument();
     const source = doc.items[0] as DreamViewport;

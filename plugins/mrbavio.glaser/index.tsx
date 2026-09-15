@@ -198,7 +198,33 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
       else if (sourceBefore !== null && now !== sourceBefore) session.done();
     }
   };
-  dd.on("items", () => trackBuilding());
+  // A variant's title bar must say which one it is: `<source> · <verb>
+  // n/N`. The agent is asked for that title, but a copied root label wins
+  // over meta.title in the bar — so on landing, a variant whose bar would
+  // not show `n/N` gets its label set from the marker, the one truth.
+  const titleVariants = (added: string[]): void => {
+    for (const id of added) {
+      const item = dd.items().find((i) => i.id === id);
+      if (item === undefined) continue;
+      const m = markerOf(item);
+      if (m === null) continue;
+      const vp = item as { payload: { root: { label?: string }; meta?: { title?: string } } };
+      const shown = vp.payload.root.label ?? vp.payload.meta?.title ?? "";
+      if (shown.includes(`${m.n}/${m.of}`)) continue;
+      const source = dd.items().find((i) => i.id === m.sourceId) as typeof vp | undefined;
+      const sourceTitle = source?.payload.root.label ?? source?.payload.meta?.title ?? "Untitled";
+      const title = `${sourceTitle} · ${m.verb} ${m.n}/${m.of}`;
+      dd.updateItem(id, (working) => {
+        const w = working as unknown as typeof vp;
+        w.payload.root.label = title;
+        w.payload.meta = { ...(w.payload.meta ?? {}), title };
+      });
+    }
+  };
+  dd.on("items", ({ added }) => {
+    titleVariants(added);
+    trackBuilding();
+  });
   dd.on("document", ({ restored }) => {
     if (!restored) trackBuilding();
   });
