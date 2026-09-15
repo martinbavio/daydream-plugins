@@ -270,6 +270,8 @@ describe("glaser host part", () => {
     expect(text).toMatch(/cksum/);
     expect(text).toContain("glaser_pick");
     expect(text).toContain("THE WATCH DOES NOT RUN DURING THIS STATE");
+    expect(text).toContain("call glaser_pick FIRST");
+    expect(text).toContain("run_in_background: true");
     expect(text).toContain("glaser_done");
   });
 
