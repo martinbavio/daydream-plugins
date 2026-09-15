@@ -1,8 +1,11 @@
 {
-  "name": "@mrbavio/plugin-impeccable",
+  "name": "@mrbavio/plugin-glaser",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
   "peerDependencies": {
     "@solidjs/web": "2.0.0-rc.0",
     "solid-js": "2.0.0-rc.0"

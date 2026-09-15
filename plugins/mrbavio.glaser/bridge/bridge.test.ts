@@ -9,7 +9,8 @@ import type {
   HostToolRegistration,
 } from "@daydream/plugin-api/host";
 
-import activate, { instructionsText, TOOL_NAME } from "../bridge.ts";
+import activate, { instructionsText, SESSION_TOOL, VERB_TOOL, watchCommand } from "../bridge.ts";
+import { parseVariantMarker, STORAGE_FILE } from "../variants.ts";
 import manifest from "../manifest.json" with { type: "json" };
 import { candidateSkillDirs, findSkillDir, SKILL_MISSING, skillVersion } from "./skill.ts";
 import {
@@ -80,7 +81,7 @@ const state = (selection: StateSlice["selection"], viewports = [pricing, docs]) 
   drafts: [],
 });
 
-describe("impeccable host part", () => {
+describe("glaser host part", () => {
   let skill = "";
   const saved = process.env["IMPECCABLE_SKILL_DIR"];
   beforeEach(async () => {
@@ -105,12 +106,13 @@ describe("impeccable host part", () => {
   test("registers the verb tool and one prompt per verb, every name declared in the manifest, and the instructions say where the skill is", async () => {
     const { host, prompts, tools, instructions } = fakeHost(state(null));
     await activate(host);
-    expect(tools.map((t) => t.name)).toEqual(manifest.contributes.tools);
-    expect(tools[0]!.name).toBe(TOOL_NAME);
-    expect(tools[0]!.annotations).toEqual({ readOnlyHint: true });
+    // The browser part registers glaser_pick; the host part these two.
+    expect(tools.map((t) => t.name)).toEqual([VERB_TOOL, SESSION_TOOL]);
+    expect(manifest.contributes.tools).toEqual([VERB_TOOL, SESSION_TOOL, "glaser_pick"]);
+    expect(tools.every((t) => t.annotations?.readOnlyHint === true)).toBe(true);
     expect(prompts.map((p) => p.name)).toEqual(VERBS.map((v) => promptName(v.verb)));
     expect(new Set(prompts.map((p) => p.name))).toEqual(new Set(manifest.contributes.prompts));
-    expect(prompts.every((p) => /^impeccable-[a-z]+$/.test(p.name))).toBe(true);
+    expect(prompts.every((p) => /^glaser-[a-z]+$/.test(p.name))).toBe(true);
     expect(instructions()).toContain(manifest.contributes.instructions);
     expect(instructions()).toContain(`Impeccable 9.9.9 was found at ${skill}`);
   });
@@ -120,15 +122,18 @@ describe("impeccable host part", () => {
       state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [] }),
     );
     await activate(host);
-    const bolder = prompts.find((p) => p.name === "impeccable-bolder")!;
+    const bolder = prompts.find((p) => p.name === "glaser-bolder")!;
     const text = await (bolder.build as Build)({});
-    expect(text.startsWith("# impeccable bolder (Impeccable 9.9.9)")).toBe(true);
+    expect(text.startsWith("# Glaser: bolder (Impeccable 9.9.9)")).toBe(true);
     expect(text).toContain('TARGET: element `el_card` inside viewport `vp_pricing` ("Pricing", 960×600, at 100, 40)');
     expect(text).toContain('get_viewport {id: "vp_pricing"}');
     // Variants land beside the source, one frame plus a gap apart.
     expect(text).toContain("3 VARIANTS");
     expect(text).toContain("1 at {x: 1108, y: 40}, 2 at {x: 2116, y: 40}, 3 at {x: 3124, y: 40}");
     expect(text).toContain('"Pricing · bolder n/3"');
+    // The notes marker the canvas reads back, as the adopt command parses it.
+    expect(text).toContain("`Glaser bolder · variant n of 3 of vp_pricing`");
+    expect(parseVariantMarker("Glaser bolder · variant 2 of 3 of vp_pricing\n\nA denser card.")).toEqual({ verb: "bolder", n: 2, of: 3, sourceId: "vp_pricing" });
     expect(text).not.toContain("draft_open {from:");
     // Then Impeccable's own text, verbatim, in order.
     const playbook = text.indexOf("# Impeccable's playbook: bolder");
@@ -146,10 +151,10 @@ describe("impeccable host part", () => {
     await activate(host);
     const run = tools[0]!.run as (args: Record<string, string | undefined>) => Promise<{ text: string; isError?: boolean }>;
     const viaTool = await run({ verb: "quieter", brief: "less shouty" });
-    const viaPrompt = await (prompts.find((p) => p.name === "impeccable-quieter")!.build as Build)({ brief: "less shouty" });
+    const viaPrompt = await (prompts.find((p) => p.name === "glaser-quieter")!.build as Build)({ brief: "less shouty" });
     expect(viaTool.text).toBe(viaPrompt);
     expect(viaTool.isError).toBe(false);
-    expect(viaTool.text).toContain("# impeccable quieter");
+    expect(viaTool.text).toContain("# Glaser: quieter");
     // The verb is an enum of the same list the prompts cover.
     const verb = (tools[0]!.inputSchema as unknown as { verb: { options: string[] } }).verb;
     expect(verb.options).toEqual(VERBS.map((v) => v.verb));
@@ -160,7 +165,7 @@ describe("impeccable host part", () => {
       state({ elementId: "html_root", viewportId: "vp_pricing", itemIds: ["vp_pricing"] }),
     );
     await activate(host);
-    const polish = prompts.find((p) => p.name === "impeccable-polish")!;
+    const polish = prompts.find((p) => p.name === "glaser-polish")!;
     const text = await (polish.build as Build)({ brief: "the footer feels crowded" });
     expect(text).toContain("TARGET: the whole page of viewport `vp_pricing`");
     expect(text).toContain('draft_open {from: "vp_pricing"}');
@@ -174,7 +179,7 @@ describe("impeccable host part", () => {
       state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [] }),
     );
     await activate(host);
-    const typeset = prompts.find((p) => p.name === "impeccable-typeset")!;
+    const typeset = prompts.find((p) => p.name === "glaser-typeset")!;
     const text = await (typeset.build as Build)({ viewport: "vp_docs", element: "el_h1", variants: "2" });
     expect(text).toContain("TARGET: element `el_h1` inside viewport `vp_docs` (untitled, 720 wide, at 0, 900)");
     expect(text).toContain("2 VARIANTS");
@@ -241,6 +246,18 @@ describe("impeccable host part", () => {
     expect(await skillVersion(skill)).toBe("9.9.9");
   });
 
+  test("glaser_session answers the watch over the storage file and the loop", async () => {
+    const { host, tools } = fakeHost(state(null));
+    await activate(host);
+    const session = tools.find((t) => t.name === SESSION_TOOL)!;
+    const { text } = await (session.run as () => Promise<{ text: string }>)();
+    expect(text).toContain(watchCommand());
+    expect(watchCommand()).toContain(STORAGE_FILE);
+    expect(watchCommand()).toMatch(/cksum/);
+    expect(text).toContain("glaser_pick");
+    expect(text).toContain("START THE WATCH AGAIN");
+  });
+
   test("instructionsText and stateSlice are plain", () => {
     expect(instructionsText("Base.", null)).toMatch(/^Base\. NOTE: the Impeccable skill is NOT installed/);
     expect(instructionsText("Base.", { dir: "/s", version: null })).toBe("Base. Impeccable was found at /s.");
@@ -268,7 +285,7 @@ describe("impeccable host part", () => {
       craftFloor: "f",
       skillVersion: null,
     });
-    expect(text.startsWith("# impeccable bolder\n")).toBe(true);
+    expect(text.startsWith("# Glaser: bolder\n")).toBe(true);
     expect(text).not.toContain("THE USER'S BRIEF");
   });
 });

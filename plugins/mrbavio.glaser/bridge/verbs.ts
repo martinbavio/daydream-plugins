@@ -1,4 +1,4 @@
-// The verbs this plugin carries, and the prompt each becomes: the Daydream
+// The verbs Glaser carries, and the prompt each becomes: the Daydream
 // ADAPTER first (where the agent is, what the target is, what the
 // deliverable is, what is out), then Impeccable's own playbook for the
 // verb and its craft floor, verbatim. Pure: the file reads and the tab
@@ -12,6 +12,8 @@
 // "target" (an element or viewport on the canvas) and the deliverable (a
 // draft) — and rules out the steps that name a dev server, a screenshot
 // tool, a hook or a file path.
+
+import { variantMarker } from "../variants.ts";
 
 /** How a verb lands: `variants` opens N drafts beside the source, each a
  * different direction; `in-place` reworks the source as an edit draft. */
@@ -36,77 +38,77 @@ export interface VerbSpec {
 export const VERBS: readonly VerbSpec[] = [
   {
     verb: "bolder",
-    title: "Impeccable: bolder",
+    title: "Glaser: bolder",
     description:
       "Amplify a safe or bland element: three draft variants beside the source, in the page's own vocabulary.",
     mode: "variants",
   },
   {
     verb: "quieter",
-    title: "Impeccable: quieter",
+    title: "Glaser: quieter",
     description:
       "Tone down an aggressive or overstimulating element: three draft variants beside the source.",
     mode: "variants",
   },
   {
     verb: "typeset",
-    title: "Impeccable: typeset",
+    title: "Glaser: typeset",
     description:
       "Improve typography — hierarchy, measure, scale, fonts: three draft variants beside the source.",
     mode: "variants",
   },
   {
     verb: "layout",
-    title: "Impeccable: layout",
+    title: "Glaser: layout",
     description:
       "Fix spacing, rhythm and visual hierarchy: three draft variants beside the source.",
     mode: "variants",
   },
   {
     verb: "colorize",
-    title: "Impeccable: colorize",
+    title: "Glaser: colorize",
     description:
       "Add strategic colour to a monochrome or dull element: three draft variants beside the source.",
     mode: "variants",
   },
   {
     verb: "delight",
-    title: "Impeccable: delight",
+    title: "Glaser: delight",
     description:
       "Add personality and a memorable touch: three draft variants beside the source.",
     mode: "variants",
   },
   {
     verb: "distill",
-    title: "Impeccable: distill",
+    title: "Glaser: distill",
     description:
       "Strip the target to its essence, removing what does not earn its place; reworked in place.",
     mode: "in-place",
   },
   {
     verb: "polish",
-    title: "Impeccable: polish",
+    title: "Glaser: polish",
     description:
       "A final quality pass — alignment, spacing, consistency, micro-detail; reworked in place.",
     mode: "in-place",
   },
   {
     verb: "clarify",
-    title: "Impeccable: clarify",
+    title: "Glaser: clarify",
     description:
       "Improve UX copy, labels and messages in the target; reworked in place.",
     mode: "in-place",
   },
   {
     verb: "animate",
-    title: "Impeccable: animate",
+    title: "Glaser: animate",
     description:
       "Add purposeful CSS motion — transitions and animations only, no scripts; reworked in place.",
     mode: "in-place",
   },
   {
     verb: "adapt",
-    title: "Impeccable: adapt",
+    title: "Glaser: adapt",
     description:
       "Adapt the page to another width or context through @media layers; reworked in place.",
     mode: "in-place",
@@ -114,7 +116,7 @@ export const VERBS: readonly VerbSpec[] = [
 ];
 
 export function promptName(verb: string): string {
-  return `impeccable-${verb}`;
+  return `glaser-${verb}`;
 }
 
 /** The slice of `canvas_state` the adapter reads (Daydream's CanvasState,
@@ -249,8 +251,9 @@ function deliverableSection(input: PromptInput): string {
     return `${i + 1} at {x: ${x}, y: ${y}}`;
   }).join(", ");
   const title = target?.viewport.title ?? "Untitled";
+  const marker = variantMarker({ verb: spec.verb, n: "n", of: variants, sourceId: id });
   return [
-    `DELIVERABLE: ${variants} VARIANTS of the source, each a new draft viewport beside it, each a genuinely different direction the playbook allows — not three intensities of one idea. For variant n: draft_open with the source's frame, fonts and meta (meta.title "${title} · ${spec.verb} n/${variants}"), the source's whole root with the target rewritten for that direction, and position ${positions}; then draft_finalize. The source stays untouched. Open and finalize them one after another so the user sees each land. When all ${variants} are on the canvas, report each direction in one line; the user adopts one by hand (or deletes the losers) — do not remove anything.`,
+    `DELIVERABLE: ${variants} VARIANTS of the source, each a new draft viewport beside it, each a genuinely different direction the playbook allows — not three intensities of one idea. For variant n: draft_open with the source's frame and fonts, meta.title "${title} · ${spec.verb} n/${variants}", meta.notes whose FIRST LINE is exactly \`${marker}\` followed by a blank line and the direction in one or two sentences (the canvas reads that line to know the round; the user reads the rest while choosing), the source's whole root with the target rewritten for that direction, and position ${positions}; then draft_finalize. The source stays untouched. Open and finalize them one after another so the user sees each land. When all ${variants} are on the canvas, report each direction in one line; the user adopts one from the canvas (Glaser: adopt) or deletes the losers — do not remove anything.`,
   ].join("\n");
 }
 
@@ -273,7 +276,7 @@ export function composePrompt(input: PromptInput): string {
   const { spec, brief, skillVersion } = input;
   const version = skillVersion === null ? "" : ` (Impeccable ${skillVersion})`;
   const sections = [
-    `# impeccable ${spec.verb}${version}`,
+    `# Glaser: ${spec.verb}${version}`,
     targetSection(input),
     deliverableSection(input),
     brief === undefined || brief.trim() === ""

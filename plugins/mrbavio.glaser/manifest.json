@@ -1,0 +1,56 @@
+{
+  "id": "mrbavio.glaser",
+  "name": "Glaser",
+  "version": "0.2.0",
+  "minCore": "0.1.0",
+  "contributes": {
+    "commands": [
+      "mrbavio.glaser.bolder",
+      "mrbavio.glaser.quieter",
+      "mrbavio.glaser.typeset",
+      "mrbavio.glaser.layout",
+      "mrbavio.glaser.colorize",
+      "mrbavio.glaser.delight",
+      "mrbavio.glaser.distill",
+      "mrbavio.glaser.polish",
+      "mrbavio.glaser.clarify",
+      "mrbavio.glaser.animate",
+      "mrbavio.glaser.adapt",
+      "mrbavio.glaser.adopt",
+      "mrbavio.glaser.cancel",
+      "mrbavio.glaser.end-session"
+    ],
+    "shortcuts": {
+      "Escape": "mrbavio.glaser.cancel"
+    },
+    "overlays": [
+      "caption"
+    ],
+    "tools": [
+      "glaser_verb",
+      "glaser_session",
+      "glaser_pick"
+    ],
+    "prompts": [
+      "glaser-bolder",
+      "glaser-quieter",
+      "glaser-typeset",
+      "glaser-layout",
+      "glaser-colorize",
+      "glaser-delight",
+      "glaser-distill",
+      "glaser-polish",
+      "glaser-clarify",
+      "glaser-animate",
+      "glaser-adapt"
+    ],
+    "instructions": "Glaser brings design verbs to a viewport on the canvas — Impeccable's playbooks (impeccable.style), read from the skill installed on this machine: bolder, quieter, typeset, layout, colorize, delight open three draft variants beside the source; distill, polish, clarify, animate, adapt rework the source in place as an edit draft. The user picks a verb ON THE CANVAS (a command on the selection), and the pick waits for you in the plugin's storage file. So: any Glaser request — a sentence like \"make this bolder\", a bare \"go\", or a wake-up from the watch — starts with glaser_pick, which answers the waiting pick (verb, viewport, element) and takes it; then glaser_verb {verb, viewport, element, brief?} answers the target, the deliverable and the playbook — follow it. With no pick, glaser_verb alone from the user's words, the selection as the target. A GLASER SESSION is the loop that needs no typing: when the user asks to start one, call glaser_session — it answers a watch command that exits when the storage file changes; run it the way your harness runs a long wait (Claude Code: a background task that notifies you; Codex: a yielded foreground exec you keep reading; Cursor: a background terminal), and on every wake-up call glaser_pick, do the verb, then START THE WATCH AGAIN before anything else. A pick with exit: true ends the session: stop watching and say so. Never run a verb the user did not pick or ask for."
+  },
+  "permissions": [
+    {
+      "name": "reads the installed Impeccable skill",
+      "reason": "each verb reads reference/<verb>.md and reference/craft-floor.md from ~/.agents/skills/impeccable (or the project's .agents/skills/impeccable) at request time, so the plugin follows whatever version is installed"
+    }
+  ],
+  "built": "dist/index.js"
+}
