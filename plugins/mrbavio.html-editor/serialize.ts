@@ -1,9 +1,13 @@
 // The pane's face of a subtree: STRUCTURE ONLY (decisions.md #58). Tag,
 // attributes, text and children — never a style attribute (styling is the
-// CSS editor's), never a class or an id (labels are not HTML, and ids are
-// the kernel's handles, kept by tag-and-position matching on the way back,
-// reconcile.ts). Pure: a DreamElement in, HTML text out, so the same text
-// re-parses (parse.ts) to the same tree.
+// CSS editor's), never a label (labels are not HTML), never the MODEL id
+// (the kernel's handle, kept by tag-and-position matching on the way
+// back, reconcile.ts). An author's `class` and `id` are ordinary
+// attributes since the selectors step (decisions.md #71) — the hooks a
+// sheet's selectors match — and are written like any other; #58's "never
+// a class or an id" retired with the reason that made it true. Pure: a
+// DreamElement in, HTML text out, so the same text re-parses (parse.ts)
+// to the same tree.
 //
 // Layout: two-space indentation, one element per line. A text-only element
 // stays on one line (`<h1>Title</h1>`); text beside children goes on its

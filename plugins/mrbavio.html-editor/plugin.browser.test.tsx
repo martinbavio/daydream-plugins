@@ -304,8 +304,13 @@ describe("mrbavio.html-editor", () => {
     expect(root().children[0]!.children[0]!.text).toBe("Old headline");
     expect(mounted.store.canUndo()).toBe(false);
 
+    await type('<h1 onclick="x()">Hi</h1>');
+    expect(message()).toContain('"onclick"');
+    // An author's class is an attribute (decisions.md #71): applied, no
+    // sentence.
     await type('<h1 class="big">Hi</h1>');
-    expect(message()).toContain('"class"');
+    expect(message()).toBeNull();
+    expect(root().children[0]!.children[0]!.attrs).toEqual({ class: "big" });
     await type("<h1>a</h1><p>b</p>");
     expect(message()).toContain("found 2");
     expect(root().children[0]!.children).toHaveLength(2);
@@ -426,10 +431,10 @@ describe("mrbavio.html-editor", () => {
     mounted = await mountPlugin({ entry: activate, manifest, document: doc });
     select(h1.id);
     content().focus();
-    await type('<h1 class="big">Nope</h1>');
+    await type('<h1 onclick="x()">Nope</h1>');
     blur();
-    expect(view().state.doc.toString()).toBe('<h1 class="big">Nope</h1>');
-    expect(message()).toContain('"class"');
+    expect(view().state.doc.toString()).toBe('<h1 onclick="x()">Nope</h1>');
+    expect(message()).toContain('"onclick"');
     expect(root().children[0]!.children[0]!.text).toBe("Old headline");
 
     // Away and back: the paragraph shows clean, the heading's draft waits.
@@ -437,8 +442,8 @@ describe("mrbavio.html-editor", () => {
     expect(view().state.doc.toString()).toBe("<p>Body copy</p>");
     expect(message()).toBeNull();
     select(h1.id);
-    expect(view().state.doc.toString()).toBe('<h1 class="big">Nope</h1>');
-    expect(message()).toContain('"class"');
+    expect(view().state.doc.toString()).toBe('<h1 onclick="x()">Nope</h1>');
+    expect(message()).toContain('"onclick"');
 
     // Corrected: the draft is gone.
     content().focus();

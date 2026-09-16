@@ -48,14 +48,16 @@ describe("parseHtml", () => {
     expect(body.children[0]!.text).toBe("y");
   });
 
-  test("attributes on the root go through the kernel's rule like any other", () => {
+  test("attributes on the root go through the kernel's rule like any other: a class is kept, a handler is refused", () => {
+    const classed = parsed('<html class="page"><body></body></html>', "root");
+    expect(classed.attrs).toEqual({ class: "page" });
     const result = parseHtml(
-      '<html class="page"><body></body></html>',
+      '<html onload="x()"><body></body></html>',
       "root",
       rules,
     );
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.problem).toContain("class");
+    if (!result.ok) expect(result.problem).toContain("onload");
   });
 
   test("head content at the root level is refused, never dropped", () => {
@@ -75,7 +77,7 @@ describe("parseHtml", () => {
     if (!scripted.ok) expect(scripted.problem).toContain('"script"');
   });
 
-  test("two fragments, a script, a class: refused with a sentence", () => {
+  test("two fragments, a script, a handler: refused with a sentence; a class and an id are attributes (decisions.md #71)", () => {
     const two = parseHtml("<h1>a</h1><p>b</p>", "fragment", rules);
     expect(two.ok).toBe(false);
     const script = parseHtml(
@@ -85,9 +87,14 @@ describe("parseHtml", () => {
     );
     expect(script.ok).toBe(false);
     if (!script.ok) expect(script.problem).toContain('"script"');
-    const styled = parseHtml('<div class="a"></div>', "fragment", rules);
-    expect(styled.ok).toBe(false);
-    if (!styled.ok) expect(styled.problem).toContain('"class"');
+    const handler = parseHtml('<div onclick="a()"></div>', "fragment", rules);
+    expect(handler.ok).toBe(false);
+    if (!handler.ok) expect(handler.problem).toContain('"onclick"');
+    expect(parsed('<div class="a b" id="c"></div>', "fragment")).toEqual({
+      tag: "div",
+      attrs: { class: "a b", id: "c" },
+      children: [],
+    });
   });
 
   test("a void element with attributes; children of a void never exist", () => {
