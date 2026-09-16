@@ -112,6 +112,12 @@ const FONT_FACE_DESCRIPTORS: ReadonlySet<string> = new Set([
 
 const AT_KEYWORD = /^@[a-z-]+/i;
 
+/** At-rules that are packaging, never content: a `@charset` names the
+ * encoding of a file the page has already decoded, and the parser drops
+ * it as it drops the charset meta (tags.ts) — counting it would measure
+ * the file, not the model. */
+const PACKAGING_AT_RULES: ReadonlySet<string> = new Set(["@charset"]);
+
 /** The at-keyword an at-rule opens with, lower-cased, or null for a rule
  * that is not one. */
 function atKeyword(rule: RuleLike): string | null {
@@ -498,9 +504,10 @@ export function countSource(source: string): SourceCount {
         if (--depth <= 0) break;
       } else if (c === ";" && depth === 0) break;
     }
-    if (keyword !== null && keyword !== undefined)
-      count(out.atRules, keyword.toLowerCase());
-    else if (opened) out.rules += 1;
+    if (keyword !== null && keyword !== undefined) {
+      const lower = keyword.toLowerCase();
+      if (!PACKAGING_AT_RULES.has(lower)) count(out.atRules, lower);
+    } else if (opened) out.rules += 1;
   }
   return out;
 }

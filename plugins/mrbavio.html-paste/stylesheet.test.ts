@@ -281,12 +281,8 @@ describe("walkStyleSheet", () => {
       source,
     );
     expect(out.rules.map((rule) => rule.selector)).toEqual(["body", ".a"]);
-    expect(out.dropped).toEqual({
-      "@import": 1,
-      "@charset": 1,
-      rule: 1,
-      "@foo": 1,
-    });
+    // A @charset is packaging, never a loss.
+    expect(out.dropped).toEqual({ "@import": 1, rule: 1, "@foo": 1 });
   });
 });
 
@@ -315,9 +311,10 @@ describe("flattenSelector", () => {
 });
 
 describe("countSource", () => {
-  test("top-level blocks not starting with @ are rules; at-rules by keyword, statements and blocks alike; comments and strings hide their braces", () => {
+  test("top-level blocks not starting with @ are rules; at-rules by keyword, statements and blocks alike, a @charset never; comments and strings hide their braces", () => {
     expect(
       countSource(`
+        @charset "utf-8";
         @import url("a;b.css");
         @layer a, b;
         /* .x { } */
