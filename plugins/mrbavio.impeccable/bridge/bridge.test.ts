@@ -296,6 +296,8 @@ describe("impeccable host part", () => {
     expect(text).toContain('impeccable_detect {viewport: "vp_pricing"}');
     expect(text).toContain("ONE CALL");
     expect(text).toContain("Do not export, write or run anything yourself");
+    expect(text).toContain("THE PLAYBOOK'S ISOLATION RULE STANDS HERE");
+    expect(text).toContain("DEGRADED banner");
     expect(text).toContain("Never open a draft");
     expect(text).not.toContain("VARIANTS");
     expect(text).not.toContain("draft_open {from:");
