@@ -72,7 +72,7 @@ export interface SheetWalk {
   rules: StyleRule[];
   fonts: FontFace[];
   /** Rules lost, by reason: an at-keyword (`@import`, `@keyframes`, a
-   * refused `@supports` condition) or `rule` for a selector. */
+   * refused condition's) or `rule` for a selector. */
   dropped: Record<string, number>;
   /** Declarations the renderer would refuse, as `style (<property>)`;
    * a `@font-face` descriptor the format does not hold, as
@@ -230,11 +230,11 @@ function walkStyleRule(
 
 /**
  * One stored rule, or a count of why not: the selector through the
- * kernel's grammar (`rule`), each condition through the layer grammar
- * and the no-state rule (its keyword — `@supports` until the kernel
- * takes it), each declaration through the property and value grammars
- * (stripped by name, the rule kept). A rule left with no declaration
- * stores nothing: an empty block, or a parent that only nests.
+ * kernel's grammar (`rule`), each condition through the rule grammar and
+ * the no-state rule (its keyword), each declaration through the property
+ * and value grammars (stripped by name, the rule kept). A rule left with
+ * no declaration stores nothing: an empty block, or a parent that only
+ * nests.
  */
 function storeRule(
   selector: string,
@@ -252,10 +252,7 @@ function storeRule(
     return;
   }
   for (const prelude of conditions) {
-    if (
-      walk.core.conditionKind(prelude) === "state" ||
-      walk.core.conditionPreludeProblem(prelude) !== null
-    ) {
+    if (conditionRefused(prelude, walk.core)) {
       count(walk.dropped, atKeyword({ cssText: prelude }) ?? "rule");
       return;
     }
@@ -265,6 +262,48 @@ function storeRule(
     ...(conditions.length === 0 ? {} : { conditions: [...conditions] }),
     styles: parsed.styles,
   });
+}
+
+/**
+ * Whether a rule's condition is one the format refuses: a state prelude
+ * (in a rule, `:hover` belongs to the selector — the kernel's ruleProblem
+ * says the same) or a prelude the layer grammar refuses.
+ *
+ * `@supports` is a RULE's to carry (decisions.md #71: emitted verbatim for
+ * the browser), and the kernel's sheet validator admits it — but `dd.core`
+ * hands out only the ELEMENT-LAYER face, `conditionPreludeProblem`, which
+ * still reserves it (#38). So a `@supports` prelude is judged HERE by the
+ * same lexical checks that face applies before its reservation: a
+ * non-empty condition, balanced parentheses, none of the sheet-text
+ * hazards (braces, semicolons, comment delimiters, quotes, control
+ * characters). TEMPORARY: the kernel's next phase exposes
+ * `dd.core.ruleProblem`, and this branch goes with it.
+ */
+function conditionRefused(prelude: string, core: SheetRules): boolean {
+  const kind = core.conditionKind(prelude);
+  if (kind === "state") return true;
+  if (kind === "supports") return supportsPreludeProblem(prelude) !== null;
+  return core.conditionPreludeProblem(prelude) !== null;
+}
+
+const PRELUDE_HAZARD = /[{};"']|\/\*|\*\/|[ -]/;
+
+/** The layer grammar's lexical checks over a `@supports` prelude — one
+ * grammar, so a refused prelude never becomes sheet text. */
+function supportsPreludeProblem(prelude: string): string | null {
+  const trimmed = prelude.trim();
+  if (PRELUDE_HAZARD.test(prelude)) {
+    return `A condition cannot contain sheet punctuation: "${trimmed}"`;
+  }
+  const condition = trimmed.slice("@supports".length).trim();
+  if (condition === "") return "@supports needs a condition";
+  let depth = 0;
+  for (const ch of condition) {
+    if (ch === "(") depth++;
+    else if (ch === ")" && --depth < 0) break;
+  }
+  if (depth !== 0) return "@supports condition has unbalanced parentheses";
+  return null;
 }
 
 /** The `url()` sources a `src` descriptor names, unquoted — the kernel's

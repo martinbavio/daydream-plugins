@@ -14,8 +14,8 @@ export interface PasteReport {
   downgraded: Record<string, number>;
   /** What was removed with its content, by name → count: an element's
    * tag; a stylesheet's at-rule by keyword (`@import`, `@keyframes`,
-   * `@layer`, a `@font-face` that would not load, a `@supports` the
-   * format does not take yet); `rule` for a style rule whose selector the
+   * `@layer`, a `@font-face` that would not load, a condition the format
+   * refuses); `rule` for a style rule whose selector the
    * parser or the format refused; everything past the depth cap, under
    * `deeper than <n>`. */
   dropped: Record<string, number>;

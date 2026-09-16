@@ -151,7 +151,7 @@ describe("walkStyleSheet", () => {
     ]);
   });
 
-  test("at-rule ancestry becomes conditions, outermost first, on every rule inside; a refused prelude drops each rule under its keyword", () => {
+  test("at-rule ancestry becomes conditions, outermost first, on every rule inside — @supports too, judged lexically until dd.core.ruleProblem; a refused prelude drops each rule under its keyword", () => {
     const out = walk([
       group("@media screen and (min-width: 600px)", [
         style(".btn", "padding: 8px"),
@@ -161,6 +161,10 @@ describe("walkStyleSheet", () => {
         style(".g", "display: grid"),
         style(".h", "display: grid"),
       ]),
+      group("@media", [style(".bare", "color: red")]),
+      group("@supports (display: grid", [style(".open", "color: red")]),
+      group("@supports", [style(".empty", "color: red")]),
+      group("@supports (x: y) { }", [style(".brace", "color: red")]),
       style(".n", "", [
         group("@container (min-width: 1px)", [style("& .m", "color: red")]),
       ]),
@@ -180,12 +184,22 @@ describe("walkStyleSheet", () => {
         styles: { gap: "1px" },
       },
       {
+        selector: ".g",
+        conditions: ["@supports (display: grid)"],
+        styles: { display: "grid" },
+      },
+      {
+        selector: ".h",
+        conditions: ["@supports (display: grid)"],
+        styles: { display: "grid" },
+      },
+      {
         selector: ".n .m",
         conditions: ["@container (min-width: 1px)"],
         styles: { color: "red" },
       },
     ]);
-    expect(out.dropped).toEqual({ "@supports": 2 });
+    expect(out.dropped).toEqual({ "@media": 1, "@supports": 3 });
   });
 
   test("a @font-face lifts into fonts as a descriptor map; a face with a non-https url, no source or no family is dropped and counted; an unknown descriptor is stripped by name", () => {

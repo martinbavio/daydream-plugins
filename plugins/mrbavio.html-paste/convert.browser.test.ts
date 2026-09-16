@@ -684,9 +684,14 @@ describe("the sheet (decisions.md #71)", () => {
     expect(conversion.report).toEqual(emptyReport());
   });
 
-  test("@import, @layer, @keyframes, @property and @supports are counted by name and not stored — a @layer block's rules go with it, a @supports rule is counted until the format takes it", () => {
+  test("@import, @layer, @keyframes and @property are counted by name and not stored — a @layer block's rules go with it; a @supports rule lands with its condition", () => {
     const conversion = convert(atRules);
     expect(conversion.item.payload.sheet).toEqual([
+      {
+        selector: ".spinner",
+        conditions: ["@supports (display: grid)"],
+        styles: { display: "grid" },
+      },
       {
         selector: ".spinner",
         styles: { animation: "1s linear 0s infinite normal none running spin" },
@@ -694,13 +699,7 @@ describe("the sheet (decisions.md #71)", () => {
     ]);
     expect(conversion.report).toEqual({
       ...emptyReport(),
-      dropped: {
-        "@import": 1,
-        "@layer": 1,
-        "@keyframes": 1,
-        "@property": 1,
-        "@supports": 1,
-      },
+      dropped: { "@import": 1, "@layer": 1, "@keyframes": 1, "@property": 1 },
     });
   });
 

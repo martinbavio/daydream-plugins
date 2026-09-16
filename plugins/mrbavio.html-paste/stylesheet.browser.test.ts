@@ -46,7 +46,7 @@ describe("sheetFromStyleText", () => {
     expect(out.dropped).toEqual({ "@import": 1, rule: 1, "@foo": 1 });
   });
 
-  test("the kernel's grammar refuses what the browser would take — a shadow-tree selector, :visited — under `rule`; a @supports condition under its keyword until the format takes it", () => {
+  test("the kernel's grammar refuses what the browser would take — a shadow-tree selector, :visited — under `rule`; a @supports condition is stored, as a rule's is", () => {
     const out = sheet(
       `:host .x { color: red }
        a:visited { color: purple }
@@ -55,9 +55,19 @@ describe("sheetFromStyleText", () => {
        .fine { color: red }`,
     );
     expect(out.rules).toEqual([
+      {
+        selector: ".g",
+        conditions: ["@supports (display: grid)"],
+        styles: { display: "grid" },
+      },
+      {
+        selector: ".h",
+        conditions: ["@media (min-width: 600px)", "@supports (gap: 1px)"],
+        styles: { gap: "1px" },
+      },
       { selector: ".fine", styles: { color: "red" } },
     ]);
-    expect(out.dropped).toEqual({ rule: 2, "@supports": 2 });
+    expect(out.dropped).toEqual({ rule: 2 });
   });
 
   test("nesting the CSSOM absolutizes (the implied & inserted) flattens to the entry's forms; a nested @container becomes a condition on the flattened rule", () => {
