@@ -231,10 +231,11 @@ function walkStyleRule(
 /**
  * One stored rule, or a count of why not: the selector through the
  * kernel's grammar (`rule`), each condition through the rule grammar and
- * the no-state rule (its keyword), each declaration through the property
- * and value grammars (stripped by name, the rule kept). A rule left with
- * no declaration stores nothing: an empty block, or a parent that only
- * nests.
+ * the no-state rule (its keyword), and only then each declaration through
+ * the property and value grammars (stripped by name, the rule kept) — a
+ * rule refused whole is ONE loss, and nothing of its declarations is
+ * counted beside it. A rule left with no declaration stores nothing: an
+ * empty block, or a parent that only nests.
  */
 function storeRule(
   selector: string,
@@ -242,11 +243,7 @@ function storeRule(
   cssText: string,
   walk: Walk,
 ): void {
-  const parsed = parseStyleAttribute(cssText, walk.core);
-  walk.important += parsed.important;
-  for (const name of parsed.invalid)
-    count(walk.stripped, `style (${name.slice(0, 24)})`);
-  if (Object.keys(parsed.styles).length === 0) return;
+  if (cssText.trim() === "") return;
   if (walk.core.selectorProblem(selector) !== null) {
     count(walk.dropped, "rule");
     return;
@@ -257,6 +254,11 @@ function storeRule(
       return;
     }
   }
+  const parsed = parseStyleAttribute(cssText, walk.core);
+  walk.important += parsed.important;
+  for (const name of parsed.invalid)
+    count(walk.stripped, `style (${name.slice(0, 24)})`);
+  if (Object.keys(parsed.styles).length === 0) return;
   walk.rules.push({
     selector,
     ...(conditions.length === 0 ? {} : { conditions: [...conditions] }),

@@ -115,15 +115,19 @@ describe("walkStyleSheet", () => {
     expect(out.dropped).toEqual({});
   });
 
-  test("a refused selector drops the rule under `rule`; a nested rule under it is judged on its own flattened selector", () => {
+  test("a refused selector drops the rule under `rule`, its declarations uncounted; a nested rule under it is judged on its own flattened selector", () => {
     const out = walk([
-      style(":host", "color: red", [style("& .x", "color: blue")]),
+      style(":host", "color: red !important; wid th: 1px", [
+        style("& .x", "color: blue"),
+      ]),
       style(".ok", "color: green"),
     ]);
     expect(out.rules).toEqual([
       { selector: ".ok", styles: { color: "green" } },
     ]);
     expect(out.dropped).toEqual({ rule: 2 });
+    expect(out.important).toBe(0);
+    expect(out.stripped).toEqual({});
   });
 
   test("nesting is flattened as the entry says, nested rules after their parent, nested declarations with the parent's selector", () => {
