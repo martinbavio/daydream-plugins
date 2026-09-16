@@ -147,8 +147,9 @@ describe("glaser host part", () => {
     expect(text).toContain("There is NO `@keyframes`");
     expect(text).toContain("do not search one");
     expect(text).toContain("IN PARALLEL");
-    expect(text).toContain("writes its own rewrite");
-    expect(text).toContain("FIRST touches its draft");
+    expect(text).toContain("(c) Write the target rewritten");
+    expect(text).toContain("THE VERY FIRST CALL");
+    expect(text).toContain("Give each sub-agent THIS SCRIPT");
     expect(text).toContain("never send the whole page");
     // Then Impeccable's own text, verbatim, in order.
     const playbook = text.indexOf("# Impeccable's playbook: bolder");
