@@ -101,9 +101,9 @@ describe("the display table", () => {
     expect(defaultInline("custom-element")).toBe(true);
   });
 
-  test("dropRule and resolveTag: code and foreign content counted, packaging silent, the rest kept or downgraded by the kernel's answer", () => {
+  test("dropRule and resolveTag: code and foreign content counted, packaging and the consumed style block silent, the rest kept or downgraded by the kernel's answer", () => {
     expect(dropRule("script")).toBe("counted");
-    expect(dropRule("style")).toBe("counted");
+    expect(dropRule("style")).toBe("silent");
     expect(dropRule("meta")).toBe("silent");
     expect(dropRule("head")).toBe("silent");
     expect(dropRule("div")).toBeNull();

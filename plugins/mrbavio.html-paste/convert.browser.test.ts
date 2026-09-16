@@ -1,8 +1,10 @@
 // The converter over real fragments (decisions.md #56): the tree AND the
 // report, because the report is what every later model step is measured
-// by — the same fixtures pasted again after the selectors step should
-// show these counts fall. Browser project: the converter parses with
-// DOMParser.
+// by — the same fixtures pasted again after a step should show these
+// counts fall. The selectors step (decisions.md #71) did: the style block
+// and the class grid report nothing now, and the seven fixtures it added
+// pin the sheet a paste lands. Browser project: the converter parses
+// with DOMParser and the browser's own CSS parser.
 import { describe, expect, test } from "vitest";
 
 import type { DreamElement } from "@daydream/plugin-api";
@@ -21,14 +23,21 @@ import {
 import { emptyReport } from "./report";
 import { defaultInline } from "./tags";
 
+import atRules from "./fixtures/at-rules.html?raw";
 import chromeFragment from "./fixtures/chrome-fragment.html?raw";
 import classGrid from "./fixtures/class-grid.html?raw";
+import customProperties from "./fixtures/custom-properties.html?raw";
 import dataImage from "./fixtures/data-image.html?raw";
 import wholeDocument from "./fixtures/document.html?raw";
+import fontFace from "./fixtures/font-face.html?raw";
 import form from "./fixtures/form.html?raw";
 import hero from "./fixtures/hero.html?raw";
 import hostile from "./fixtures/hostile.html?raw";
+import idHero from "./fixtures/id-hero.html?raw";
+import mediaInterleaved from "./fixtures/media-interleaved.html?raw";
 import mixedInline from "./fixtures/mixed-inline.html?raw";
+import nested from "./fixtures/nested.html?raw";
+import ornaments from "./fixtures/ornaments.html?raw";
 import styleBlock from "./fixtures/style-block.html?raw";
 import svgIcon from "./fixtures/svg-icon.html?raw";
 import table from "./fixtures/table.html?raw";
@@ -499,51 +508,232 @@ describe("the downgrade table", () => {
     });
   });
 
-  test("a style block is dropped and counted, even when the parser hoists it into the head; class is stripped", () => {
+  test("a style block lands as the sheet, even when the parser hoists it into the head; class stays; nothing is reported", () => {
     const conversion = convert(styleBlock);
     expect(shape(body(conversion))).toEqual({
       tag: "body",
       children: [
         {
           tag: "div",
+          attrs: { class: "card" },
           children: [
             { tag: "h3", text: "Styled by a class" },
-            {
-              tag: "p",
-              text: "The stylesheet is dropped today; the selectors step takes it.",
-            },
+            { tag: "p", text: "The stylesheet is the viewport's sheet." },
           ],
         },
       ],
     });
-    expect(conversion.report).toEqual({
-      ...emptyReport(),
-      dropped: { style: 1 },
-      stripped: { class: 1 },
-    });
+    // The CSSOM's spelling: the colour as rgb(), the zero lengths in px.
+    expect(conversion.item.payload.sheet).toEqual([
+      {
+        selector: ".card",
+        styles: {
+          padding: "16px",
+          border: "1px solid rgb(221, 221, 221)",
+          "border-radius": "8px",
+        },
+      },
+      { selector: ".card h3", styles: { margin: "0px 0px 8px" } },
+    ]);
+    expect(conversion.item.payload.fonts).toBeUndefined();
+    expect(conversion.report).toEqual(emptyReport());
   });
 
-  test("a class-only card grid keeps its structure and text and loses every class and id, counted", () => {
+  test("a class-only card grid keeps its structure, text, classes and ids, and reports nothing", () => {
     const conversion = convert(classGrid);
     const grid = body(conversion).children[0]!;
     expect(grid.tag).toBe("div");
     expect(grid.styles).toEqual({});
+    expect(grid.attrs).toEqual({ id: "pricing", class: "grid grid-3" });
     expect(grid.children.map(shape)).toEqual(
       [
-        ["Free", "For trying it out."],
-        ["Pro", "For daily work."],
-        ["Team", "For everyone at once."],
-      ].map(([title, copy]) => ({
+        ["free", "Free", "For trying it out."],
+        ["pro", "Pro", "For daily work."],
+        ["team", "Team", "For everyone at once."],
+      ].map(([id, title, copy]) => ({
         tag: "article",
+        attrs: { class: "card", id: `card-${id}` },
         children: [
-          { tag: "h3", text: title },
-          { tag: "p", text: copy },
+          { tag: "h3", attrs: { class: "card-title" }, text: title },
+          { tag: "p", attrs: { class: "card-copy" }, text: copy },
         ],
       })),
     );
+    expect(conversion.item.payload.sheet).toBeUndefined();
+    expect(conversion.report).toEqual(emptyReport());
+  });
+});
+
+describe("the sheet (decisions.md #71)", () => {
+  test("interleaved @media: rules in source order, the at-rule ancestry as conditions on each rule inside", () => {
+    const conversion = convert(mediaInterleaved);
+    expect(conversion.item.payload.sheet).toEqual([
+      {
+        selector: ".btn",
+        styles: { padding: "8px 16px", "border-radius": "6px" },
+      },
+      {
+        selector: ".btn-primary",
+        styles: {
+          background: "rgb(10, 102, 194)",
+          color: "rgb(255, 255, 255)",
+        },
+      },
+      {
+        selector: ".btn",
+        conditions: ["@media (min-width: 600px)"],
+        styles: { padding: "12px 24px" },
+      },
+      {
+        selector: ".btn-primary",
+        conditions: ["@media print"],
+        styles: { background: "none" },
+      },
+    ]);
+    const links = body(conversion).children[0]!.children;
+    expect(links.map((el) => el.attrs)).toEqual([
+      { class: "btn btn-primary", href: "https://example.com/start" },
+      undefined,
+      { class: "btn", href: "https://example.com/docs" },
+    ]);
+    expect(conversion.report).toEqual(emptyReport());
+  });
+
+  test("nested CSS is flattened: a leading & under one parent writes the parent out, a list parent goes inside :is(), trailing declarations take the parent's selector, nested rules follow their parent", () => {
+    const conversion = convert(nested);
+    expect(conversion.item.payload.sheet).toEqual([
+      { selector: ".nav", styles: { display: "flex", gap: "16px" } },
+      { selector: ".nav a", styles: { color: "inherit" } },
+      { selector: ".nav a:hover", styles: { "text-decoration": "underline" } },
+      { selector: ".nav .brand, .nav .cta", styles: { "font-weight": "700" } },
+      {
+        selector: ":is(.nav .brand, .nav .cta) span",
+        styles: { color: "rgb(10, 102, 194)" },
+      },
+      { selector: ".nav", styles: { padding: "0px" } },
+    ]);
+    expect(conversion.report).toEqual(emptyReport());
+  });
+
+  test(":root custom properties land as a rule on :root, the values as written", () => {
+    const conversion = convert(customProperties);
+    expect(conversion.item.payload.sheet).toEqual([
+      { selector: ":root", styles: { "--brand": "#0a66c2", "--gap": "12px" } },
+      {
+        selector: ".stack",
+        styles: { display: "grid", gap: "var(--gap)", color: "var(--brand)" },
+      },
+    ]);
+    expect(conversion.report).toEqual(emptyReport());
+  });
+
+  test("::before and ::after ornaments are stored with their pseudo-elements, a one-colon :first-letter in the CSSOM's two-colon spelling", () => {
+    const conversion = convert(ornaments);
+    expect(conversion.item.payload.sheet).toEqual([
+      {
+        selector: ".tag::before",
+        styles: { content: '"★ "', color: "rgb(245, 158, 11)" },
+      },
+      {
+        selector: ".tag::after",
+        styles: {
+          content: '""',
+          display: "inline-block",
+          width: "8px",
+          height: "8px",
+          "border-radius": "50%",
+          background: "currentcolor",
+        },
+      },
+      { selector: "h2::first-letter", styles: { "font-size": "2em" } },
+    ]);
+    expect(conversion.report).toEqual(emptyReport());
+  });
+
+  test("an id-styled hero: the id and the class stay as attributes, the #top rules land, the href to the fragment is kept, the body's style block is consumed in place", () => {
+    const conversion = convert(idHero);
+    expect(shape(body(conversion))).toEqual({
+      tag: "body",
+      children: [
+        {
+          tag: "section",
+          attrs: { id: "top", class: "hero" },
+          children: [
+            { tag: "h1", text: "Back to the top" },
+            {
+              tag: "p",
+              text: "An id styles the hero, and the link points at it.",
+            },
+            { tag: "a", attrs: { class: "back", href: "#top" }, text: "Top" },
+          ],
+        },
+      ],
+    });
+    expect(conversion.item.payload.sheet).toEqual([
+      {
+        selector: "#top",
+        styles: {
+          padding: "48px",
+          background: "rgb(15, 23, 42)",
+          color: "rgb(255, 255, 255)",
+        },
+      },
+      { selector: "#top h1", styles: { margin: "0px 0px 8px" } },
+      { selector: "#top .back", styles: { color: "rgb(251, 191, 36)" } },
+    ]);
+    expect(conversion.report).toEqual(emptyReport());
+  });
+
+  test("@import, @layer, @keyframes, @property and @supports are counted by name and not stored — a @layer block's rules go with it, a @supports rule is counted until the format takes it", () => {
+    const conversion = convert(atRules);
+    expect(conversion.item.payload.sheet).toEqual([
+      {
+        selector: ".spinner",
+        styles: { animation: "1s linear 0s infinite normal none running spin" },
+      },
+    ]);
     expect(conversion.report).toEqual({
       ...emptyReport(),
-      stripped: { class: 10, id: 4 },
+      dropped: {
+        "@import": 1,
+        "@layer": 1,
+        "@keyframes": 1,
+        "@property": 1,
+        "@supports": 1,
+      },
+    });
+  });
+
+  test("a @font-face lifts into fonts in its descriptor grain; a face whose url is not https is dropped and counted; the body rule that uses it lands", () => {
+    const conversion = convert(fontFace);
+    expect(conversion.item.payload.fonts).toEqual([
+      {
+        "font-family": "Inter",
+        src: 'url("https://fonts.example/inter.woff2") format("woff2")',
+        "font-weight": "100 900",
+        "font-display": "swap",
+      },
+    ]);
+    expect(conversion.item.payload.sheet).toEqual([
+      { selector: "body", styles: { "font-family": "Inter, sans-serif" } },
+    ]);
+    expect(conversion.report).toEqual({
+      ...emptyReport(),
+      dropped: { "@font-face": 1 },
+    });
+  });
+
+  test("two style blocks are one sheet in document order, each parsed as its own sheet; a script's text never reaches the sheet", () => {
+    const conversion = convert(
+      "<style>.a { color: red</style><div class='a'><style>.b { color: blue }</style><script>.c { color: green }</script></div>",
+    );
+    expect(conversion.item.payload.sheet).toEqual([
+      { selector: ".a", styles: { color: "red" } },
+      { selector: ".b", styles: { color: "blue" } },
+    ]);
+    expect(conversion.report).toEqual({
+      ...emptyReport(),
+      dropped: { script: 1 },
     });
   });
 });
@@ -717,13 +907,18 @@ describe("the pieces that need a parser", () => {
         { tag: "p", styles: { color: "red" }, text: "styled" },
       ],
     });
+    // The style block's `body { display: none }` is the honest rule it
+    // is, and lands; its `@import` is counted by name.
+    expect(conversion.item.payload.sheet).toEqual([
+      { selector: "body", styles: { display: "none" } },
+    ]);
     // A template's script and an iframe's onload go with their element;
     // the three javascript: hrefs are stripped by name.
     expect(conversion.report).toEqual({
       downgraded: { svg: 1 },
       dropped: {
         script: 1,
-        style: 1,
+        "@import": 1,
         iframe: 1,
         object: 1,
         embed: 1,

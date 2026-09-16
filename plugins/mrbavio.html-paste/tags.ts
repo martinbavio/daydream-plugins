@@ -68,11 +68,10 @@ const BLOCK_TAGS: ReadonlySet<string> = new Set([
   "ul",
 ]);
 
-/** Dropped with their content and COUNTED: code, foreign content and
- * stylesheets — the things a paste really loses. */
+/** Dropped with their content and COUNTED: code and foreign content —
+ * the things a paste really loses. */
 const DROPPED_TAGS: ReadonlySet<string> = new Set([
   "script",
-  "style",
   "template",
   "noscript",
   "iframe",
@@ -81,15 +80,19 @@ const DROPPED_TAGS: ReadonlySet<string> = new Set([
   "canvas",
 ]);
 
-/** Dropped SILENTLY: document packaging, never content. Chrome wraps every
- * copy in a charset meta; a report that named it on every paste would
- * measure the clipboard, not the model. Comments are dropped the same way. */
+/** Dropped SILENTLY on the tree walk: document packaging, never content.
+ * Chrome wraps every copy in a charset meta; a report that named it on
+ * every paste would measure the clipboard, not the model. Comments are
+ * dropped the same way. A `<style>` is here because it is CONSUMED, not
+ * lost: convert.ts reads every one into the viewport's sheet before the
+ * walk (decisions.md #71), and what its text loses is counted there. */
 const PACKAGING_TAGS: ReadonlySet<string> = new Set([
   "head",
   "meta",
   "link",
   "title",
   "base",
+  "style",
 ]);
 
 /** Why the converter drops a tag — `"counted"` in the report, `"silent"`
