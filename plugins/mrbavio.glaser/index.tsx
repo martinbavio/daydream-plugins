@@ -26,13 +26,14 @@ import { css } from "./styles";
 const ID = "mrbavio.glaser";
 /** The verbs, in the picker's order — the host part's list, shared. */
 const VERBS = VERB_SPECS.map((v) => v.verb);
-const isVariantsVerb = (verb: string): boolean =>
-  VERB_SPECS.find((v) => v.verb === verb)?.mode === "variants";
+const modeOf = (verb: string) => VERB_SPECS.find((v) => v.verb === verb)?.mode;
+const isVariantsVerb = (verb: string): boolean => modeOf(verb) === "variants";
 /** The picker's last entry: the session's exit, beside the verbs. */
 const END_SESSION = "end session";
 
 export const PICK_TOOL = "glaser_pick";
 export const DONE_TOOL = "glaser_done";
+export const HTML_TOOL = "glaser_html";
 
 export default async function activate(dd: DaydreamApi): Promise<void> {
   const style = document.createElement("style");
@@ -129,12 +130,48 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   dd.registerOverlay({
     id: "caption",
     slot: "overlay.screen",
-    render: () => createCaption(dd, session),
+    render: () =>
+      createCaption(dd, session, (verb) =>
+        modeOf(verb) === "report" ? "reviewing" : "building",
+      ),
   });
   dd.registerOverlay({
     id: "picker",
     slot: "overlay.interactive",
     render: () => createPicker(dd, entries, picker),
+  });
+
+  // The viewport as one standalone HTML page, for a judge that reads
+  // HTML — Impeccable's detector (the critique and audit verbs). The
+  // kernel renders it: a live mount, its document read once, disposed.
+  // Asset paths are made absolute to this host so the file stands alone.
+  dd.registerTool({
+    name: HTML_TOOL,
+    title: "Glaser HTML",
+    description:
+      "One viewport as a standalone HTML file — the page exactly as the canvas renders it, styles and fonts inline — for Impeccable's detector: write it to a file and run `impeccable detect --json <file>`. Answers {viewportId, html, bytes}. Reads only.",
+    inputSchema: {
+      type: "object",
+      properties: { viewport: { type: "string", description: "A viewport id from canvas_state" } },
+      required: ["viewport"],
+    },
+    annotations: { readOnlyHint: true },
+    run: async (input) => {
+      const id = String(input["viewport"] ?? "");
+      const viewport = dd.core.viewportItems(dd.document()).find((v) => v.id === id);
+      if (viewport === undefined) throw new Error(`no viewport with id "${id}"`);
+      const mounted = await dd.mountViewport(viewport, { still: true });
+      try {
+        const doc = mounted.document();
+        const html = `<!doctype html>\n${doc.documentElement.outerHTML}`.replace(
+          /(src|href)="\/assets\//g,
+          `$1="${window.location.origin}/assets/`,
+        );
+        return { viewportId: id, html, bytes: html.length };
+      } finally {
+        mounted.dispose();
+      }
+    },
   });
 
   // What the canvas can see of a round's progress (the agent's glaser_done

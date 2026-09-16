@@ -16,8 +16,9 @@
 import { variantMarker } from "../variants.ts";
 
 /** How a verb lands: `variants` opens N drafts beside the source, each a
- * different direction; `in-place` reworks the source as an edit draft. */
-export type VerbMode = "variants" | "in-place";
+ * different direction; `in-place` reworks the source as an edit draft;
+ * `report` lands nothing — the review is the answer. */
+export type VerbMode = "variants" | "in-place" | "report";
 
 export interface VerbSpec {
   /** The Impeccable command; `reference/<verb>.md` is its playbook. */
@@ -28,9 +29,7 @@ export interface VerbSpec {
   mode: VerbMode;
 }
 
-/** The verbs of the first slice. Left out on purpose: `critique` and
- * `audit` (both require the detector, which the plugin wires in its next
- * slice), `harden` (i18n and error states belong to a running product),
+/** The verbs. Left out on purpose: `harden` (i18n and error states belong to a running product),
  * `overdrive` and `optimize` (scripts and bundles — a simulated viewport
  * runs neither), and everything that builds, shapes or documents a
  * project (`craft`, `shape`, `init`, `document`, `extract`, `onboard`,
@@ -112,6 +111,20 @@ export const VERBS: readonly VerbSpec[] = [
     description:
       "Adapt the page to another width or context through @media layers; reworked in place.",
     mode: "in-place",
+  },
+  {
+    verb: "critique",
+    title: "Glaser: critique",
+    description:
+      "A UX design review of the target with scores, Impeccable's detector over the rendered page as evidence; nothing lands.",
+    mode: "report",
+  },
+  {
+    verb: "audit",
+    title: "Glaser: audit",
+    description:
+      "Technical quality checks — accessibility, performance, responsive, anti-patterns — over the rendered page with Impeccable's detector; a scored report, nothing lands.",
+    mode: "report",
   },
 ];
 
@@ -199,6 +212,9 @@ export interface PromptInput {
   /** `reference/craft-floor.md`, verbatim. */
   craftFloor: string;
   skillVersion: string | null;
+  /** Where the installed skill is — the detector's launcher lives under
+   * it (`scripts/impeccable`); a report verb names the exact command. */
+  skillDir: string;
 }
 
 export const DEFAULT_VARIANTS = 3;
@@ -238,6 +254,12 @@ function targetSection(input: PromptInput): string {
 function deliverableSection(input: PromptInput): string {
   const { spec, target, variants } = input;
   const id = target?.viewport.id ?? "<viewport id>";
+  if (spec.mode === "report") {
+    const detect = `${input.skillDir}/scripts/impeccable detect --json`;
+    return [
+      `DELIVERABLE: THE REPORT, in chat — nothing lands on the canvas. The playbook's evidence step is Impeccable's detector, and it runs over the RENDERED PAGE, not the JSON: call glaser_html {viewport: "${id}"} — the viewport as one standalone HTML file, styles and fonts inline, exactly as the canvas renders it — write it to a file (say /tmp/glaser-${id}.html; a harness that saved the answer to a file for you already has it on disk), then run \`${detect} /tmp/glaser-${id}.html\` and read its JSON. Where the playbook says a browser, a screenshot or a URL, the file IS the page; where it names a sub-command to run, name it for the user instead (a Glaser verb of the same name, picked on the canvas). Where it wants a snapshot persisted, skip it. Write the report the playbook describes, scoped to the target and ordered by what to fix first; when it wants sub-agents and the user allows them, use them. Then glaser_done. Never open a draft or change the page: this verb only judges it.`,
+    ].join("\n");
+  }
   if (spec.mode === "in-place") {
     return [
       `DELIVERABLE: the target reworked IN PLACE, as one edit draft the user watches. draft_open {from: "${id}"} seeds a draft from the viewport and locks it; draft_replace the target subtree (or draft_set the root's styles when the page itself is the target) with the reworked version; draft_finalize lands it in place as one undo step. One draft, one finalize. Do not open a second viewport and do not use replace_viewport or ingest.`,

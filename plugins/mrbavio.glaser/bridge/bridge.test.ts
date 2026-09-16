@@ -109,7 +109,7 @@ describe("glaser host part", () => {
     await activate(host);
     // The browser part registers glaser_pick; the host part these two.
     expect(tools.map((t) => t.name)).toEqual([VERB_TOOL, SESSION_TOOL]);
-    expect(manifest.contributes.tools).toEqual([VERB_TOOL, SESSION_TOOL, "glaser_pick", "glaser_done"]);
+    expect(manifest.contributes.tools).toEqual([VERB_TOOL, SESSION_TOOL, "glaser_pick", "glaser_done", "glaser_html"]);
     expect(tools.every((t) => t.annotations?.readOnlyHint === true)).toBe(true);
     expect(prompts.map((p) => p.name)).toEqual(VERBS.map((v) => promptName(v.verb)));
     expect(new Set(prompts.map((p) => p.name))).toEqual(new Set(manifest.contributes.prompts));
@@ -280,6 +280,24 @@ describe("glaser host part", () => {
     expect(text).toContain("glaser_done");
   });
 
+  test("a report verb (critique, audit): the rendered page through glaser_html and the skill's own detector; nothing lands", async () => {
+    const { host, prompts } = fakeHost(
+      state({ elementId: "html_root", viewportId: "vp_pricing", itemIds: ["vp_pricing"] }),
+    );
+    await activate(host);
+    const names = prompts.map((p) => p.name);
+    expect(names).toContain("glaser-critique");
+    expect(names).toContain("glaser-audit");
+    const text = await (prompts.find((p) => p.name === "glaser-audit")!.build as Build)({});
+    expect(text).toContain("DELIVERABLE: THE REPORT, in chat — nothing lands");
+    expect(text).toContain('glaser_html {viewport: "vp_pricing"}');
+    expect(text).toContain(`${skill}/scripts/impeccable detect --json /tmp/glaser-vp_pricing.html`);
+    expect(text).toContain("Never open a draft");
+    expect(text).not.toContain("VARIANTS");
+    expect(text).not.toContain("draft_open {from:");
+    expect(text).toContain("The audit playbook.");
+  });
+
   test("instructionsText and stateSlice are plain", () => {
     expect(instructionsText("Base.", null)).toMatch(/^Base\. NOTE: the Impeccable skill is NOT installed/);
     expect(instructionsText("Base.", { dir: "/s", version: null })).toBe("Base. Impeccable was found at /s.");
@@ -306,6 +324,7 @@ describe("glaser host part", () => {
       playbook: "p",
       craftFloor: "f",
       skillVersion: null,
+      skillDir: "/skill",
     });
     expect(text.startsWith("# Glaser: bolder\n")).toBe(true);
     expect(text).not.toContain("THE USER'S BRIEF");

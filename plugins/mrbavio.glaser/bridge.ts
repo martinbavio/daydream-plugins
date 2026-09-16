@@ -133,7 +133,7 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
   host.registerTool({
     name: VERB_TOOL,
     title: "Glaser verb",
-    description: `The playbook for one design verb over a viewport on the canvas, with the target resolved from the selection (or the arguments) and the deliverable spelled out — call it, then follow it. Verbs: ${verbs.join(", ")}. ${VERBS.filter((v) => v.mode === "variants").length} of them open draft variants beside the source, the rest rework it in place. After a canvas pick, pass the pick's viewport and element.`,
+    description: `The playbook for one design verb over a viewport on the canvas, with the target resolved from the selection (or the arguments) and the deliverable spelled out — call it, then follow it. Verbs: ${verbs.join(", ")}. ${VERBS.filter((v) => v.mode === "variants").length} of them open draft variants beside the source, ${VERBS.filter((v) => v.mode === "in-place").length} rework it in place, and critique and audit answer a report over the rendered page (glaser_html + Impeccable's detector) and land nothing. After a canvas pick, pass the pick's viewport and element.`,
     inputSchema: {
       verb: z.enum(verbs as [string, ...string[]]).describe("The verb."),
       ...TARGET_ARGS,
@@ -192,5 +192,6 @@ async function build(
     playbook,
     craftFloor,
     skillVersion: version,
+    skillDir: dir,
   });
 }

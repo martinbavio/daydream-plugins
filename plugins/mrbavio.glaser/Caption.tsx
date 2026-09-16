@@ -11,7 +11,13 @@ import { classPrefix } from "./styles";
  * Drawn in the screen slot from the target's rect — above an element,
  * inside the top-left corner of a whole page (the title bar sits above
  * that). Subscribe in compute, read layout in apply (decisions.md #33). */
-export default function createCaption(dd: DaydreamApi, session: Session) {
+export default function createCaption(
+  dd: DaydreamApi,
+  session: Session,
+  /** What an agent is doing with the verb while the pick is taken:
+   * "building" for the verbs that land, "reviewing" for a report. */
+  working: (verb: string) => string = () => "building",
+) {
   const [box, setBox] = createSignal<OverlayRect | null>(null);
 
   createEffect(
@@ -37,7 +43,7 @@ export default function createCaption(dd: DaydreamApi, session: Session) {
     if (phase.kind === "idle") return "";
     if (phase.kind === "waiting") return `${phase.pick.verb} · waiting for an agent`;
     return phase.of === null
-      ? `${phase.pick.verb} · building`
+      ? `${phase.pick.verb} · ${working(phase.pick.verb)}`
       : `${phase.pick.verb} · ${phase.landed} of ${phase.of}`;
   };
   const whole = () => {

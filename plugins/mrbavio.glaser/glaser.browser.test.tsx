@@ -20,7 +20,7 @@ import {
   type MountedPlugin,
 } from "@daydream/plugin-testing";
 
-import activate, { DONE_TOOL, PICK_TOOL } from "./index";
+import activate, { DONE_TOOL, HTML_TOOL, PICK_TOOL } from "./index";
 import rawManifest from "./manifest.json";
 import { SESSION_KEY } from "./session";
 import { variantMarker } from "./variants";
@@ -135,7 +135,7 @@ describe("mrbavio.glaser in the shell", () => {
     expect(pickerEl()!.closest("[data-plugin-overlay-slot]")!.getAttribute("data-plugin-overlay-slot")).toBe("overlay.interactive");
     expect(verbs()).toEqual([
       "bolder", "quieter", "typeset", "layout", "colorize", "delight",
-      "distill", "polish", "clarify", "animate", "adapt", "end session",
+      "distill", "polish", "clarify", "animate", "adapt", "critique", "audit", "end session",
     ]);
     expect(document.activeElement).toBe(pickerEl()!.querySelector("input"));
 
@@ -316,6 +316,36 @@ describe("mrbavio.glaser in the shell", () => {
     mounted.store.landItems([ok]);
     await settle();
     expect((mounted.store.document.items.find((i) => i.id === ok.id) as DreamViewport).payload.root.label).toBe("Pricing · bolder 2/3 · layout 1/1");
+  });
+
+  test("glaser_html renders the viewport as one standalone page; a report verb captions as reviewing", async () => {
+    const doc = fixtureDocument();
+    const viewport = doc.items[0] as DreamViewport;
+    const { host } = fakeHost();
+    mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
+    const reply = (await tool(HTML_TOOL).run({ viewport: viewport.id })) as { viewportId: string; html: string; bytes: number };
+    expect(reply.viewportId).toBe(viewport.id);
+    expect(reply.html.startsWith("<!doctype html>")).toBe(true);
+    expect(reply.html).toContain("<style>");
+    expect(reply.html).toContain("</body></html>");
+    expect(reply.bytes).toBe(reply.html.length);
+    // The mount is gone once read: no live iframe left behind.
+    await settle();
+    expect(document.querySelectorAll("iframe").length).toBe(0);
+    await expect(tool(HTML_TOOL).run({ viewport: "nope" })).rejects.toThrow(/no viewport/);
+
+    select(viewport.payload.root.id);
+    run("mrbavio.glaser.pick");
+    await settle();
+    pickerEl()!.querySelector<HTMLElement>('[data-verb="audit"]')!.click();
+    await settle();
+    expect(caption()!.textContent).toBe("audit · waiting for an agent");
+    await pickTool().run({});
+    await settle();
+    expect(caption()!.textContent).toBe("audit · reviewing");
+    await tool(DONE_TOOL).run({});
+    await settle();
+    expect(caption()).toBeNull();
   });
 
   test("adopt sits in a variant's title bar: its page replaces the source, the round is removed, one undo step", async () => {
