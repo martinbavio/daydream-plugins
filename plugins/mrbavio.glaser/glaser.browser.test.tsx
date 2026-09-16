@@ -141,11 +141,11 @@ describe("mrbavio.glaser in the shell", () => {
 
     type("bold");
     expect(verbs()).toEqual(["bolder"]);
-    // The rest of the line is the brief, shown under the field, and the
-    // list stays pinned to the verb.
+    // The rest of the line is the brief; the list stays pinned to the
+    // verb, and nothing echoes the field.
     type("bolder keep the photo, louder CTA");
     expect(verbs()).toEqual(["bolder"]);
-    expect(pickerEl()!.querySelector<HTMLElement>(".glaser-picker-brief")!.textContent).toBe("keep the photo, louder CTA");
+    expect(pickerEl()!.querySelector(".glaser-picker-brief")).toBeNull();
     key(pickerEl()!.querySelector("input")!, { key: "Enter" });
     await settle();
     expect(pickerEl()).toBeNull();

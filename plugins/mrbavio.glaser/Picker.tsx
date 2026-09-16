@@ -105,11 +105,6 @@ export default function createPicker(dd: DaydreamApi, entries: readonly PickerEn
             }}
             onKeyDown={onKeyDown}
           />
-          <Show when={parseQuery(query()).brief !== ""}>
-            <div class={`${classPrefix}-picker-brief`} data-brief={parseQuery(query()).brief}>
-              {parseQuery(query()).brief}
-            </div>
-          </Show>
           <ul class={`${classPrefix}-picker-list`} role="listbox">
             <For each={matches()}>
               {(entry, i) => (
