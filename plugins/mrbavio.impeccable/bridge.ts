@@ -90,7 +90,7 @@ export function watchCommand(file: string): string {
 /** What impeccable_session answers: the watch command and the loop. */
 export function sessionText(dataFile: string): string {
   return [
-    "IMPECCABLE SESSION: the user picks verbs on the canvas; you wait, wake, do the verb, wait again. No typing in between.",
+    "DESIGN SESSION on the Daydream canvas (the plugin's own loop — not the /impeccable skill's live mode): the user picks verbs on the canvas; you wait, wake, do the verb, wait again. No typing in between.",
     "",
     `THE WATCH — it exits when the plugin's storage file changes, printing it. The path is absolute; run it from anywhere:`,
     "",
@@ -186,7 +186,7 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
     name: SESSION_TOOL,
     title: "Impeccable session",
     description:
-      "Start an Impeccable session: answers the watch command that wakes you when the user picks a verb on the canvas, and the loop to run — wait, impeccable_pick, impeccable_verb, wait again. Call it when the user asks for a session; then run the watch.",
+      "Start a design session on the Daydream canvas: answers the watch command that wakes you when the user picks a verb on the canvas, and the loop to run — wait, impeccable_pick, impeccable_verb, wait again. Call it when the user asks for a session (a design session, an Impeccable session); then run the watch. Not the /impeccable skill's live mode: the canvas is the page.",
     inputSchema: {},
     annotations: { readOnlyHint: true },
     run: () => ({ text: sessionText(host.plugin.dataFile) }),

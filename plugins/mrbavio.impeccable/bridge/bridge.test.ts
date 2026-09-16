@@ -275,6 +275,8 @@ describe("impeccable host part", () => {
     expect(text).toContain("f='/served/.daydream/plugin-data/mrbavio.impeccable.json'");
     expect(text).toMatch(/cksum/);
     expect(text).toContain("impeccable_pick");
+    expect(text).toContain("DESIGN SESSION on the Daydream canvas");
+    expect(text).toContain("not the /impeccable skill");
     expect(text).toContain("THE WATCH DOES NOT RUN DURING THIS STATE");
     expect(text).toContain("call impeccable_pick FIRST");
     expect(text).toContain("run_in_background: true");
