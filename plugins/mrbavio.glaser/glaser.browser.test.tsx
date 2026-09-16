@@ -141,6 +141,18 @@ describe("mrbavio.glaser in the shell", () => {
 
     type("bold");
     expect(verbs()).toEqual(["bolder"]);
+    // Tab completes the word to the highlighted verb, caret after a space.
+    key(pickerEl()!.querySelector("input")!, { key: "Tab" });
+    expect(pickerEl()!.querySelector("input")!.value).toBe("bolder ");
+    expect(verbs()).toEqual(["bolder"]);
+    // Tab with a brief already typed keeps it; on a fresh field with
+    // nothing matched it does nothing.
+    type("qui but keep the photo");
+    key(pickerEl()!.querySelector("input")!, { key: "Tab" });
+    expect(pickerEl()!.querySelector("input")!.value).toBe("quieter but keep the photo");
+    type("zzz");
+    key(pickerEl()!.querySelector("input")!, { key: "Tab" });
+    expect(pickerEl()!.querySelector("input")!.value).toBe("zzz");
     // The rest of the line is the brief; the list stays pinned to the
     // verb, and nothing echoes the field.
     type("bolder keep the photo, louder CTA");

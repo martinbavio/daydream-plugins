@@ -70,6 +70,16 @@ export default function createPicker(dd: DaydreamApi, entries: readonly PickerEn
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
       setIndex(list.length === 0 ? 0 : (index() - 1 + list.length) % list.length);
+    } else if (event.key === "Tab") {
+      // Tab completes the first word to the highlighted verb and leaves
+      // the caret after a space, ready for the brief; the brief already
+      // typed is kept. Nothing highlighted: nothing to complete.
+      event.preventDefault();
+      const chosen = list[index()];
+      if (chosen === undefined) return;
+      const { brief } = parseQuery(query());
+      setQuery(brief === "" ? `${chosen.id} ` : `${chosen.id} ${brief}`);
+      setIndex(0);
     } else if (event.key === "Enter") {
       event.preventDefault();
       const chosen = list[index()];
