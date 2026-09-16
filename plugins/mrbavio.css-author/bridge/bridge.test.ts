@@ -51,6 +51,7 @@ function fakeHost(dir: string): { host: DaydreamHostApi; got: Recorded } {
       state: () => Promise.reject(new Error("no tab")),
       measure: () => Promise.reject(new Error("no tab")),
       lint: () => Promise.reject(new Error("no tab")),
+      tool: () => Promise.reject(new Error("no tab")),
     },
   };
   return { host, got };
