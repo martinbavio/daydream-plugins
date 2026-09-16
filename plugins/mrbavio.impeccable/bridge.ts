@@ -22,6 +22,7 @@ import { z } from "zod";
 
 import type { DaydreamHostApi } from "@daydream/plugin-api/host";
 
+import type * as Detect from "./bridge/detect.ts";
 import type * as Skill from "./bridge/skill.ts";
 import type * as Verbs from "./bridge/verbs.ts";
 
@@ -33,17 +34,19 @@ import type * as Verbs from "./bridge/verbs.ts";
  * with its own query is the kernel's trick, applied one level down.
  * (variants.ts, which verbs.ts imports statically, still needs a restart
  * when it changes; it rarely does.) */
-async function helpers(): Promise<{ skill: typeof Skill; verbs: typeof Verbs }> {
+async function helpers(): Promise<{ skill: typeof Skill; verbs: typeof Verbs; detect: typeof Detect }> {
   const t = Date.now();
-  const [skill, verbs] = await Promise.all([
+  const [skill, verbs, detect] = await Promise.all([
     import(/* @vite-ignore */ `./bridge/skill.ts?t=${t}`) as Promise<typeof Skill>,
     import(/* @vite-ignore */ `./bridge/verbs.ts?t=${t}`) as Promise<typeof Verbs>,
+    import(/* @vite-ignore */ `./bridge/detect.ts?t=${t}`) as Promise<typeof Detect>,
   ]);
-  return { skill, verbs };
+  return { skill, verbs, detect };
 }
 
 export const VERB_TOOL = "impeccable_verb";
 export const SESSION_TOOL = "impeccable_session";
+export const DETECT_TOOL = "impeccable_detect";
 
 interface VerbArgs {
   viewport?: string;
@@ -124,7 +127,7 @@ export function instructionsText(
 }
 
 export default async function activate(host: DaydreamHostApi): Promise<void> {
-  const { skill, verbs } = await helpers();
+  const { skill, verbs, detect } = await helpers();
   const { candidateSkillDirs, findSkillDir, readReference, SKILL_MISSING, skillVersion } = skill;
   const { composePrompt, promptName, resolveTarget, stateSlice, variantCount, VERBS } = verbs;
   const dir = await findSkillDir();
@@ -187,6 +190,35 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
     inputSchema: {},
     annotations: { readOnlyHint: true },
     run: () => ({ text: sessionText(host.plugin.dataFile) }),
+  });
+
+  // The detector as one call (decisions.md #72): the tab renders, the
+  // host writes and runs, the agent reads findings — no page in between.
+  host.registerTool({
+    name: DETECT_TOOL,
+    title: "Impeccable detect",
+    description:
+      "Impeccable's detector over a viewport as the canvas renders it: the page is exported by the tab (impeccable_html), written to a file by the host, scanned by the installed skill's own launcher, and the findings answered — {viewportId, file, target?, count, byRule, findings: [{antipattern, name, severity, category, snippet}]}. With element, the export is pruned to that element and its ancestors, so every finding is the target's. The evidence step of critique and audit, in one call; the file stays on disk for you to open.",
+    inputSchema: {
+      viewport: z.string().describe("A viewport id from canvas_state"),
+      element: z.string().optional().describe("An element id inside it: scan the target alone, in its cascade"),
+    },
+    annotations: { readOnlyHint: true },
+    run: async ({ viewport, element }) => {
+      const skillDir = await findSkillDir();
+      if (skillDir === null) return { text: SKILL_MISSING, isError: true };
+      const report = await detect.detect({
+        viewportId: viewport,
+        ...(element === undefined ? {} : { element }),
+        skillDir,
+        html: (input) => host.tab.tool("impeccable_html", input),
+      });
+      const rules = Object.entries(report.byRule).map(([rule, n]) => `${n} ${rule}`).join(", ");
+      return {
+        text: `${report.count} finding${report.count === 1 ? "" : "s"}${rules === "" ? "" : ` — ${rules}`} over ${report.file}${report.target === undefined ? "" : ` (pruned to ${report.target.id}: ${report.target.kept} elements kept, ${report.target.pruned} removed)`}.\n${JSON.stringify(report.findings)}`,
+        structured: report as unknown as Record<string, unknown>,
+      };
+    },
   });
 
   for (const spec of VERBS) {

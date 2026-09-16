@@ -9,7 +9,7 @@ import type {
   HostToolRegistration,
 } from "@daydream/plugin-api/host";
 
-import activate, { instructionsText, SESSION_TOOL, VERB_TOOL, watchCommand } from "../bridge.ts";
+import activate, { DETECT_TOOL, instructionsText, SESSION_TOOL, VERB_TOOL, watchCommand } from "../bridge.ts";
 import { parseVariantMarker } from "../variants.ts";
 import manifest from "../manifest.json" with { type: "json" };
 import { candidateSkillDirs, findSkillDir, SKILL_MISSING, skillVersion } from "./skill.ts";
@@ -56,6 +56,7 @@ function fakeHost(
       state: () => (state instanceof Error ? Promise.reject(state) : Promise.resolve(state)),
       measure: () => Promise.reject(new Error("no tab")),
       lint: () => Promise.reject(new Error("no tab")),
+      tool: (name, input) => Promise.resolve({ ran: name, input, html: "<!doctype html><html></html>" }),
     },
   };
   return { host, prompts, tools, instructions: () => instructions };
@@ -108,8 +109,8 @@ describe("impeccable host part", () => {
     const { host, prompts, tools, instructions } = fakeHost(state(null));
     await activate(host);
     // The browser part registers impeccable_pick; the host part these two.
-    expect(tools.map((t) => t.name)).toEqual([VERB_TOOL, SESSION_TOOL]);
-    expect(manifest.contributes.tools).toEqual([VERB_TOOL, SESSION_TOOL, "impeccable_pick", "impeccable_done", "impeccable_html"]);
+    expect(tools.map((t) => t.name)).toEqual([VERB_TOOL, SESSION_TOOL, DETECT_TOOL]);
+    expect(manifest.contributes.tools).toEqual([VERB_TOOL, SESSION_TOOL, DETECT_TOOL, "impeccable_pick", "impeccable_done", "impeccable_html"]);
     expect(tools.every((t) => t.annotations?.readOnlyHint === true)).toBe(true);
     expect(prompts.map((p) => p.name)).toEqual(VERBS.map((v) => promptName(v.verb)));
     expect(new Set(prompts.map((p) => p.name))).toEqual(new Set(manifest.contributes.prompts));
@@ -290,8 +291,9 @@ describe("impeccable host part", () => {
     expect(names).toContain("impeccable-audit");
     const text = await (prompts.find((p) => p.name === "impeccable-audit")!.build as Build)({});
     expect(text).toContain("DELIVERABLE: THE REPORT, in chat — nothing lands");
-    expect(text).toContain('impeccable_html {viewport: "vp_pricing"}');
-    expect(text).toContain(`${skill}/scripts/impeccable detect --json /tmp/impeccable-vp_pricing.html`);
+    expect(text).toContain('impeccable_detect {viewport: "vp_pricing"}');
+    expect(text).toContain("ONE CALL");
+    expect(text).toContain("Do not export, write or run anything yourself");
     expect(text).toContain("Never open a draft");
     expect(text).not.toContain("VARIANTS");
     expect(text).not.toContain("draft_open {from:");
@@ -301,9 +303,9 @@ describe("impeccable host part", () => {
     const scoped = fakeHost(state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [] }));
     await activate(scoped.host);
     const on = await (scoped.prompts.find((p) => p.name === "impeccable-critique")!.build as Build)({});
-    expect(on).toContain('impeccable_html {viewport: "vp_pricing", element: "el_card"}');
+    expect(on).toContain('impeccable_detect {viewport: "vp_pricing", element: "el_card"}');
     expect(on).toContain("PRUNED to the target");
-    expect(on).toContain("not npx");
+    expect(on).toContain("npx");
   });
 
   test("instructionsText and stateSlice are plain", () => {

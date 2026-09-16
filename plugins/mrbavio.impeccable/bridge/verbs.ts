@@ -255,15 +255,14 @@ function deliverableSection(input: PromptInput): string {
   const { spec, target, variants } = input;
   const id = target?.viewport.id ?? "<viewport id>";
   if (spec.mode === "report") {
-    const detect = `${input.skillDir}/scripts/impeccable detect --json`;
     const el = target?.elementId ?? null;
-    const call = el === null ? `impeccable_html {viewport: "${id}"}` : `impeccable_html {viewport: "${id}", element: "${el}"}`;
+    const call = el === null ? `impeccable_detect {viewport: "${id}"}` : `impeccable_detect {viewport: "${id}", element: "${el}"}`;
     const scope =
       el === null
         ? ""
-        : ` That page is PRUNED to the target: its subtree and the ancestors it inherits from, nothing else — so every finding the detector reports is the target's (it names text and colours, never elements). Judge the target as part of its page — the source's styles are in the file — but report on the target.`;
+        : ` The page it scans is PRUNED to the target: its subtree and the ancestors it inherits from, nothing else — so every finding is the target's (the detector names text and colours, never elements). Judge the target as part of its page — the answer's \`file\` is the page, open it when you need to see — but report on the target.`;
     return [
-      `DELIVERABLE: THE REPORT, in chat — nothing lands on the canvas. The playbook's evidence step is Impeccable's detector, and it runs over the RENDERED PAGE, not the JSON: call ${call} — the viewport as one standalone HTML file, styles and fonts inline, exactly as the canvas renders it — write it to a file (say /tmp/impeccable-${id}.html; a harness that saved the answer to a file for you already has it on disk), then run EXACTLY \`${detect} /tmp/impeccable-${id}.html\` — that launcher is the installed skill's own detector; not npx, not a global \`impeccable\`, which may be another version — and read its JSON.${scope} Where the playbook says a browser, a screenshot or a URL, the file IS the page; where it names a sub-command to run, name it for the user instead (a Impeccable verb of the same name, picked on the canvas). Where it wants a snapshot persisted, skip it. Write the report the playbook describes, scoped to the target and ordered by what to fix first; when it wants sub-agents and the user allows them, use them. Then impeccable_done. Never open a draft or change the page: this verb only judges it.`,
+      `DELIVERABLE: THE REPORT, in chat — nothing lands on the canvas. The playbook's evidence step is Impeccable's detector over the RENDERED PAGE, and it is ONE CALL: ${call} — the host exports the page as the canvas renders it, writes it to a file, runs the installed skill's own detector over it and answers the findings (antipattern, severity, snippet) with the file's path. Do not export, write or run anything yourself; do not use npx or a global \`impeccable\`.${scope} Where the playbook says a browser, a screenshot or a URL, that file IS the page; where it names a sub-command to run, name it for the user instead (an Impeccable verb of the same name, picked on the canvas). Where it wants a snapshot persisted, skip it. Write the report the playbook describes, scoped to the target and ordered by what to fix first; when it wants sub-agents and the user allows them, use them. Then impeccable_done. Never open a draft or change the page: this verb only judges it.`,
     ].join("\n");
   }
   if (spec.mode === "in-place") {
