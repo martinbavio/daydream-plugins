@@ -294,7 +294,7 @@ function conditionRefused(prelude: string, core: SheetRules): boolean {
   return core.conditionPreludeProblem(prelude) !== null;
 }
 
-const PRELUDE_HAZARD = /[{};"']|\/\*|\*\/|[ -]/;
+const PRELUDE_HAZARD = /[{};"']|\/\*|\*\/|[\u0000-\u001f]/;
 
 /** The layer grammar's lexical checks over a `@supports` prelude — one
  * grammar, so a refused prelude never becomes sheet text. */
