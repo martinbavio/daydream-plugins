@@ -15,7 +15,7 @@ tags:
   ]
 tier: procedure
 status: v1 draft from general expertise — to be corrected against the maintainer's notes; hard budget about 1,200 tokens
-summary: Decision procedures against the three judgment failures — which formatting context, whether a declaration is needed at all, where in the cascade to set it (a rule or the element) — and the author → land → fix → land loop.
+summary: Decision procedures against the three judgment failures — which formatting context, whether a declaration is needed at all, where in the cascade to set it — and the author → land → fix → land loop.
 ---
 
 ## 1. Which formatting context
@@ -35,17 +35,17 @@ Ask four questions; if any answers yes, do not write it.
 
 1. **Is it the initial value of a non-inherited property?** `position: static`, `flex-direction: row`, `width: auto`, `opacity: 1`. An initial in base styles changes nothing there; the static lint reports the common non-inherited ones. An INHERITED property restated at its initial (`line-height: normal` under a parent's 1.5) is a real reset — judge it under question 2.
 2. **Is it inherited from an ancestor already?** `color`, `font-*`, `line-height`, `text-align`, `letter-spacing` flow down; a child restating its parent's value is noise. Set them once, high.
-3. **Does the UA stylesheet already set it on this tag?** `div`, `p`, `section` are block; `h1` is bold and large; `p` and `h*` carry vertical margins; `ul` carries left padding; `body` carries 8px margin; `img` is inline; `button` has its own font, padding and border. Restate only to CHANGE it.
+3. **Does the UA stylesheet already set it on this tag?** `h1` is bold and large; `p` and `h*` carry vertical margins; `ul` carries left padding; `body` carries 8px margin; `img` is inline; `button` has its own font, padding and border. Restate only to CHANGE it.
 4. **Is it implied or made inert by another declaration?** `align-items` on a box that is not flex or grid, `flex-wrap` without `display: flex`, `top` or `inset` on a static box, `width: 100%` on a block child, `justify-content` where `gap` already does the job, `min-width: 0` where nothing overflows. Drop it.
 
 Then: would the page change if this line went — at this width or at another? If at none, the necessity lint will report it dead; remove it before landing, not after.
 
 ## 3. Cascade reasoning
 
-- Set inherited properties (font, color, line-height) on the nearest common ancestor — usually `html` — and let inheritance work. Do not restate them on children.
+- Set inherited properties (font, color, line-height) on the nearest common ancestor — usually `html` — and let inheritance work.
 - Layout goes on the container, sizing on the items. A child's `margin` fights a parent's `gap`: pick one.
 - A conditional layer overrides the base ONLY for what changes under that condition. A layer restating the base is dead weight; a layer per breakpoint nobody asked for is invented responsiveness. Write the widest-reaching state as the base.
-- No `!important`, ever. Shared styling is a rule, its selector naming who shares it; a one-off is on the element's map, which is inline and beats every rule — an element's conditional layer beats a rule's `@media`. Never restate on an element what a rule sets: the redundancy finding blocks it. Write a rule before the elements it styles.
+- No `!important`, ever. Shared styling is a rule, its selector naming who shares it; a one-off is the element's own map — inline, above every rule, its conditional layer above a rule's `@media`. Never restate on an element what a rule sets (the lint blocks it); write a rule before the elements it styles.
 - One reason per element. A wrapper that exists only to carry a declaration gives it to its child or parent and disappears.
 
 ## 4. The loop
