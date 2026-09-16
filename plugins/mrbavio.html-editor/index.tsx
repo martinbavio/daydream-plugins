@@ -1,6 +1,7 @@
 // mrbavio.html-editor — the HTML pane as a plugin (decisions.md #58): the
-// selected element's subtree as source, STRUCTURE ONLY — tag, attributes,
-// text, children; never a style, a class or an id — in CodeMirror, applied
+// selected element's subtree as source, STRUCTURE ONLY — tag, attributes
+// (an author's class and id among them, decisions.md #71), text,
+// children; never a style, a label or the model id — in CodeMirror, applied
 // LIVE as you type through an item transaction that commits as one undo
 // step when the editor is left, identities kept by
 // content-tag-and-position matching (reconcile.ts). With it, a

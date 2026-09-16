@@ -7,16 +7,21 @@
 //
 // The model as it is (packages/plugin-api/document.ts): one `text` per
 // element rendered before its children, so mixed inline runs become
-// `span` children; a closed tag allowlist (`core.tagProblem`); three
-// attributes (`core.attrProblem`); styles as a verbatim map, so inline
-// `style` is the only styling a paste keeps — `class`, `id` and
-// stylesheets go, counted, until the selectors step.
+// `span` children; a closed tag allowlist (`core.tagProblem`); the
+// attribute allowlist (`core.attrProblem`), `class`, `id` and `data-*`
+// among them since the selectors step; styles as a verbatim map on the
+// element, and the page's `<style>` blocks as the viewport's SHEET
+// (decisions.md #71, stylesheet.ts) — flat rules the browser parsed, a
+// `@font-face` lifted into `fonts`. A linked stylesheet is still lost: a
+// fetch is a network call beyond the host.
 
 import type {
   CoreApi,
   DreamElement,
   DreamViewport,
+  StyleRule,
 } from "@daydream/plugin-api";
+import type { FontFace } from "@daydream/plugin-api/document";
 
 import { count, emptyReport, type PasteReport } from "./report";
 import {
@@ -24,8 +29,10 @@ import {
   parseStyleAttribute,
   preservesWhitespace,
 } from "./styleAttribute";
+import { sheetFromStyleText } from "./stylesheet";
 import {
   dropRule,
+  insideDroppedTag,
   insideParagraph,
   isDroppedTag,
   resolveTag,
@@ -92,17 +99,15 @@ export function convertDocument(
   position: { x: number; y: number },
 ): Conversion {
   const ctx: Context = { core, report: emptyReport(), dataImages: [] };
-  // The head is packaging — dropped whole — except that a stylesheet or
-  // a script in it is content the page had (and the parser hoists a
-  // fragment's leading `<style>` there). Count them like ones in the body.
-  for (const tag of ["style", "script"]) {
-    const n = doc.head.querySelectorAll(tag).length;
-    if (n > 0) count(ctx.report.dropped, tag, n);
-  }
+  // The head is packaging — dropped whole — except that a script in it is
+  // content the page had. Count it like one in the body.
+  const scripts = doc.head.querySelectorAll("script").length;
+  if (scripts > 0) count(ctx.report.dropped, "script", scripts);
   // A linked stylesheet, wherever it sits, is exactly what a class-styled
   // fragment lost; other links (icons, preloads) are packaging.
   const sheets = doc.querySelectorAll('link[rel~="stylesheet"]').length;
   if (sheets > 0) count(ctx.report.dropped, "link", sheets);
+  const { sheet, fonts } = sheetOf(doc, ctx);
   const html = doc.documentElement;
   const root: DreamElement = {
     id: core.generateId(),
@@ -124,9 +129,54 @@ export function convertDocument(
     payload: {
       root,
       ...(title === "" ? {} : { meta: { title } }),
+      ...(fonts.length === 0 ? {} : { fonts }),
+      ...(sheet.length === 0 ? {} : { sheet }),
     },
   };
   return { item, report: ctx.report, dataImages: ctx.dataImages };
+}
+
+/** The XHTML namespace: an SVG `<style>` styles the drawing, which goes
+ * with its tag. */
+const HTML_NS = "http://www.w3.org/1999/xhtml";
+
+/**
+ * Every `<style>` in head or body (the parser hoists a fragment's leading
+ * one into the head), in document order — a page's cascade is its
+ * stylesheets in order — each parsed by the browser as the sheet it is
+ * (an unterminated block in one never swallows the next, exactly as the
+ * page would have it) and the results laid end to end as ONE sheet. The
+ * element itself is consumed here, not dropped: tags.ts treats it as
+ * packaging on the tree walk. A `<style>` under a dropped element — a
+ * `<noscript>`'s, which the page never applies while scripts run — goes
+ * with that element, counted once under its tag. A `media` attribute is
+ * the sheet's own `@media` around everything in it — `<style
+ * media="print">` must not land as screen rules — so it heads every
+ * rule's `conditions`, where the kernel's evaluator answers it.
+ */
+function sheetOf(
+  doc: Document,
+  ctx: Context,
+): { sheet: StyleRule[]; fonts: FontFace[] } {
+  const sheet: StyleRule[] = [];
+  const fonts: FontFace[] = [];
+  for (const element of Array.from(doc.querySelectorAll("style"))) {
+    if (element.namespaceURI !== HTML_NS || insideDroppedTag(element)) continue;
+    const media = element.getAttribute("media")?.trim() ?? "";
+    const walked = sheetFromStyleText(
+      element.textContent ?? "",
+      ctx.core,
+      media === "" ? [] : [`@media ${media}`],
+    );
+    sheet.push(...walked.rules);
+    fonts.push(...walked.fonts);
+    ctx.report.important += walked.important;
+    for (const [key, n] of Object.entries(walked.dropped))
+      count(ctx.report.dropped, key, n);
+    for (const [key, n] of Object.entries(walked.stripped))
+      count(ctx.report.stripped, key, n);
+  }
+  return { sheet, fonts };
 }
 
 /** Every element in a tree, the report's "landed" figure. */

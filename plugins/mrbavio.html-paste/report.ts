@@ -1,24 +1,32 @@
 // What a paste lost (decisions.md #56). The report is the INSTRUMENT for
-// the steps after this one — an HTML editor, wider allowlists, selectors,
-// a per-viewport stylesheet — each judged by pasting the same fragments
-// and watching these counts fall. Names, never just totals: a later step
-// wants to know it was `table` and `class`, not "three things".
+// the steps after this one — each judged by pasting the same fragments
+// and watching these counts fall. The selectors step (decisions.md #71)
+// was measured by it: `class`, `id` and the `<style>` block left these
+// buckets, and the at-rules a sheet still loses (`@import`, `@keyframes`,
+// `@layer`, `@property`) took their place under `dropped`, by name, so
+// the next step is measured by the same instrument. Names, never just
+// totals: a later step wants to know it was `table` and `@layer`, not
+// "three things".
 
 export interface PasteReport {
   /** Elements whose tag the kernel cannot hold, kept as `span` or `div`:
    * source tag → count. */
   downgraded: Record<string, number>;
-  /** Elements removed with their content: tag → count. A `style` element
-   * counts here too — its text is dropped today, the selectors step will
-   * take it — and so does everything past the depth cap, under
+  /** What was removed with its content, by name → count: an element's
+   * tag; a stylesheet's at-rule by keyword (`@import`, `@keyframes`,
+   * `@layer`, a `@font-face` that would not load, a condition the format
+   * refuses); `rule` for a style rule whose selector the
+   * parser or the format refused; everything past the depth cap, under
    * `deeper than <n>`. */
   dropped: Record<string, number>;
   /** Attributes removed: name → count. `style` never appears whole — it
    * is parsed into the element's styles — but a declaration the renderer
-   * would refuse counts as `style (<property>)`. */
+   * would refuse, inline or in a rule, counts as `style (<property>)`,
+   * and a `@font-face` descriptor the format does not hold as
+   * `@font-face (<descriptor>)`. */
   stripped: Record<string, number>;
-  /** `!important` flags removed from inline declarations: the format has
-   * no importance (decisions.md #38). */
+  /** `!important` flags removed from declarations, inline and in rules:
+   * the format has no importance (decisions.md #38, #71). */
   important: number;
   /** Image sources the `img` could not keep, by reason (`relative`,
    * `http:`, `data:` when vendoring failed, another scheme) → count. The

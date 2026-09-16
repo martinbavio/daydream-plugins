@@ -1,10 +1,17 @@
 {
   "name": "@mrbavio/plugin-html-paste",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "peerDependencies": {
     "@solidjs/web": "2.0.0-rc.0",
     "solid-js": "2.0.0-rc.0"
+  },
+  "dependencies": {
+    "@daydream/plugin-api": "github:mbavio-phota/daydream#bbbc23d66b53aa1ed4f7551191fb14c0f8f949ee&path:packages/plugin-api"
+  },
+  "devDependencies": {
+    "@daydream/plugin-testing": "github:mbavio-phota/daydream#bbbc23d66b53aa1ed4f7551191fb14c0f8f949ee&path:packages/plugin-testing",
+    "vitest": "^4.1.11"
   }
 }

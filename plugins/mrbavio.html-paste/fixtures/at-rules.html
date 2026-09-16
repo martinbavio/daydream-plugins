@@ -1,0 +1,9 @@
+<style>
+  @import url(https://fonts.example/inter.css);
+  @layer base { .spinner { color: red; } }
+  @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+  @property --p { syntax: "<length>"; inherits: false; initial-value: 0px; }
+  @supports (display: grid) { .spinner { display: grid; } }
+  .spinner { animation: spin 1s linear infinite; }
+</style>
+<div class="spinner"></div>

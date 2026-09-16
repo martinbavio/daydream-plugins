@@ -1,6 +1,7 @@
 // The pane's face: structure only, indented two spaces, void elements
 // without end tags, text escaped — and nothing of the styling or the
-// labels (decisions.md #58).
+// labels (decisions.md #58); an author's class and id are attributes like
+// any other (decisions.md #71).
 import { describe, expect, test } from "vitest";
 
 import { createElement } from "@daydream/plugin-testing";
@@ -40,11 +41,12 @@ describe("serializeElement", () => {
     );
   });
 
-  test("styles, conditionals and labels never appear: the pane is structure", () => {
+  test("styles, conditionals, labels and the model id never appear: the pane is structure; an author's class and id are attributes and do", () => {
     const box = createElement({
       tag: "div",
       label: "Hero",
       styles: { display: "grid", color: "red" },
+      attrs: { class: "hero card", id: "top" },
       children: [
         createElement({ tag: "p", text: "x", styles: { margin: "0" } }),
       ],
@@ -53,8 +55,9 @@ describe("serializeElement", () => {
       { condition: "@media (width >= 600px)", styles: { gap: "8px" } },
     ];
     const html = serializeElement(box);
-    expect(html).toBe("<div>\n  <p>x</p>\n</div>");
-    expect(html).not.toMatch(/style|class|id=|Hero|grid|@media/);
+    expect(html).toBe('<div class="hero card" id="top">\n  <p>x</p>\n</div>');
+    expect(html).not.toMatch(/style|Hero|grid|@media/);
+    expect(html).not.toContain(box.id);
   });
 
   test("attributes are written in stored order and quoted; void elements have no end tag", () => {

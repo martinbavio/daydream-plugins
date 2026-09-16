@@ -171,9 +171,14 @@ describe("treeFromNodes", () => {
   });
 
   test("an attribute the kernel rejects is refused, naming the element", () => {
-    expect(refused(el("div", { class: "hero" }))).toBe(
-      `<div class>: ${rules.attrProblem("class", "hero")}`,
+    expect(refused(el("div", { onclick: "x()" }))).toBe(
+      `<div onclick>: ${rules.attrProblem("onclick", "x()")}`,
     );
+    // An author's class and id are attributes (decisions.md #71).
+    expect(parsed(el("div", { class: "hero", id: "top" })).attrs).toEqual({
+      class: "hero",
+      id: "top",
+    });
     expect(refused(el("div", { style: "color: red" }))).toContain("style");
     expect(refused(el("a", { href: "javascript:alert(1)" }))).toContain("href");
     expect(refused(el("img", { src: "http://x.test/a.png" }))).toContain("src");
