@@ -62,7 +62,7 @@ async function stored(
 }
 
 const caption = (): HTMLElement | null =>
-  mounted!.overlay()!.querySelector(".glaser-caption");
+  mounted!.overlay()!.querySelector(".impeccable-caption");
 
 function select(id: string | null): void {
   mounted!.store.setSelectedId(id);
@@ -91,7 +91,7 @@ async function settle(): Promise<void> {
 }
 
 const pickerEl = (): HTMLElement | null =>
-  mounted!.host.querySelector('[role="dialog"][aria-label="Glaser"]');
+  mounted!.host.querySelector('[role="dialog"][aria-label="Impeccable"]');
 const verbs = (): string[] =>
   Array.from(pickerEl()!.querySelectorAll<HTMLElement>("[data-verb]"), (li) => li.dataset["verb"]!);
 
@@ -106,12 +106,12 @@ function key(target: EventTarget, init: KeyboardEventInit): void {
   flush();
 }
 
-describe("mrbavio.glaser in the shell", () => {
+describe("mrbavio.impeccable in the shell", () => {
   test("the manifest declares what the entry registers", () => {
-    expect(manifest.id).toBe("mrbavio.glaser");
+    expect(manifest.id).toBe("mrbavio.impeccable");
     expect(manifest.contributes?.overlays).toEqual(["caption", "picker"]);
-    expect(manifest.contributes?.commands).toEqual(["mrbavio.glaser.pick", "mrbavio.glaser.cancel", "mrbavio.glaser.end-session"]);
-    expect(manifest.contributes?.shortcuts).toEqual({ "Mod+P": "mrbavio.glaser.pick", Escape: "mrbavio.glaser.cancel" });
+    expect(manifest.contributes?.commands).toEqual(["mrbavio.impeccable.pick", "mrbavio.impeccable.cancel", "mrbavio.impeccable.end-session"]);
+    expect(manifest.contributes?.shortcuts).toEqual({ "Mod+P": "mrbavio.impeccable.pick", Escape: "mrbavio.impeccable.cancel" });
     expect(manifest.contributes?.itemActions).toEqual(["adopt"]);
     expect(manifest.contributes?.tools).toContain(PICK_TOOL);
     expect(manifest.unstable).toBeUndefined();
@@ -125,7 +125,7 @@ describe("mrbavio.glaser in the shell", () => {
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
 
     // Nothing selected: the picker declines.
-    expect(run("mrbavio.glaser.pick")).toBe(false);
+    expect(run("mrbavio.impeccable.pick")).toBe(false);
     expect(pickerEl()).toBeNull();
 
     select(grid);
@@ -157,7 +157,7 @@ describe("mrbavio.glaser in the shell", () => {
     // verb, and nothing echoes the field.
     type("bolder keep the photo, louder CTA");
     expect(verbs()).toEqual(["bolder"]);
-    expect(pickerEl()!.querySelector(".glaser-picker-brief")).toBeNull();
+    expect(pickerEl()!.querySelector(".impeccable-picker-brief")).toBeNull();
     key(pickerEl()!.querySelector("input")!, { key: "Enter" });
     await settle();
     expect(pickerEl()).toBeNull();
@@ -196,14 +196,14 @@ describe("mrbavio.glaser in the shell", () => {
     expect(caption()).toBeNull();
   });
 
-  test("an in-place round stays building through unrelated edits and ends when the source's page changes; glaser_done ends any round", async () => {
+  test("an in-place round stays building through unrelated edits and ends when the source's page changes; impeccable_done ends any round", async () => {
     const doc = fixtureDocument();
     const viewport = doc.items[0] as DreamViewport;
     const { host } = fakeHost();
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
 
     select(viewport.payload.root.id);
-    run("mrbavio.glaser.pick");
+    run("mrbavio.impeccable.pick");
     await settle();
     pickerEl()!.querySelector<HTMLElement>('[data-verb="polish"]')!.click();
     await settle();
@@ -225,9 +225,9 @@ describe("mrbavio.glaser in the shell", () => {
     await settle();
     expect(caption()).toBeNull();
 
-    // glaser_done: the agent's word ends a round the canvas cannot see the
+    // impeccable_done: the agent's word ends a round the canvas cannot see the
     // end of (a round that stopped short).
-    run("mrbavio.glaser.pick");
+    run("mrbavio.impeccable.pick");
     await settle();
     pickerEl()!.querySelector<HTMLElement>('[data-verb="bolder"]')!.click();
     await settle();
@@ -247,7 +247,7 @@ describe("mrbavio.glaser in the shell", () => {
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
 
     select(viewport.payload.root.id);
-    expect(run("mrbavio.glaser.pick")).toBe(true);
+    expect(run("mrbavio.impeccable.pick")).toBe(true);
     await settle();
     // Escape in the field closes the picker and picks nothing.
     key(pickerEl()!.querySelector("input")!, { key: "Escape" });
@@ -255,7 +255,7 @@ describe("mrbavio.glaser in the shell", () => {
     expect(pickerEl()).toBeNull();
     expect(files[manifest.id]).toBeUndefined();
 
-    run("mrbavio.glaser.pick");
+    run("mrbavio.impeccable.pick");
     await settle();
     pickerEl()!.querySelector<HTMLElement>('[data-verb="polish"]')!.click();
     await settle();
@@ -264,13 +264,13 @@ describe("mrbavio.glaser in the shell", () => {
     expect((polished["pick"] as { brief?: string }).brief).toBeUndefined();
     expect(caption()!.textContent).toBe("polish · waiting for an agent");
 
-    expect(run("mrbavio.glaser.cancel")).toBe(true);
+    expect(run("mrbavio.impeccable.cancel")).toBe(true);
     expect(await stored(files, 2)).toMatchObject({ pick: null, exit: false });
     await settle();
     expect(caption()).toBeNull();
-    expect(run("mrbavio.glaser.cancel")).toBe(false); // nothing to cancel
+    expect(run("mrbavio.impeccable.cancel")).toBe(false); // nothing to cancel
 
-    run("mrbavio.glaser.pick");
+    run("mrbavio.impeccable.pick");
     await settle();
     pickerEl()!.querySelector<HTMLElement>('[data-verb="end session"]')!.click();
     expect(await stored(files, 3)).toMatchObject({ pick: null, exit: true });
@@ -318,7 +318,7 @@ describe("mrbavio.glaser in the shell", () => {
     expect((mounted.store.document.items.find((i) => i.id === ok.id) as DreamViewport).payload.root.label).toBe("Pricing · bolder 2/3 · layout 1/1");
   });
 
-  test("glaser_html renders the viewport as one standalone page; a report verb captions as reviewing", async () => {
+  test("impeccable_html renders the viewport as one standalone page; a report verb captions as reviewing", async () => {
     const doc = fixtureDocument();
     const viewport = doc.items[0] as DreamViewport;
     const { host } = fakeHost();
@@ -345,19 +345,19 @@ describe("mrbavio.glaser in the shell", () => {
     expect(pruned.target!.pruned).toBeGreaterThan(0);
     const page = new DOMParser().parseFromString(pruned.html, "text/html");
     expect(page.querySelector("style")).not.toBeNull();
-    expect(page.querySelectorAll("[data-glaser-target]").length).toBe(1 + grid.children.length);
+    expect(page.querySelectorAll("[data-impeccable-target]").length).toBe(1 + grid.children.length);
     expect(page.querySelector(`[data-dream-id="${grid.id}"]`)).not.toBeNull();
     // Every element left is an ancestor of the target or inside it.
     const gridNode = page.querySelector(`[data-dream-id="${grid.id}"]`)!;
     for (const el of page.body.querySelectorAll("*")) {
       expect(el.contains(gridNode) || gridNode.contains(el)).toBe(true);
     }
-    expect(page.body.hasAttribute("data-glaser-target")).toBe(false);
+    expect(page.body.hasAttribute("data-impeccable-target")).toBe(false);
     expect(page.body.querySelectorAll("*").length).toBeLessThan(reply.html.split("<").length);
     await expect(tool(HTML_TOOL).run({ viewport: viewport.id, element: "nope" })).rejects.toThrow(/no element/);
 
     select(viewport.payload.root.id);
-    run("mrbavio.glaser.pick");
+    run("mrbavio.impeccable.pick");
     await settle();
     pickerEl()!.querySelector<HTMLElement>('[data-verb="audit"]')!.click();
     await settle();
@@ -379,7 +379,7 @@ describe("mrbavio.glaser in the shell", () => {
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
     await settle();
 
-    const buttons = Array.from(mounted.host.querySelectorAll<HTMLElement>('[data-item-action="mrbavio.glaser:adopt"]'));
+    const buttons = Array.from(mounted.host.querySelectorAll<HTMLElement>('[data-item-action="mrbavio.impeccable:adopt"]'));
     expect(buttons.length).toBe(3); // the source carries none
     expect(buttons.map((b) => b.textContent)).toEqual(["adopt", "adopt", "adopt"]);
     // The second variant's bar: the bars come in item order.

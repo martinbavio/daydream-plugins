@@ -1,7 +1,7 @@
 // The plugin's CSS, mounted once as a <style> (a plugin ships CSS as a
 // string). Quiet: small, sentence case, the chrome's own colours; the
 // caption reads as a note on the target, the picker as a list beside it.
-export const classPrefix = "glaser";
+export const classPrefix = "impeccable";
 
 export const css = `
 .${classPrefix}-caption {

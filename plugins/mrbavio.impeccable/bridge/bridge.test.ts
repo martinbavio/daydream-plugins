@@ -40,7 +40,7 @@ function fakeHost(
     plugin: {
       id: manifest.id,
       dir: "/nowhere",
-      dataFile: "/served/.daydream/plugin-data/mrbavio.glaser.json",
+      dataFile: "/served/.daydream/plugin-data/mrbavio.impeccable.json",
       manifest: manifest as DaydreamHostApi["plugin"]["manifest"],
     },
     registerTool: (t) => void tools.push(t as HostToolRegistration),
@@ -82,7 +82,7 @@ const state = (selection: StateSlice["selection"], viewports = [pricing, docs]) 
   drafts: [],
 });
 
-describe("glaser host part", () => {
+describe("impeccable host part", () => {
   let skill = "";
   const saved = process.env["IMPECCABLE_SKILL_DIR"];
   beforeEach(async () => {
@@ -107,13 +107,13 @@ describe("glaser host part", () => {
   test("registers the verb tool and one prompt per verb, every name declared in the manifest, and the instructions say where the skill is", async () => {
     const { host, prompts, tools, instructions } = fakeHost(state(null));
     await activate(host);
-    // The browser part registers glaser_pick; the host part these two.
+    // The browser part registers impeccable_pick; the host part these two.
     expect(tools.map((t) => t.name)).toEqual([VERB_TOOL, SESSION_TOOL]);
-    expect(manifest.contributes.tools).toEqual([VERB_TOOL, SESSION_TOOL, "glaser_pick", "glaser_done", "glaser_html"]);
+    expect(manifest.contributes.tools).toEqual([VERB_TOOL, SESSION_TOOL, "impeccable_pick", "impeccable_done", "impeccable_html"]);
     expect(tools.every((t) => t.annotations?.readOnlyHint === true)).toBe(true);
     expect(prompts.map((p) => p.name)).toEqual(VERBS.map((v) => promptName(v.verb)));
     expect(new Set(prompts.map((p) => p.name))).toEqual(new Set(manifest.contributes.prompts));
-    expect(prompts.every((p) => /^glaser-[a-z]+$/.test(p.name))).toBe(true);
+    expect(prompts.every((p) => /^impeccable-[a-z]+$/.test(p.name))).toBe(true);
     expect(instructions()).toContain(manifest.contributes.instructions);
     expect(instructions()).toContain(`Impeccable 9.9.9 was found at ${skill}`);
   });
@@ -123,9 +123,9 @@ describe("glaser host part", () => {
       state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [] }),
     );
     await activate(host);
-    const bolder = prompts.find((p) => p.name === "glaser-bolder")!;
+    const bolder = prompts.find((p) => p.name === "impeccable-bolder")!;
     const text = await (bolder.build as Build)({});
-    expect(text.startsWith("# Glaser: bolder (Impeccable 9.9.9)")).toBe(true);
+    expect(text.startsWith("# Impeccable: bolder (Impeccable 9.9.9)")).toBe(true);
     expect(text).toContain('TARGET: element `el_card` inside viewport `vp_pricing` ("Pricing", 960×600, at 100, 40)');
     expect(text).toContain('get_viewport {id: "vp_pricing", element: "el_card"}');
     expect(text).toContain("Read THE TARGET, not the page");
@@ -134,8 +134,8 @@ describe("glaser host part", () => {
     expect(text).toContain("1 at {x: 1108, y: 40}, 2 at {x: 2116, y: 40}, 3 at {x: 3124, y: 40}");
     expect(text).toContain('"Pricing · bolder n/3"');
     // The notes marker the canvas reads back, as the adopt command parses it.
-    expect(text).toContain("`Glaser bolder · variant n of 3 of vp_pricing`");
-    expect(parseVariantMarker("Glaser bolder · variant 2 of 3 of vp_pricing\n\nA denser card.")).toEqual({ verb: "bolder", n: 2, of: 3, sourceId: "vp_pricing" });
+    expect(text).toContain("`Impeccable bolder · variant n of 3 of vp_pricing`");
+    expect(parseVariantMarker("Impeccable bolder · variant 2 of 3 of vp_pricing\n\nA denser card.")).toEqual({ verb: "bolder", n: 2, of: 3, sourceId: "vp_pricing" });
     expect(text).not.toContain("draft_open {from:");
     // A variant is a copy plus one replace (decisions.md #68), fanned out
     // to sub-agents where the harness has them.
@@ -168,10 +168,10 @@ describe("glaser host part", () => {
     await activate(host);
     const run = tools[0]!.run as (args: Record<string, string | undefined>) => Promise<{ text: string; isError?: boolean }>;
     const viaTool = await run({ verb: "quieter", brief: "less shouty" });
-    const viaPrompt = await (prompts.find((p) => p.name === "glaser-quieter")!.build as Build)({ brief: "less shouty" });
+    const viaPrompt = await (prompts.find((p) => p.name === "impeccable-quieter")!.build as Build)({ brief: "less shouty" });
     expect(viaTool.text).toBe(viaPrompt);
     expect(viaTool.isError).toBe(false);
-    expect(viaTool.text).toContain("# Glaser: quieter");
+    expect(viaTool.text).toContain("# Impeccable: quieter");
     // The verb is an enum of the same list the prompts cover.
     const verb = (tools[0]!.inputSchema as unknown as { verb: { options: string[] } }).verb;
     expect(verb.options).toEqual(VERBS.map((v) => v.verb));
@@ -182,7 +182,7 @@ describe("glaser host part", () => {
       state({ elementId: "html_root", viewportId: "vp_pricing", itemIds: ["vp_pricing"] }),
     );
     await activate(host);
-    const polish = prompts.find((p) => p.name === "glaser-polish")!;
+    const polish = prompts.find((p) => p.name === "impeccable-polish")!;
     const text = await (polish.build as Build)({ brief: "the footer feels crowded" });
     expect(text).toContain("TARGET: the whole page of viewport `vp_pricing`");
     expect(text).toContain('draft_open {from: "vp_pricing"}');
@@ -196,7 +196,7 @@ describe("glaser host part", () => {
       state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [] }),
     );
     await activate(host);
-    const typeset = prompts.find((p) => p.name === "glaser-typeset")!;
+    const typeset = prompts.find((p) => p.name === "impeccable-typeset")!;
     const text = await (typeset.build as Build)({ viewport: "vp_docs", element: "el_h1", variants: "2" });
     expect(text).toContain("TARGET: element `el_h1` inside viewport `vp_docs` (untitled, 720 wide, at 0, 900)");
     expect(text).toContain("2 VARIANTS");
@@ -263,45 +263,45 @@ describe("glaser host part", () => {
     expect(await skillVersion(skill)).toBe("9.9.9");
   });
 
-  test("glaser_session answers the watch over the storage file and the loop", async () => {
+  test("impeccable_session answers the watch over the storage file and the loop", async () => {
     const { host, tools } = fakeHost(state(null));
     await activate(host);
     const session = tools.find((t) => t.name === SESSION_TOOL)!;
     const { text } = await (session.run as () => Promise<{ text: string }>)();
     // The watch names the host's absolute path (decisions.md #69): the
     // agent's working directory never matters.
-    expect(text).toContain(watchCommand("/served/.daydream/plugin-data/mrbavio.glaser.json"));
-    expect(text).toContain("f='/served/.daydream/plugin-data/mrbavio.glaser.json'");
+    expect(text).toContain(watchCommand("/served/.daydream/plugin-data/mrbavio.impeccable.json"));
+    expect(text).toContain("f='/served/.daydream/plugin-data/mrbavio.impeccable.json'");
     expect(text).toMatch(/cksum/);
-    expect(text).toContain("glaser_pick");
+    expect(text).toContain("impeccable_pick");
     expect(text).toContain("THE WATCH DOES NOT RUN DURING THIS STATE");
-    expect(text).toContain("call glaser_pick FIRST");
+    expect(text).toContain("call impeccable_pick FIRST");
     expect(text).toContain("run_in_background: true");
-    expect(text).toContain("glaser_done");
+    expect(text).toContain("impeccable_done");
   });
 
-  test("a report verb (critique, audit): the rendered page through glaser_html and the skill's own detector; nothing lands", async () => {
+  test("a report verb (critique, audit): the rendered page through impeccable_html and the skill's own detector; nothing lands", async () => {
     const { host, prompts } = fakeHost(
       state({ elementId: "html_root", viewportId: "vp_pricing", itemIds: ["vp_pricing"] }),
     );
     await activate(host);
     const names = prompts.map((p) => p.name);
-    expect(names).toContain("glaser-critique");
-    expect(names).toContain("glaser-audit");
-    const text = await (prompts.find((p) => p.name === "glaser-audit")!.build as Build)({});
+    expect(names).toContain("impeccable-critique");
+    expect(names).toContain("impeccable-audit");
+    const text = await (prompts.find((p) => p.name === "impeccable-audit")!.build as Build)({});
     expect(text).toContain("DELIVERABLE: THE REPORT, in chat — nothing lands");
-    expect(text).toContain('glaser_html {viewport: "vp_pricing"}');
-    expect(text).toContain(`${skill}/scripts/impeccable detect --json /tmp/glaser-vp_pricing.html`);
+    expect(text).toContain('impeccable_html {viewport: "vp_pricing"}');
+    expect(text).toContain(`${skill}/scripts/impeccable detect --json /tmp/impeccable-vp_pricing.html`);
     expect(text).toContain("Never open a draft");
     expect(text).not.toContain("VARIANTS");
     expect(text).not.toContain("draft_open {from:");
     expect(text).toContain("The audit playbook.");
-    expect(text).not.toContain("data-glaser-target");
+    expect(text).not.toContain("data-impeccable-target");
     // On an element: the export marks the target, the report keeps to it.
     const scoped = fakeHost(state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [] }));
     await activate(scoped.host);
-    const on = await (scoped.prompts.find((p) => p.name === "glaser-critique")!.build as Build)({});
-    expect(on).toContain('glaser_html {viewport: "vp_pricing", element: "el_card"}');
+    const on = await (scoped.prompts.find((p) => p.name === "impeccable-critique")!.build as Build)({});
+    expect(on).toContain('impeccable_html {viewport: "vp_pricing", element: "el_card"}');
     expect(on).toContain("PRUNED to the target");
     expect(on).toContain("not npx");
   });
@@ -334,7 +334,7 @@ describe("glaser host part", () => {
       skillVersion: null,
       skillDir: "/skill",
     });
-    expect(text.startsWith("# Glaser: bolder\n")).toBe(true);
+    expect(text.startsWith("# Impeccable: bolder\n")).toBe(true);
     expect(text).not.toContain("THE USER'S BRIEF");
   });
 });

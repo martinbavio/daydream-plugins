@@ -46,9 +46,11 @@ function fan(): DreamItem[] {
 describe("variants", () => {
   test("the marker round-trips and tolerates a notes body after it", () => {
     const line = variantMarker({ verb: "typeset", n: 2, of: 3, sourceId: "vp_1" });
-    expect(line).toBe("Glaser typeset · variant 2 of 3 of vp_1");
+    expect(line).toBe("Impeccable typeset · variant 2 of 3 of vp_1");
     expect(parseVariantMarker(line)).toEqual({ verb: "typeset", n: 2, of: 3, sourceId: "vp_1" });
     expect(parseVariantMarker(`${line}\n\nA serif display face.`)).toEqual({ verb: "typeset", n: 2, of: 3, sourceId: "vp_1" });
+    // The older spelling still reads: variants landed before the rename.
+    expect(parseVariantMarker("Glaser typeset · variant 2 of 3 of vp_1")).toEqual({ verb: "typeset", n: 2, of: 3, sourceId: "vp_1" });
     expect(parseVariantMarker("A serif display face.\n" + line)).toBeNull();
     expect(parseVariantMarker(undefined)).toBeNull();
     expect(parseVariantMarker("")).toBeNull();

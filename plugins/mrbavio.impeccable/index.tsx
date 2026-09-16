@@ -1,15 +1,15 @@
-// mrbavio.glaser — design verbs on the canvas. The BROWSER PART is the
+// mrbavio.impeccable — design verbs on the canvas. The BROWSER PART is the
 // session's canvas side: the picker (⌘P on a selection, decisions.md #67:
-// Glaser's own list in the interactive overlay slot, beside the target),
-// the caption that says a pick is waiting or building, the glaser_pick
+// Impeccable's own list in the interactive overlay slot, beside the target),
+// the caption that says a pick is waiting or building, the impeccable_pick
 // tool an agent takes the pick with, `adopt` in a variant's title bar
 // (a title-bar action), and cancel / end-session. The verbs themselves —
 // Impeccable's playbooks over a viewport — are the host part's
-// (bridge.ts): glaser_verb and one prompt each.
+// (bridge.ts): impeccable_verb and one prompt each.
 //
 // How a pick reaches an agent: through dd.storage. Every change here is
-// written to `.daydream/plugin-data/mrbavio.glaser.json` at once, and an
-// agent in a session watches that file (glaser_session). The canvas never
+// written to `.daydream/plugin-data/mrbavio.impeccable.json` at once, and an
+// agent in a session watches that file (impeccable_session). The canvas never
 // calls an agent; it leaves a note where the agent is already looking.
 
 import { createSignal, onCleanup, untrack } from "solid-js";
@@ -23,7 +23,7 @@ import createPicker, { type PickerEntry } from "./Picker";
 import { createSession, SESSION_KEY } from "./session";
 import { css } from "./styles";
 
-const ID = "mrbavio.glaser";
+const ID = "mrbavio.impeccable";
 /** The verbs, in the picker's order — the host part's list, shared. */
 const VERBS = VERB_SPECS.map((v) => v.verb);
 const modeOf = (verb: string) => VERB_SPECS.find((v) => v.verb === verb)?.mode;
@@ -31,13 +31,13 @@ const isVariantsVerb = (verb: string): boolean => modeOf(verb) === "variants";
 /** The picker's last entry: the session's exit, beside the verbs. */
 const END_SESSION = "end session";
 
-export const PICK_TOOL = "glaser_pick";
-export const DONE_TOOL = "glaser_done";
-export const HTML_TOOL = "glaser_html";
+export const PICK_TOOL = "impeccable_pick";
+export const DONE_TOOL = "impeccable_done";
+export const HTML_TOOL = "impeccable_html";
 
 export default async function activate(dd: DaydreamApi): Promise<void> {
   const style = document.createElement("style");
-  style.dataset["glaserStyles"] = "";
+  style.dataset["impeccableStyles"] = "";
   style.textContent = css;
   document.head.append(style);
   onCleanup(() => style.remove());
@@ -78,7 +78,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
 
   dd.registerCommand({
     id: `${ID}.pick`,
-    title: "Glaser: pick a verb",
+    title: "Impeccable: pick a verb",
     scope: "canvas",
     when: () => target() !== null,
     run: () => {
@@ -91,7 +91,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
 
   dd.registerCommand({
     id: `${ID}.cancel`,
-    title: "Glaser: cancel the pick",
+    title: "Impeccable: cancel the pick",
     scope: "canvas",
     when: () => session.phase().kind === "waiting",
     run: () => {
@@ -102,7 +102,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
 
   dd.registerCommand({
     id: `${ID}.end-session`,
-    title: "Glaser: end the session",
+    title: "Impeccable: end the session",
     scope: "canvas",
     run: () => {
       session.end();
@@ -147,9 +147,9 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   // Asset paths are made absolute to this host so the file stands alone.
   dd.registerTool({
     name: HTML_TOOL,
-    title: "Glaser HTML",
+    title: "Impeccable HTML",
     description:
-      "One viewport as a standalone HTML file — the page exactly as the canvas renders it, styles and fonts inline — for Impeccable's detector: write it to a file and run `impeccable detect --json <file>`. With `element`, the page is PRUNED to that element: its subtree and its ancestors (the cascade it inherits from), every ancestor's other children removed — so every finding over the file is the target's; the subtree also carries data-glaser-target=\"\". Answers {viewportId, html, bytes, target?: {id, kept, pruned}}. Reads only.",
+      "One viewport as a standalone HTML file — the page exactly as the canvas renders it, styles and fonts inline — for Impeccable's detector: write it to a file and run `impeccable detect --json <file>`. With `element`, the page is PRUNED to that element: its subtree and its ancestors (the cascade it inherits from), every ancestor's other children removed — so every finding over the file is the target's; the subtree also carries data-impeccable-target=\"\". Answers {viewportId, html, bytes, target?: {id, kept, pruned}}. Reads only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -181,7 +181,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
           // element, only text and colours, so a page holding nothing but
           // the target is the one way a finding is the target's for sure.
           const subtree = [node, ...node.querySelectorAll("*")];
-          for (const n of subtree) n.setAttribute("data-glaser-target", "");
+          for (const n of subtree) n.setAttribute("data-impeccable-target", "");
           let pruned = 0;
           for (let el: Element | null = node.parentElement; el !== null; el = el.parentElement) {
             for (const child of [...el.children]) {
@@ -203,7 +203,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     },
   });
 
-  // What the canvas can see of a round's progress (the agent's glaser_done
+  // What the canvas can see of a round's progress (the agent's impeccable_done
   // is the explicit end). A VARIANTS round: every variant carries the
   // source and the verb in its notes marker, so the count on the canvas
   // against the marker's `of` is the progress, and reaching it is the end.
@@ -218,9 +218,9 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
 
   dd.registerTool({
     name: PICK_TOOL,
-    title: "Glaser pick",
+    title: "Impeccable pick",
     description:
-      "Take the verb the user picked on the canvas: answers {pick: {verb, viewportId, elementId, brief?, at} | null, exit} and clears it (the canvas shows the pick as building). Call it first on any Glaser request and on every wake-up of a session's watch; then glaser_verb with the pick's verb, viewport, element and — when present — brief, the user's own words about this round, which outrank the playbook's defaults. exit true means the user ended the session.",
+      "Take the verb the user picked on the canvas: answers {pick: {verb, viewportId, elementId, brief?, at} | null, exit} and clears it (the canvas shows the pick as building). Call it first on any Impeccable request and on every wake-up of a session's watch; then impeccable_verb with the pick's verb, viewport, element and — when present — brief, the user's own words about this round, which outrank the playbook's defaults. exit true means the user ended the session.",
     inputSchema: { type: "object", properties: {}, required: [] },
     annotations: { idempotentHint: false, destructiveHint: false },
     run: () => {
@@ -232,7 +232,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
 
   dd.registerTool({
     name: DONE_TOOL,
-    title: "Glaser done",
+    title: "Impeccable done",
     description:
       "Tell the canvas the round is complete: every variant landed, or the in-place rework landed, or you stopped. The canvas infers most of this from what lands, but call it at the end of every round anyway — a round that stopped short would otherwise read as still building.",
     inputSchema: { type: "object", properties: {}, required: [] },

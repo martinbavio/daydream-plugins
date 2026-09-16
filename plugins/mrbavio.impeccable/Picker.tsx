@@ -16,7 +16,7 @@ export interface PickerState {
   choose(id: string, brief: string): void;
 }
 
-/** Glaser's own picker, drawn in the interactive slot beside the target
+/** Impeccable's own picker, drawn in the interactive slot beside the target
  * (decisions.md #67): a field and the verbs, nothing else. Typing narrows,
  * Enter or a click picks, arrows move and wrap, Escape or a press outside
  * closes. Positioned from the target's rect in the apply phase; the field
@@ -99,7 +99,7 @@ export default function createPicker(dd: DaydreamApi, entries: readonly PickerEn
           ref={(el) => (rootEl = el)}
           class={`${classPrefix}-picker`}
           role="dialog"
-          aria-label="Glaser"
+          aria-label="Impeccable"
           style={{ left: `${rect().x + rect().width + 12}px`, top: `${rect().y}px` }}
         >
           <input

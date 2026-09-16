@@ -23,7 +23,7 @@ export type Phase =
   | { kind: "waiting"; pick: Pick }
   /** An agent took it and is working; ends when the round is complete —
    * every variant landed, the in-place rework landed, or the agent said
-   * so (glaser_done). `landed` counts a variant round's progress. */
+   * so (impeccable_done). `landed` counts a variant round's progress. */
   | { kind: "building"; pick: Pick; landed: number; of: number | null };
 
 export interface Session {
@@ -31,7 +31,7 @@ export interface Session {
   /** The user picked a verb for the selection, with what they typed after
    * it as the brief (empty: none). */
   pick(verb: string, viewportId: string, elementId: string | null, brief?: string): void;
-  /** An agent takes what waits (glaser_pick): the pick and the exit flag,
+  /** An agent takes what waits (impeccable_pick): the pick and the exit flag,
    * both cleared. */
   take(): { pick: Pick | null; exit: boolean };
   /** The user withdrew the pick (Escape, the cancel command). */

@@ -15,14 +15,16 @@ export interface VariantMarker {
   sourceId: string;
 }
 
-const MARKER = /^Glaser ([a-z]+) · variant (\d+) of (\d+) of (\S+)\s*$/;
+/** The line, and the older spelling a canvas may still carry from before
+ * the plugin took Impeccable's name. */
+const MARKER = /^(?:Impeccable|Glaser) ([a-z]+) · variant (\d+) of (\d+) of (\S+)\s*$/;
 
 /** The line; `n` may be the letter, for a prompt describing every
  * variant at once. */
 export function variantMarker(
   m: Omit<VariantMarker, "n"> & { n: number | "n" },
 ): string {
-  return `Glaser ${m.verb} · variant ${m.n} of ${m.of} of ${m.sourceId}`;
+  return `Impeccable ${m.verb} · variant ${m.n} of ${m.of} of ${m.sourceId}`;
 }
 
 /** The marker on the first line of a notes text, or null. */
@@ -48,7 +50,7 @@ export interface SessionState {
   seq: number;
   /** A verb the user picked on the canvas, waiting for an agent. */
   pick: Pick | null;
-  /** The user ended the session from the canvas; the next glaser_pick
+  /** The user ended the session from the canvas; the next impeccable_pick
    * takes it and the agent stops watching. */
   exit: boolean;
 }

@@ -1,6 +1,6 @@
-// mrbavio.glaser's HOST PART: the verbs, and the session. A verb is
+// mrbavio.impeccable's HOST PART: the verbs, and the session. A verb is
 // Impeccable's playbook (impeccable.style) over a viewport on the canvas,
-// answered twice over one builder: as the TOOL glaser_verb an agent calls
+// answered twice over one builder: as the TOOL impeccable_verb an agent calls
 // from a sentence — tools are the model's to invoke — and as one MCP
 // PROMPT per verb for a client that picks prompts from a menu. Both are
 // composed at request time: the canvas tab's state (the selection is the
@@ -11,10 +11,10 @@
 //
 // The SESSION is how a pick made on the canvas reaches the agent with no
 // typing. The browser part writes the pick through dd.storage, which the
-// host saves to `.daydream/plugin-data/mrbavio.glaser.json` at once; an
+// host saves to `.daydream/plugin-data/mrbavio.impeccable.json` at once; an
 // agent watches that file with a shell loop its harness runs as a long
-// wait, wakes when it changes, takes the pick (glaser_pick, a browser
-// tool) and does the verb. glaser_session answers the watch command and
+// wait, wakes when it changes, takes the pick (impeccable_pick, a browser
+// tool) and does the verb. impeccable_session answers the watch command and
 // the loop — the same shape as Impeccable's own live poll, with the canvas
 // as the overlay and the storage file as the journal.
 
@@ -42,8 +42,8 @@ async function helpers(): Promise<{ skill: typeof Skill; verbs: typeof Verbs }> 
   return { skill, verbs };
 }
 
-export const VERB_TOOL = "glaser_verb";
-export const SESSION_TOOL = "glaser_session";
+export const VERB_TOOL = "impeccable_verb";
+export const SESSION_TOOL = "impeccable_session";
 
 interface VerbArgs {
   viewport?: string;
@@ -84,10 +84,10 @@ export function watchCommand(file: string): string {
   return `f='${file}'; s=$(cksum < "$f" 2>/dev/null); while [ "$(cksum < "$f" 2>/dev/null)" = "$s" ]; do sleep 1; done; cat "$f"`;
 }
 
-/** What glaser_session answers: the watch command and the loop. */
+/** What impeccable_session answers: the watch command and the loop. */
 export function sessionText(dataFile: string): string {
   return [
-    "GLASER SESSION: the user picks verbs on the canvas; you wait, wake, do the verb, wait again. No typing in between.",
+    "IMPECCABLE SESSION: the user picks verbs on the canvas; you wait, wake, do the verb, wait again. No typing in between.",
     "",
     `THE WATCH — it exits when the plugin's storage file changes, printing it. The path is absolute; run it from anywhere:`,
     "",
@@ -98,9 +98,9 @@ export function sessionText(dataFile: string): string {
     "Run it the way your harness runs a long wait: Claude Code — the Bash tool with run_in_background: true (the harness notifies you when it exits; never a foreground call, never a short timeout); Codex — a yielded foreground exec you keep reading until it returns; Cursor — a background terminal with notify; anything else — a foreground call.",
     "",
     "THE LOOP — one state at a time, never two:",
-    "1. WAITING: call glaser_pick FIRST — a pick made before you were watching is already in the file, and a watch started now would never wake for it. A pick → step 3. exit → stop. Nothing → start the watch (and nothing else) and tell the user in one line that the session is on and they can pick a verb on the canvas.",
-    "2. WOKEN: the watch exited. Call glaser_pick; it answers {pick, exit} and takes the pick (the canvas caption changes from waiting to building). exit true → say the session ended and stop, no watch. pick null → back to 1.",
-    "3. WORKING: glaser_verb {verb, viewport, element, brief} from the pick (brief when the pick carries one — the user's words, which outrank the playbook's defaults) and follow it TO THE END — every draft landed, one line per direction, then glaser_done (the canvas stops saying building). THE WATCH DOES NOT RUN DURING THIS STATE: a watch started here waits for a pick the user cannot make while you are still building, and stalls the round.",
+    "1. WAITING: call impeccable_pick FIRST — a pick made before you were watching is already in the file, and a watch started now would never wake for it. A pick → step 3. exit → stop. Nothing → start the watch (and nothing else) and tell the user in one line that the session is on and they can pick a verb on the canvas.",
+    "2. WOKEN: the watch exited. Call impeccable_pick; it answers {pick, exit} and takes the pick (the canvas caption changes from waiting to building). exit true → say the session ended and stop, no watch. pick null → back to 1.",
+    "3. WORKING: impeccable_verb {verb, viewport, element, brief} from the pick (brief when the pick carries one — the user's words, which outrank the playbook's defaults) and follow it TO THE END — every draft landed, one line per direction, then impeccable_done (the canvas stops saying building). THE WATCH DOES NOT RUN DURING THIS STATE: a watch started here waits for a pick the user cannot make while you are still building, and stalls the round.",
     "4. Only when the round is done: back to 1 — start the watch again.",
     "The user adopts a variant from the canvas; nothing for you to do there.",
     "",
@@ -165,8 +165,8 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
 
   host.registerTool({
     name: VERB_TOOL,
-    title: "Glaser verb",
-    description: `The playbook for one design verb over a viewport on the canvas, with the target resolved from the selection (or the arguments) and the deliverable spelled out — call it, then follow it. Verbs: ${verbNames.join(", ")}. ${VERBS.filter((v) => v.mode === "variants").length} of them open draft variants beside the source, ${VERBS.filter((v) => v.mode === "in-place").length} rework it in place, and critique and audit answer a report over the rendered page (glaser_html + Impeccable's detector) and land nothing. After a canvas pick, pass the pick's viewport and element.`,
+    title: "Impeccable verb",
+    description: `The playbook for one design verb over a viewport on the canvas, with the target resolved from the selection (or the arguments) and the deliverable spelled out — call it, then follow it. Verbs: ${verbNames.join(", ")}. ${VERBS.filter((v) => v.mode === "variants").length} of them open draft variants beside the source, ${VERBS.filter((v) => v.mode === "in-place").length} rework it in place, and critique and audit answer a report over the rendered page (impeccable_html + Impeccable's detector) and land nothing. After a canvas pick, pass the pick's viewport and element.`,
     inputSchema: {
       verb: z.enum(verbNames as [string, ...string[]]).describe("The verb."),
       ...TARGET_ARGS,
@@ -181,9 +181,9 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
 
   host.registerTool({
     name: SESSION_TOOL,
-    title: "Glaser session",
+    title: "Impeccable session",
     description:
-      "Start a Glaser session: answers the watch command that wakes you when the user picks a verb on the canvas, and the loop to run — wait, glaser_pick, glaser_verb, wait again. Call it when the user asks for a session; then run the watch.",
+      "Start an Impeccable session: answers the watch command that wakes you when the user picks a verb on the canvas, and the loop to run — wait, impeccable_pick, impeccable_verb, wait again. Call it when the user asks for a session; then run the watch.",
     inputSchema: {},
     annotations: { readOnlyHint: true },
     run: () => ({ text: sessionText(host.plugin.dataFile) }),

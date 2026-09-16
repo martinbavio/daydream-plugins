@@ -1,4 +1,4 @@
-// The verbs Glaser carries, and the prompt each becomes: the Daydream
+// The verbs the plugin carries, and the prompt each becomes: the Daydream
 // ADAPTER first (where the agent is, what the target is, what the
 // deliverable is, what is out), then Impeccable's own playbook for the
 // verb and its craft floor, verbatim. Pure: the file reads and the tab
@@ -37,91 +37,91 @@ export interface VerbSpec {
 export const VERBS: readonly VerbSpec[] = [
   {
     verb: "bolder",
-    title: "Glaser: bolder",
+    title: "Impeccable: bolder",
     description:
       "Amplify a safe or bland element: three draft variants beside the source, in the page's own vocabulary.",
     mode: "variants",
   },
   {
     verb: "quieter",
-    title: "Glaser: quieter",
+    title: "Impeccable: quieter",
     description:
       "Tone down an aggressive or overstimulating element: three draft variants beside the source.",
     mode: "variants",
   },
   {
     verb: "typeset",
-    title: "Glaser: typeset",
+    title: "Impeccable: typeset",
     description:
       "Improve typography — hierarchy, measure, scale, fonts: three draft variants beside the source.",
     mode: "variants",
   },
   {
     verb: "layout",
-    title: "Glaser: layout",
+    title: "Impeccable: layout",
     description:
       "Fix spacing, rhythm and visual hierarchy: three draft variants beside the source.",
     mode: "variants",
   },
   {
     verb: "colorize",
-    title: "Glaser: colorize",
+    title: "Impeccable: colorize",
     description:
       "Add strategic colour to a monochrome or dull element: three draft variants beside the source.",
     mode: "variants",
   },
   {
     verb: "delight",
-    title: "Glaser: delight",
+    title: "Impeccable: delight",
     description:
       "Add personality and a memorable touch: three draft variants beside the source.",
     mode: "variants",
   },
   {
     verb: "distill",
-    title: "Glaser: distill",
+    title: "Impeccable: distill",
     description:
       "Strip the target to its essence, removing what does not earn its place; reworked in place.",
     mode: "in-place",
   },
   {
     verb: "polish",
-    title: "Glaser: polish",
+    title: "Impeccable: polish",
     description:
       "A final quality pass — alignment, spacing, consistency, micro-detail; reworked in place.",
     mode: "in-place",
   },
   {
     verb: "clarify",
-    title: "Glaser: clarify",
+    title: "Impeccable: clarify",
     description:
       "Improve UX copy, labels and messages in the target; reworked in place.",
     mode: "in-place",
   },
   {
     verb: "animate",
-    title: "Glaser: animate",
+    title: "Impeccable: animate",
     description:
       "Add purposeful CSS motion — transitions and animations only, no scripts; reworked in place.",
     mode: "in-place",
   },
   {
     verb: "adapt",
-    title: "Glaser: adapt",
+    title: "Impeccable: adapt",
     description:
       "Adapt the page to another width or context through @media layers; reworked in place.",
     mode: "in-place",
   },
   {
     verb: "critique",
-    title: "Glaser: critique",
+    title: "Impeccable: critique",
     description:
       "A UX design review of the target with scores, Impeccable's detector over the rendered page as evidence; nothing lands.",
     mode: "report",
   },
   {
     verb: "audit",
-    title: "Glaser: audit",
+    title: "Impeccable: audit",
     description:
       "Technical quality checks — accessibility, performance, responsive, anti-patterns — over the rendered page with Impeccable's detector; a scored report, nothing lands.",
     mode: "report",
@@ -129,7 +129,7 @@ export const VERBS: readonly VerbSpec[] = [
 ];
 
 export function promptName(verb: string): string {
-  return `glaser-${verb}`;
+  return `impeccable-${verb}`;
 }
 
 /** The slice of `canvas_state` the adapter reads (Daydream's CanvasState,
@@ -257,13 +257,13 @@ function deliverableSection(input: PromptInput): string {
   if (spec.mode === "report") {
     const detect = `${input.skillDir}/scripts/impeccable detect --json`;
     const el = target?.elementId ?? null;
-    const call = el === null ? `glaser_html {viewport: "${id}"}` : `glaser_html {viewport: "${id}", element: "${el}"}`;
+    const call = el === null ? `impeccable_html {viewport: "${id}"}` : `impeccable_html {viewport: "${id}", element: "${el}"}`;
     const scope =
       el === null
         ? ""
         : ` That page is PRUNED to the target: its subtree and the ancestors it inherits from, nothing else — so every finding the detector reports is the target's (it names text and colours, never elements). Judge the target as part of its page — the source's styles are in the file — but report on the target.`;
     return [
-      `DELIVERABLE: THE REPORT, in chat — nothing lands on the canvas. The playbook's evidence step is Impeccable's detector, and it runs over the RENDERED PAGE, not the JSON: call ${call} — the viewport as one standalone HTML file, styles and fonts inline, exactly as the canvas renders it — write it to a file (say /tmp/glaser-${id}.html; a harness that saved the answer to a file for you already has it on disk), then run EXACTLY \`${detect} /tmp/glaser-${id}.html\` — that launcher is the installed skill's own detector; not npx, not a global \`impeccable\`, which may be another version — and read its JSON.${scope} Where the playbook says a browser, a screenshot or a URL, the file IS the page; where it names a sub-command to run, name it for the user instead (a Glaser verb of the same name, picked on the canvas). Where it wants a snapshot persisted, skip it. Write the report the playbook describes, scoped to the target and ordered by what to fix first; when it wants sub-agents and the user allows them, use them. Then glaser_done. Never open a draft or change the page: this verb only judges it.`,
+      `DELIVERABLE: THE REPORT, in chat — nothing lands on the canvas. The playbook's evidence step is Impeccable's detector, and it runs over the RENDERED PAGE, not the JSON: call ${call} — the viewport as one standalone HTML file, styles and fonts inline, exactly as the canvas renders it — write it to a file (say /tmp/impeccable-${id}.html; a harness that saved the answer to a file for you already has it on disk), then run EXACTLY \`${detect} /tmp/impeccable-${id}.html\` — that launcher is the installed skill's own detector; not npx, not a global \`impeccable\`, which may be another version — and read its JSON.${scope} Where the playbook says a browser, a screenshot or a URL, the file IS the page; where it names a sub-command to run, name it for the user instead (a Impeccable verb of the same name, picked on the canvas). Where it wants a snapshot persisted, skip it. Write the report the playbook describes, scoped to the target and ordered by what to fix first; when it wants sub-agents and the user allows them, use them. Then impeccable_done. Never open a draft or change the page: this verb only judges it.`,
     ].join("\n");
   }
   if (spec.mode === "in-place") {
@@ -287,11 +287,11 @@ function deliverableSection(input: PromptInput): string {
 3. WRITE EACH VARIANT AND LAND IT ON ITS OWN: draft_replace {draft, token, target: <the target's id AS YOU READ IT FROM THE SOURCE — the copy answers to the source's ids>, element: <the target rewritten for that direction>} (or draft_set for the root's styles when the page itself is the target), then draft_finalize IMMEDIATELY — the canvas shows a draft as building until its own finalize lands it, so a finalize held back reads as work still going on. Never hold finalizes for the end; never send the whole page.
 IN PARALLEL when the user allows sub-agents (a harness spawns them only when the user, a CLAUDE.md or a skill asks — ask once if unsure): after step 2, one sub-agent per variant, spawned back to back, the parent writing nothing and waiting for all. Give each sub-agent THIS SCRIPT, in this order, with the values filled in — it sees nothing else you know:
   (a) draft_set {draft: <its draft id>, token: <its token from the open>, outline: [<its direction, a few words>]} — THE VERY FIRST CALL, before reading anything: the copy was opened before the sub-agent existed, and a draft silent for two minutes shows as stalled on the canvas.
-  (b) glaser_verb {verb: "${spec.verb}", viewport: "${id}", element: <the target's id>, brief: <its direction>} — the playbook.
+  (b) impeccable_verb {verb: "${spec.verb}", viewport: "${id}", element: <the target's id>, brief: <its direction>} — the playbook.
   (c) Write the target rewritten for its direction, from THE TARGET ELEMENT'S JSON you paste into its instructions (so it reads nothing again).
   (d) draft_replace {draft, token: <the token draft_set answered>, target: <the target's id>, element: <the rewrite>}, then draft_finalize IMMEDIATELY.
 The slow part is the writing, so let it happen in three places at once; a variant is a bounded rewrite of one section, which a fast model handles well when your harness lets you pick one for a sub-agent. Without sub-agents, step 3 for each variant in turn, each to its finalize before the next replace — and if a copy has waited two minutes for its turn, touch it first the same way.
-The notes' FIRST LINE is exactly \`${marker}\`; the canvas reads it to know the round, the user reads the rest while choosing. Positions: ${positions}. When all ${variants} are on the canvas, report each direction in one line and call glaser_done; the user adopts one from the canvas (adopt, in a variant's title bar) or deletes the losers — do not remove anything.`,
+The notes' FIRST LINE is exactly \`${marker}\`; the canvas reads it to know the round, the user reads the rest while choosing. Positions: ${positions}. When all ${variants} are on the canvas, report each direction in one line and call impeccable_done; the user adopts one from the canvas (adopt, in a variant's title bar) or deletes the losers — do not remove anything.`,
   ].join("\n");
 }
 
@@ -314,7 +314,7 @@ export function composePrompt(input: PromptInput): string {
   const { spec, brief, skillVersion } = input;
   const version = skillVersion === null ? "" : ` (Impeccable ${skillVersion})`;
   const sections = [
-    `# Glaser: ${spec.verb}${version}`,
+    `# Impeccable: ${spec.verb}${version}`,
     targetSection(input),
     deliverableSection(input),
     brief === undefined || brief.trim() === ""
