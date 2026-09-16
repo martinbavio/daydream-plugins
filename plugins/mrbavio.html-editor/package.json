@@ -10,10 +10,15 @@
     "@codemirror/language": "^6.12.4",
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.43.9",
+    "@daydream/plugin-api": "github:mbavio-phota/daydream#bbbc23d66b53aa1ed4f7551191fb14c0f8f949ee&path:packages/plugin-api",
     "@lezer/highlight": "^1.2.3"
   },
   "peerDependencies": {
     "@solidjs/web": "2.0.0-rc.0",
     "solid-js": "2.0.0-rc.0"
+  },
+  "devDependencies": {
+    "@daydream/plugin-testing": "github:mbavio-phota/daydream#bbbc23d66b53aa1ed4f7551191fb14c0f8f949ee&path:packages/plugin-testing",
+    "vitest": "^4.1.11"
   }
 }

@@ -19,5 +19,10 @@
     "vite": "^8.2.1",
     "vitest": "^4.1.11",
     "zod": "^4.6.5"
+  },
+  "pnpm": {
+    "overrides": {
+      "@daydream/plugin-api": "github:mbavio-phota/daydream#bbbc23d66b53aa1ed4f7551191fb14c0f8f949ee&path:packages/plugin-api"
+    }
   }
 }
