@@ -10,7 +10,7 @@
     "ship": "node scripts/ship.mjs"
   },
   "devDependencies": {
-    "@daydream/plugin-api": "github:mbavio-phota/daydream#path:packages/plugin-api",
+    "@daydream/plugin-api": "github:mbavio-phota/daydream#bbbc23d66b53aa1ed4f7551191fb14c0f8f949ee&path:packages/plugin-api",
     "@solidjs/vite-plugin": "3.0.0-next.29",
     "@solidjs/web": "2.0.0-rc.0",
     "@types/node": "^24.13.4",
