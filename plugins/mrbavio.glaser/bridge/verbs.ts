@@ -232,7 +232,7 @@ function targetSection(input: PromptInput): string {
   const where = describeViewport(target.viewport);
   return target.elementId === null
     ? `TARGET: the whole page of ${where}. Read it with get_viewport {id: "${target.viewport.id}"}.`
-    : `TARGET: element \`${target.elementId}\` inside ${where}. Read the page with get_viewport {id: "${target.viewport.id}"} and find the element by id in its tree; it is the section the playbook calls "the target". Everything outside it is the given — it stays as it is.`;
+    : `TARGET: element \`${target.elementId}\` inside ${where}. Read it with get_viewport {id: "${target.viewport.id}", element: "${target.elementId}"} — the subtree and its ancestry, not the page; it is the section the playbook calls "the target". Everything outside it is the given — it stays as it is.`;
 }
 
 function deliverableSection(input: PromptInput): string {
@@ -254,7 +254,7 @@ function deliverableSection(input: PromptInput): string {
   const marker = variantMarker({ verb: spec.verb, n: "n", of: variants, sourceId: id });
   return [
     `DELIVERABLE: ${variants} VARIANTS of the source, each a new draft viewport beside it, each a genuinely different direction the playbook allows — not ${variants} intensities of one idea. The order of work, for speed on the canvas:
-1. Read the source once (get_viewport {id: "${id}"}) and decide the ${variants} directions, a sentence each.
+1. Read THE TARGET, not the page: get_viewport {id: "${id}", element: <the target's id>} answers the subtree and its ancestry (tags and labels) — enough to decide the ${variants} directions, a sentence each. Read the whole page only when the page itself is the target.
 2. OPEN ALL ${variants} COPIES FIRST, back to back: draft_open {copyOf: "${id}", position: <its position below>, meta: {title: "${title} · ${spec.verb} n/${variants}", notes: <marker line, blank line, the direction>}} — each a copy of the source beside it, the source untouched, answered without its page (you hold it) but with the draft id and \`next\`, the token for its first write. The frames are on the canvas within seconds, building, while the writing happens.
 3. WRITE EACH VARIANT AND LAND IT ON ITS OWN: draft_replace {draft, token, target: <the target's id AS YOU READ IT FROM THE SOURCE — the copy answers to the source's ids>, element: <the target rewritten for that direction>} (or draft_set for the root's styles when the page itself is the target), then draft_finalize IMMEDIATELY — the canvas shows a draft as building until its own finalize lands it, so a finalize held back reads as work still going on. Never hold finalizes for the end; never send the whole page.
 IN PARALLEL when the user allows sub-agents (a harness spawns them only when the user, a CLAUDE.md or a skill asks — ask once if unsure): after step 2, one sub-agent per variant, spawned back to back, the parent writing nothing and waiting for all. Give each sub-agent THIS SCRIPT, in this order, with the values filled in — it sees nothing else you know:

@@ -127,7 +127,8 @@ describe("glaser host part", () => {
     const text = await (bolder.build as Build)({});
     expect(text.startsWith("# Glaser: bolder (Impeccable 9.9.9)")).toBe(true);
     expect(text).toContain('TARGET: element `el_card` inside viewport `vp_pricing` ("Pricing", 960×600, at 100, 40)');
-    expect(text).toContain('get_viewport {id: "vp_pricing"}');
+    expect(text).toContain('get_viewport {id: "vp_pricing", element: "el_card"}');
+    expect(text).toContain("Read THE TARGET, not the page");
     // Variants land beside the source, one frame plus a gap apart.
     expect(text).toContain("3 VARIANTS");
     expect(text).toContain("1 at {x: 1108, y: 40}, 2 at {x: 2116, y: 40}, 3 at {x: 3124, y: 40}");
