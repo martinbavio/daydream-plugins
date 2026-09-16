@@ -746,6 +746,26 @@ describe("the sheet (decisions.md #71)", () => {
       dropped: { noscript: 1 },
     });
   });
+
+  test("an svg's style block styles the drawing and goes with it, under the svg's own downgrade count and nothing more", () => {
+    const conversion = convert(
+      '<svg width="10" height="10"><style>rect { fill: red }</style><rect width="10" height="10"/></svg>',
+    );
+    expect(conversion.item.payload.sheet).toBeUndefined();
+    expect(shape(body(conversion))).toEqual({
+      tag: "body",
+      children: [
+        {
+          tag: "div",
+          styles: { width: "10px", height: "10px", display: "inline-block" },
+        },
+      ],
+    });
+    expect(conversion.report).toEqual({
+      ...emptyReport(),
+      downgraded: { svg: 1 },
+    });
+  });
 });
 
 describe("images", () => {
