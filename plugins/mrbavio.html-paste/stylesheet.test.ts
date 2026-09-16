@@ -312,6 +312,30 @@ describe("walkStyleSheet", () => {
   });
 });
 
+describe("walkStyleSheet under outer conditions", () => {
+  test("the conditions a sheet sits under head every rule's, judged like the rest", () => {
+    const list = [
+      style(".a", "color: red"),
+      group("@media (min-width: 1px)", [style(".b", "color: blue")]),
+    ];
+    expect(walkStyleSheet(list, "", rules, ["@media print"]).rules).toEqual([
+      {
+        selector: ".a",
+        conditions: ["@media print"],
+        styles: { color: "red" },
+      },
+      {
+        selector: ".b",
+        conditions: ["@media print", "@media (min-width: 1px)"],
+        styles: { color: "blue" },
+      },
+    ]);
+    const refused = walkStyleSheet(list, "", rules, ["@media"]);
+    expect(refused.rules).toEqual([]);
+    expect(refused.dropped).toEqual({ "@media": 2 });
+  });
+});
+
 describe("flattenSelector", () => {
   test("a leading & under a single parent is the parent written out; a list parent or a & elsewhere needs :is()", () => {
     expect(flattenSelector(".a .b", "& .c")).toBe(".a .b .c");

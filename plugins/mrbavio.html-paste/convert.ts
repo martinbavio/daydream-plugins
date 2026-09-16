@@ -149,7 +149,10 @@ const HTML_NS = "http://www.w3.org/1999/xhtml";
  * element itself is consumed here, not dropped: tags.ts treats it as
  * packaging on the tree walk. A `<style>` under a dropped element — a
  * `<noscript>`'s, which the page never applies while scripts run — goes
- * with that element, counted once under its tag.
+ * with that element, counted once under its tag. A `media` attribute is
+ * the sheet's own `@media` around everything in it — `<style
+ * media="print">` must not land as screen rules — so it heads every
+ * rule's `conditions`, where the kernel's evaluator answers it.
  */
 function sheetOf(
   doc: Document,
@@ -159,7 +162,12 @@ function sheetOf(
   const fonts: FontFace[] = [];
   for (const element of Array.from(doc.querySelectorAll("style"))) {
     if (element.namespaceURI !== HTML_NS || insideDroppedTag(element)) continue;
-    const walked = sheetFromStyleText(element.textContent ?? "", ctx.core);
+    const media = element.getAttribute("media")?.trim() ?? "";
+    const walked = sheetFromStyleText(
+      element.textContent ?? "",
+      ctx.core,
+      media === "" ? [] : [`@media ${media}`],
+    );
     sheet.push(...walked.rules);
     fonts.push(...walked.fonts);
     ctx.report.important += walked.important;

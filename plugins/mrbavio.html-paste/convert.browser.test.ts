@@ -736,6 +736,30 @@ describe("the sheet (decisions.md #71)", () => {
     });
   });
 
+  test("a style block's media attribute is the @media every rule in it sits under; a blank one is nothing", () => {
+    const conversion = convert(
+      '<style media="print">.a { color: red } @media (min-width: 1px) { .b { color: blue } }</style><style media=" ">.c { color: green }</style><p class="a b c">x</p>',
+    );
+    expect(conversion.item.payload.sheet).toEqual([
+      {
+        selector: ".a",
+        conditions: ["@media print"],
+        styles: { color: "red" },
+      },
+      {
+        selector: ".b",
+        conditions: ["@media print", "@media (min-width: 1px)"],
+        styles: { color: "blue" },
+      },
+      { selector: ".c", styles: { color: "green" } },
+    ]);
+    expect(conversion.report).toEqual(emptyReport());
+    // The kernel's evaluator answers print false: the rules land, inert.
+    for (const rule of conversion.item.payload.sheet ?? [])
+      for (const prelude of rule.conditions ?? [])
+        expect(coreApi().conditionPreludeProblem(prelude)).toBeNull();
+  });
+
   test("a style block under a noscript goes with the noscript, counted once under its tag: the page never applies it", () => {
     const conversion = convert(
       '<noscript><style>.n { display: none }</style></noscript><p class="n">shown</p>',

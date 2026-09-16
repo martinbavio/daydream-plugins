@@ -129,12 +129,19 @@ function atKeyword(rule: RuleLike): string | null {
 /**
  * One `<style>`'s text as stored rules and fonts, parsed by the browser.
  * `replaceSync` never throws for a constructed sheet: what it cannot
- * parse it drops, and the tokenizer diff below reports the drops.
+ * parse it drops, and the tokenizer diff below reports the drops. `outer`
+ * is the at-rule ancestry the whole sheet sits under — the element's own
+ * `media` attribute as an `@media` prelude — prefixed to every rule's
+ * `conditions` and judged with them.
  */
-export function sheetFromStyleText(text: string, core: SheetRules): SheetWalk {
+export function sheetFromStyleText(
+  text: string,
+  core: SheetRules,
+  outer: readonly string[] = [],
+): SheetWalk {
   const sheet = new CSSStyleSheet();
   sheet.replaceSync(text);
-  return walkStyleSheet(sheet.cssRules, text, core);
+  return walkStyleSheet(sheet.cssRules, text, core, outer);
 }
 
 interface Walk extends SheetWalk {
@@ -148,12 +155,14 @@ interface Walk extends SheetWalk {
 
 /**
  * The CSSOM walk over a parsed sheet's rules, `source` the text they were
- * parsed from (empty when unknown: then nothing is diffed).
+ * parsed from (empty when unknown: then nothing is diffed), `outer` the
+ * conditions every rule starts under.
  */
 export function walkStyleSheet(
   rules: ArrayLike<RuleLike>,
   source: string,
   core: SheetRules,
+  outer: readonly string[] = [],
 ): SheetWalk {
   const walk: Walk = {
     core,
@@ -164,7 +173,7 @@ export function walkStyleSheet(
     important: 0,
     seen: { rules: 0, atRules: {} },
   };
-  walkRules(rules, walk, null, [], true);
+  walkRules(rules, walk, null, [...outer], true);
   if (source !== "") {
     const counted = countSource(source);
     const lostRules = counted.rules - walk.seen.rules;
