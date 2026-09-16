@@ -32,6 +32,7 @@ import {
 import { sheetFromStyleText } from "./stylesheet";
 import {
   dropRule,
+  insideDroppedTag,
   insideParagraph,
   isDroppedTag,
   resolveTag,
@@ -146,7 +147,9 @@ const HTML_NS = "http://www.w3.org/1999/xhtml";
  * (an unterminated block in one never swallows the next, exactly as the
  * page would have it) and the results laid end to end as ONE sheet. The
  * element itself is consumed here, not dropped: tags.ts treats it as
- * packaging on the tree walk.
+ * packaging on the tree walk. A `<style>` under a dropped element — a
+ * `<noscript>`'s, which the page never applies while scripts run — goes
+ * with that element, counted once under its tag.
  */
 function sheetOf(
   doc: Document,
@@ -155,7 +158,7 @@ function sheetOf(
   const sheet: StyleRule[] = [];
   const fonts: FontFace[] = [];
   for (const element of Array.from(doc.querySelectorAll("style"))) {
-    if (element.namespaceURI !== HTML_NS) continue;
+    if (element.namespaceURI !== HTML_NS || insideDroppedTag(element)) continue;
     const walked = sheetFromStyleText(element.textContent ?? "", ctx.core);
     sheet.push(...walked.rules);
     fonts.push(...walked.fonts);

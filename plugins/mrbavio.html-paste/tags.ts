@@ -109,6 +109,20 @@ export function isDroppedTag(tag: string): boolean {
   return dropRule(tag) !== null;
 }
 
+/** Whether an ancestor of the source element is one the converter drops
+ * WITH its content (`noscript`, `template`, `iframe`…): what sits under
+ * it goes with it, however the parser kept it. */
+export function insideDroppedTag(source: Element): boolean {
+  for (
+    let node = source.parentElement;
+    node !== null;
+    node = node.parentElement
+  ) {
+    if (dropRule(node.localName) === "counted") return true;
+  }
+  return false;
+}
+
 /** The tag's UA default: inline unless the spec makes it a block. */
 export function defaultInline(tag: string): boolean {
   return !BLOCK_TAGS.has(tag);
