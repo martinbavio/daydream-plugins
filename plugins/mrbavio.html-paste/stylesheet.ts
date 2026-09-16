@@ -19,7 +19,8 @@
 // wayfinder/research/cascade-spec-facts.md §5): a style rule with one
 // invalid selector, an unknown at-rule, every `@import`, an invalid
 // declaration. The report must still name them, so a brace-level
-// tokenizer counts the source's top-level rules and at-rules and the
+// tokenizer counts the source's rules and at-rules — at the top level
+// and inside the conditional groups the walk descends — and the
 // difference against what the walk saw is reported — `rule` for a
 // selector the parser refused, the keyword for an at-rule. A tokenizer,
 // not a parser: it knows braces, strings, comments and the `@` that opens
@@ -138,9 +139,10 @@ export function sheetFromStyleText(text: string, core: SheetRules): SheetWalk {
 
 interface Walk extends SheetWalk {
   core: SheetRules;
-  /** What the walk met at the sheet's TOP LEVEL, the tokenizer's
-   * vantage: style rules and at-rules by keyword, whatever became of
-   * them. The diff against the source is what vanished in the parser. */
+  /** What the walk met at the tokenizer's vantage — the sheet's top
+   * level and the conditional groups under it, never inside a style rule
+   * — style rules and at-rules by keyword, whatever became of them. The
+   * diff against the source is what vanished in the parser. */
   seen: { rules: number; atRules: Record<string, number> };
 }
 
@@ -177,17 +179,18 @@ export function walkStyleSheet(
 }
 
 /** `parent` is the enclosing style rule's FLATTENED selector (null at the
- * top level), `conditions` the at-rule ancestry so far, outermost first. */
+ * top level), `conditions` the at-rule ancestry so far, outermost first,
+ * `counted` whether this list is one the tokenizer counts too. */
 function walkRules(
   list: ArrayLike<RuleLike>,
   walk: Walk,
   parent: string | null,
   conditions: string[],
-  top: boolean,
+  counted: boolean,
 ): void {
   for (const rule of Array.from(list)) {
     if (rule.selectorText !== undefined) {
-      if (top) walk.seen.rules += 1;
+      if (counted) walk.seen.rules += 1;
       walkStyleRule(rule, walk, parent, conditions);
       continue;
     }
@@ -201,10 +204,10 @@ function walkRules(
         storeRule(parent, conditions, rule.style.cssText, walk);
       continue;
     }
-    if (top) count(walk.seen.atRules, keyword);
+    if (counted) count(walk.seen.atRules, keyword);
     if (CONDITIONAL_GROUPS.has(keyword) && rule.cssRules !== undefined) {
       const prelude = `${keyword} ${rule.conditionText ?? ""}`.trim();
-      walkRules(rule.cssRules, walk, parent, [...conditions, prelude], false);
+      walkRules(rule.cssRules, walk, parent, [...conditions, prelude], counted);
     } else if (keyword === "@font-face" && rule.style !== undefined) {
       liftFontFace(rule.style.cssText, walk);
     } else {
@@ -451,63 +454,115 @@ function stringEnd(text: string, at: number): number {
 // --------------------------------------------------------- the source --
 
 export interface SourceCount {
-  /** Top-level blocks that do not open with `@`: the style rules the
-   * author wrote, whatever the parser made of their selectors. */
+  /** Blocks that do not open with `@`, at the top level and inside the
+   * conditional groups the walk descends: the style rules the author
+   * wrote, whatever the parser made of their selectors. */
   rules: number;
-  /** Top-level at-rules by keyword, lower-cased — statements (`@import
-   * …;`) and blocks alike. */
+  /** At-rules by keyword, lower-cased, at the same vantage — statements
+   * (`@import …;`) and blocks alike. */
   atRules: Record<string, number>;
 }
 
 /**
- * What the source text says it holds at its top level, for the diff
- * against the CSSOM walk. Comments go first (the style attribute's own
- * stripper, quote-aware); then a scan that knows strings, parentheses
- * and braces: a statement starts at the first non-blank character and
- * ends at a top-level `;` or at the close of the block its `{` opens —
- * EOF closes a block, as it does for the parser, and a prelude that
- * never opens one is nothing, as it is for the parser.
+ * What the source text says it holds, for the diff against the CSSOM
+ * walk: the statements at its top level and, inside a `@media`,
+ * `@container` or `@supports` block, the statements at every depth the
+ * walk itself reaches (a Bootstrap-like sheet keeps most of its rules
+ * inside `@media`) — never inside a style rule or any other at-rule,
+ * whose blocks are skipped whole. Comments go first (the style
+ * attribute's own stripper, quote-aware); then a scan that knows
+ * strings, parentheses and braces: a statement starts at the first
+ * non-blank character and ends at a `;` of its own level or at the
+ * close of the block its `{` opens — EOF closes a block, as it does for
+ * the parser, and a prelude that never opens one is nothing, as it is
+ * for the parser.
  */
 export function countSource(source: string): SourceCount {
-  const text = stripComments(source);
   const out: SourceCount = { rules: 0, atRules: {} };
-  let i = 0;
+  scanStatements(stripComments(source), 0, out, true);
+  return out;
+}
+
+/** The statements from `at` to the `}` that closes the enclosing block
+ * (or EOF), counted into `out`; the index past that `}`. At the `top`
+ * level there is no block to close: a stray `}` is, for the parser, the
+ * first token of a qualified rule's prelude (css-syntax "consume a list
+ * of rules": anything else starts a qualified rule), so the block it
+ * reaches is a rule the parser then refuses — a loss the diff reports. */
+function scanStatements(
+  text: string,
+  at: number,
+  out: SourceCount,
+  top: boolean,
+): number {
+  let i = at;
   while (i < text.length) {
     const ch = text[i]!;
     if (/\s/.test(ch) || ch === ";") {
       i++;
       continue;
     }
+    if (ch === "}" && !top) return i + 1;
     const keyword = ch === "@" ? AT_KEYWORD.exec(text.slice(i))?.[0] : null;
-    // The statement: to a top-level `;`, or through its block.
-    let depth = 0;
-    let paren = 0;
-    let opened = false;
-    while (i < text.length) {
-      const c = text[i]!;
-      if (c === "\\") {
-        i += 2;
-        continue;
-      }
-      if (c === '"' || c === "'") {
-        i = stringEnd(text, i);
-        continue;
-      }
-      i++;
-      if (c === "(") paren++;
-      else if (c === ")") paren = Math.max(0, paren - 1);
-      else if (paren > 0) continue;
-      else if (c === "{") {
-        depth++;
-        opened = true;
-      } else if (c === "}") {
-        if (--depth <= 0) break;
-      } else if (c === ";" && depth === 0) break;
-    }
-    if (keyword !== null && keyword !== undefined) {
-      const lower = keyword.toLowerCase();
+    const lower = keyword?.toLowerCase() ?? null;
+    i = scanPrelude(text, i, top);
+    const opened = text[i] === "{";
+    if (lower !== null) {
       if (!PACKAGING_AT_RULES.has(lower)) count(out.atRules, lower);
-    } else if (opened) out.rules += 1;
+      if (!opened) {
+        i++;
+        continue;
+      }
+      i = CONDITIONAL_GROUPS.has(lower)
+        ? scanStatements(text, i + 1, out, false)
+        : scanBlock(text, i + 1);
+    } else if (opened) {
+      out.rules += 1;
+      i = scanBlock(text, i + 1);
+    } else {
+      i++;
+    }
   }
-  return out;
+  return i;
+}
+
+/** The index of the `{`, `;` or — inside a block — `}` that ends the
+ * prelude starting at `at` (or the text's length): strings and
+ * parentheses hide theirs. */
+function scanPrelude(text: string, at: number, top: boolean): number {
+  let i = at;
+  let paren = 0;
+  while (i < text.length) {
+    const c = text[i]!;
+    if (c === "\\") i += 2;
+    else if (c === '"' || c === "'") i = stringEnd(text, i);
+    else if (c === "(") {
+      paren++;
+      i++;
+    } else if (c === ")") {
+      paren = Math.max(0, paren - 1);
+      i++;
+    } else if (paren === 0 && (c === "{" || c === ";" || (c === "}" && !top)))
+      return i;
+    else i++;
+  }
+  return i;
+}
+
+/** The index past the `}` that closes the block whose contents start at
+ * `at` (or the text's length): nested blocks and strings are skipped. */
+function scanBlock(text: string, at: number): number {
+  let i = at;
+  let depth = 1;
+  while (i < text.length) {
+    const c = text[i]!;
+    if (c === "\\") i += 2;
+    else if (c === '"' || c === "'") i = stringEnd(text, i);
+    else {
+      i++;
+      if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) return i;
+    }
+  }
+  return i;
 }

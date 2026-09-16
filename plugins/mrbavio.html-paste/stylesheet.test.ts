@@ -284,6 +284,32 @@ describe("walkStyleSheet", () => {
     // A @charset is packaging, never a loss.
     expect(out.dropped).toEqual({ "@import": 1, rule: 1, "@foo": 1 });
   });
+
+  test("the diff reaches inside @media, @container and @supports, where a Bootstrap-like sheet keeps most of its rules", () => {
+    const source = `
+      @media (min-width: 576px) {
+        .btn { padding: 8px }
+        .ok, :foo { color: red }
+        @supports (gap: 1px) { .g { gap: 1px } @bar { } }
+      }
+      .x { @media (min-width: 1px) { .inside-a-rule, :foo { color: red } } }
+    `;
+    const out = walk(
+      [
+        group("@media (min-width: 576px)", [
+          style(".btn", "padding: 8px"),
+          group("@supports (gap: 1px)", [style(".g", "gap: 1px")]),
+        ]),
+        style(".x", "", [group("@media (min-width: 1px)", [])]),
+      ],
+      source,
+    );
+    expect(out.rules.map((rule) => rule.selector)).toEqual([".btn", ".g"]);
+    // The rule lost inside a style rule's block is not seen: the
+    // tokenizer skips a style rule's block whole, as the walk skips
+    // nothing there that the CSSOM did not keep.
+    expect(out.dropped).toEqual({ rule: 1, "@bar": 1 });
+  });
 });
 
 describe("flattenSelector", () => {
@@ -311,7 +337,7 @@ describe("flattenSelector", () => {
 });
 
 describe("countSource", () => {
-  test("top-level blocks not starting with @ are rules; at-rules by keyword, statements and blocks alike, a @charset never; comments and strings hide their braces", () => {
+  test("blocks not starting with @ are rules, inside a conditional group too; at-rules by keyword, statements and blocks alike, a @charset never; a style rule's and any other at-rule's block is skipped whole; comments and strings hide their braces", () => {
     expect(
       countSource(`
         @charset "utf-8";
@@ -320,7 +346,7 @@ describe("countSource", () => {
         /* .x { } */
         .a { color: red; content: "}"; }
         .b, .c { .d { } }
-        @media (min-width: 1px) { .e { } }
+        @media (min-width: 1px) { .e { } @container c (width > 1px) { .e2 {} } }
         @MEDIA print { }
         @font-face { src: url(x) }
         @keyframes k { from { } to { } }
@@ -328,11 +354,12 @@ describe("countSource", () => {
         .g { color: "{" }
       `),
     ).toEqual({
-      rules: 4,
+      rules: 6,
       atRules: {
         "@import": 1,
         "@layer": 1,
         "@media": 2,
+        "@container": 1,
         "@font-face": 1,
         "@keyframes": 1,
       },
@@ -344,5 +371,13 @@ describe("countSource", () => {
     expect(countSource(".a")).toEqual({ rules: 0, atRules: {} });
     expect(countSource(".a { color: red")).toEqual({ rules: 1, atRules: {} });
     expect(countSource("; ; .a {}")).toEqual({ rules: 1, atRules: {} });
+    expect(countSource("@media print { .a { color: red")).toEqual({
+      rules: 1,
+      atRules: { "@media": 1 },
+    });
+    expect(countSource("@media print { } } .b {}")).toEqual({
+      rules: 1,
+      atRules: { "@media": 1 },
+    });
   });
 });
