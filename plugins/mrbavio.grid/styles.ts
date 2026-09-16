@@ -1,6 +1,8 @@
 // The overlay's CSS as a string (decisions.md #48: plugins ship no CSS
-// files — runtime loading cannot serve them). Mounted ONCE, beside the svg
-// in the overlay root (GridOverlay.tsx). Class names and the hatch pattern
+// files — runtime loading cannot serve them). Handed to `registerOverlay`
+// as `styles` (index.tsx): the kernel mounts it once, first in the overlay
+// root, inside the dream-plugin layer (decisions.md #71) — a <style> of the
+// overlay's own would be unlayered and is refused. Class names and the hatch pattern
 // id carry a prefix DERIVED from `dd.plugin.id` (classPrefix —
 // `mrbavio.grid` → `daydream-grid-…`), so a copy of this plugin under
 // another id styles its own nodes, and its gap bands reference its own

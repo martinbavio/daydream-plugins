@@ -9,7 +9,7 @@ import {
   type GridGeometry,
   type GridTrack,
 } from "./gridGeometry";
-import { classPrefix, css } from "./styles";
+import { classPrefix } from "./styles";
 
 /**
  * DevTools-style read-only grid visuals, drawn into the `overlay.screen`
@@ -95,9 +95,9 @@ function Badge(props: { prefix: string; x: number; y: number; line: number }) {
   );
 }
 
-/** The overlay's content: one `<style>` and the svg layer, rendered once
- * per registration under the slot's owner (the effect below lives with
- * it). */
+/** The overlay's content: the svg layer, rendered once per registration
+ * under the slot's owner (the effect below lives with it). Its CSS is the
+ * registration's `styles` (index.tsx), mounted by the kernel. */
 export default function createGridOverlay(dd: DaydreamApi): JSX.Element {
   // Class and pattern-id prefix from the plugin id: a copy under another
   // id draws with its own pattern and classes, never this plugin's.
@@ -140,115 +140,112 @@ export default function createGridOverlay(dd: DaydreamApi): JSX.Element {
   };
 
   return (
-    <>
-      <style>{css(p)}</style>
-      <svg class={`${p}-layer`} aria-hidden="true">
-        <Show when={visual()}>
-          {(v) => {
-            const rect = () => v().rect;
-            const geometry = () => v().geometry;
-            const rowSpan = () => trackSpan(geometry().rows);
-            const colSpan = () => trackSpan(geometry().cols);
-            return (
-              <g>
-                <defs>
-                  {/* Seamless 6x6 diagonal hatch tile; userSpaceOnUse =
-                      screen space, so the hatch scale is constant at any
-                      zoom. */}
-                  <pattern
-                    id={`${p}-gap-hatch`}
-                    patternUnits="userSpaceOnUse"
-                    width="6"
-                    height="6"
-                  >
-                    <path class={`${p}-hatch-line`} d="M 0 6 L 6 0" />
-                    <path class={`${p}-hatch-line`} d="M -1.5 1.5 L 1.5 -1.5" />
-                    <path class={`${p}-hatch-line`} d="M 4.5 7.5 L 7.5 4.5" />
-                  </pattern>
-                </defs>
-                {/* Hatched gap bands, clipped to the perpendicular track
-                    span. */}
-                <Show when={rowSpan()}>
-                  {(span) => (
-                    <For each={geometry().colGaps}>
-                      {(gap) => (
-                        <rect
-                          class={`${p}-gap-band`}
-                          x={gap.start}
-                          y={span().start}
-                          width={gap.end - gap.start}
-                          height={span().end - span().start}
-                        />
-                      )}
-                    </For>
-                  )}
-                </Show>
-                <Show when={colSpan()}>
-                  {(span) => (
-                    <For each={geometry().rowGaps}>
-                      {(gap) => (
-                        <rect
-                          class={`${p}-gap-band`}
-                          x={span().start}
-                          y={gap.start}
-                          width={span().end - span().start}
-                          height={gap.end - gap.start}
-                        />
-                      )}
-                    </For>
-                  )}
-                </Show>
-                {/* Dashed track boundary lines, extended past the
-                    container. */}
-                <For each={trackEdges(geometry().cols)}>
-                  {(x) => (
-                    <line
-                      class={`${p}-line`}
-                      x1={x}
-                      y1={rect().y - LINE_EXTENSION}
-                      x2={x}
-                      y2={rect().y + rect().height + LINE_EXTENSION}
-                    />
-                  )}
-                </For>
-                <For each={trackEdges(geometry().rows)}>
-                  {(y) => (
-                    <line
-                      class={`${p}-line`}
-                      x1={rect().x - LINE_EXTENSION}
-                      y1={y}
-                      x2={rect().x + rect().width + LINE_EXTENSION}
-                      y2={y}
-                    />
-                  )}
-                </For>
-                {/* Line-number badges: columns across the top, rows down
-                    the left. Positive lines only (decisions.md #11). */}
-                <For each={lineAnchors(geometry().cols)}>
-                  {(x, i) => (
-                    <Badge
-                      prefix={p}
-                      x={x}
-                      y={rect().y - BADGE_OFFSET}
-                      line={i() + 1}
-                    />
-                  )}
-                </For>
-                <For each={lineAnchors(geometry().rows)}>
-                  {(y, i) => (
-                    <Badge
-                      prefix={p}
-                      x={rect().x - BADGE_OFFSET}
-                      y={y}
-                      line={i() + 1}
-                    />
-                  )}
-                </For>
-              </g>
-            );
-          }}
-        </Show>
-      </svg>
-    </>
+    <svg class={`${p}-layer`} aria-hidden="true">
+      <Show when={visual()}>
+        {(v) => {
+          const rect = () => v().rect;
+          const geometry = () => v().geometry;
+          const rowSpan = () => trackSpan(geometry().rows);
+          const colSpan = () => trackSpan(geometry().cols);
+          return (
+            <g>
+              <defs>
+                {/* Seamless 6x6 diagonal hatch tile; userSpaceOnUse =
+                    screen space, so the hatch scale is constant at any
+                    zoom. */}
+                <pattern
+                  id={`${p}-gap-hatch`}
+                  patternUnits="userSpaceOnUse"
+                  width="6"
+                  height="6"
+                >
+                  <path class={`${p}-hatch-line`} d="M 0 6 L 6 0" />
+                  <path class={`${p}-hatch-line`} d="M -1.5 1.5 L 1.5 -1.5" />
+                  <path class={`${p}-hatch-line`} d="M 4.5 7.5 L 7.5 4.5" />
+                </pattern>
+              </defs>
+              {/* Hatched gap bands, clipped to the perpendicular track
+                  span. */}
+              <Show when={rowSpan()}>
+                {(span) => (
+                  <For each={geometry().colGaps}>
+                    {(gap) => (
+                      <rect
+                        class={`${p}-gap-band`}
+                        x={gap.start}
+                        y={span().start}
+                        width={gap.end - gap.start}
+                        height={span().end - span().start}
+                      />
+                    )}
+                  </For>
+                )}
+              </Show>
+              <Show when={colSpan()}>
+                {(span) => (
+                  <For each={geometry().rowGaps}>
+                    {(gap) => (
+                      <rect
+                        class={`${p}-gap-band`}
+                        x={span().start}
+                        y={gap.start}
+                        width={span().end - span().start}
+                        height={gap.end - gap.start}
+                      />
+                    )}
+                  </For>
+                )}
+              </Show>
+              {/* Dashed track boundary lines, extended past the
+                  container. */}
+              <For each={trackEdges(geometry().cols)}>
+                {(x) => (
+                  <line
+                    class={`${p}-line`}
+                    x1={x}
+                    y1={rect().y - LINE_EXTENSION}
+                    x2={x}
+                    y2={rect().y + rect().height + LINE_EXTENSION}
+                  />
+                )}
+              </For>
+              <For each={trackEdges(geometry().rows)}>
+                {(y) => (
+                  <line
+                    class={`${p}-line`}
+                    x1={rect().x - LINE_EXTENSION}
+                    y1={y}
+                    x2={rect().x + rect().width + LINE_EXTENSION}
+                    y2={y}
+                  />
+                )}
+              </For>
+              {/* Line-number badges: columns across the top, rows down
+                  the left. Positive lines only (decisions.md #11). */}
+              <For each={lineAnchors(geometry().cols)}>
+                {(x, i) => (
+                  <Badge
+                    prefix={p}
+                    x={x}
+                    y={rect().y - BADGE_OFFSET}
+                    line={i() + 1}
+                  />
+                )}
+              </For>
+              <For each={lineAnchors(geometry().rows)}>
+                {(y, i) => (
+                  <Badge
+                    prefix={p}
+                    x={rect().x - BADGE_OFFSET}
+                    y={y}
+                    line={i() + 1}
+                  />
+                )}
+              </For>
+            </g>
+          );
+        }}
+      </Show>
+    </svg>
   );
 }

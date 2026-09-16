@@ -192,11 +192,15 @@ describe("mrbavio.notes in the shell", () => {
     const panel = mounted.panel()!;
     expect(panel).not.toBeNull();
     expect(notes()).toBeNull();
-    // The root holds its one <style> and nothing else — and takes no
+    // The root holds nothing (its CSS is the kernel's <style> in the
+    // panel section, from `styles` — decisions.md #71) — and takes no
     // height: the padding is the body's, so an empty pane is a zero-height
     // row under the dock's caption, not a blank inset.
+    const styles = panel.querySelectorAll("style");
+    expect(styles).toHaveLength(1);
+    expect(styles[0]!.textContent).toMatch(/^@layer dream-plugin \{/);
     const body = panel.querySelector<HTMLElement>(".daydream-notes-panel")!;
-    expect(Array.from(body.children, (el) => el.tagName)).toEqual(["STYLE"]);
+    expect(body.children).toHaveLength(0);
     expect(body.getBoundingClientRect().height).toBe(0);
     select(grid);
     expect(notes()).toBeNull();

@@ -1,9 +1,13 @@
-// The plugin's CSS, mounted once as a <style> (a plugin ships CSS as a
-// string). Quiet: small, sentence case, the chrome's own colours; the
-// caption reads as a note on the target, the picker as a list beside it.
+// The plugin's CSS as strings, one per overlay, handed to each
+// `registerOverlay` as `styles` (index.tsx): the kernel mounts each once
+// in its overlay root, inside the dream-plugin layer (decisions.md #71) —
+// a <style> of the plugin's own would be unlayered and is refused. Quiet:
+// small, sentence case, the chrome's own colours; the caption reads as a
+// note on the target, the picker as a list beside it.
 export const classPrefix = "impeccable";
 
-export const css = `
+/** The caption overlay's rules. */
+export const captionCss = `
 .${classPrefix}-caption {
   position: absolute;
   font: 11px/1.4 system-ui, sans-serif;
@@ -14,6 +18,10 @@ export const css = `
 .${classPrefix}-caption[data-phase="building"] {
   color: #c98a1f;
 }
+`;
+
+/** The picker overlay's rules. */
+export const pickerCss = `
 .${classPrefix}-picker {
   position: absolute;
   width: 180px;

@@ -46,8 +46,13 @@ describe("mrbavio.grid", () => {
         .closest("[data-plugin-overlay-slot]")
         ?.getAttribute("data-plugin-overlay-slot"),
     ).toBe("overlay.screen");
-    // One <style>, prefixed classes, nothing drawn without a selection.
-    expect(overlay!.querySelectorAll("style")).toHaveLength(1);
+    // One <style> — the kernel's, from `styles`, in the plugin layer
+    // (decisions.md #71); prefixed classes; nothing drawn without a
+    // selection.
+    const styles = overlay!.querySelectorAll("style");
+    expect(styles).toHaveLength(1);
+    expect(styles[0]!.textContent).toMatch(/^@layer dream-plugin \{/);
+    expect(styles[0]!.textContent).toContain(".daydream-grid-line");
     expect(overlay!.querySelectorAll("line")).toHaveLength(0);
 
     mounted.store.setSelectedId(grid.id);

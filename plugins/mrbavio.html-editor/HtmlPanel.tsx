@@ -20,7 +20,7 @@ import { parseHtml, type PaneLevel } from "./htmlDom";
 import { createHtmlEditor, type HtmlEditorHandle } from "./htmlEditor";
 import { reconcile } from "./reconcile";
 import { serializeElement } from "./serialize";
-import { classPrefix, css } from "./styles";
+import { classPrefix } from "./styles";
 
 /** Text the pane could not apply when it had to let go of the element:
  * kept per element so a refusal, a re-targeting or a hidden dock never
@@ -369,7 +369,6 @@ export default function createHtmlPanel(state: PanelState) {
 
   return (
     <div class={`${p}-panel`}>
-      <style>{css(p)}</style>
       <Show
         when={selected()}
         fallback={

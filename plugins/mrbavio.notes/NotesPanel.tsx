@@ -16,7 +16,7 @@ import type {
 } from "@daydream/plugin-api";
 
 import { boldSegments, parseNotes } from "./notesFormat";
-import { classPrefix, css } from "./styles";
+import { classPrefix } from "./styles";
 
 /**
  * A factory, not a `<Component>`: the panel's `render` (index.tsx) calls
@@ -41,7 +41,6 @@ export default function createNotesPanel(dd: DaydreamApi) {
 
   return (
     <div class={`${p}-panel`}>
-      <style>{css(p)}</style>
       <Show when={meta()}>
         {(meta) => (
           <section class={`${p}-body`} aria-label="Document notes">
