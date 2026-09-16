@@ -1,21 +1,9 @@
 ---
 topic: procedures
 title: Layout procedures
-tags:
-  [
-    procedure,
-    formatting-context,
-    flow,
-    flex,
-    grid,
-    absolute,
-    cascade,
-    declarations,
-    loop,
-  ]
+tags: [procedure, formatting-context, flow, flex, grid, absolute, cascade, declarations, loop]
 tier: procedure
-status: v1 draft from general expertise — to be corrected against the maintainer's notes; hard budget about 1,200 tokens
-summary: Decision procedures against the three judgment failures — which formatting context, whether a declaration is needed at all, where in the cascade to set it — and the author → land → fix → land loop.
+summary: Decision procedures against the three judgment failures — which formatting context, whether a declaration is needed at all, where in the cascade to set it (a rule or the element) — and the author → land → fix → land loop.
 ---
 
 ## 1. Which formatting context
@@ -45,13 +33,13 @@ Then: would the page change if this line went — at this width or at another? I
 - Set inherited properties (font, color, line-height) on the nearest common ancestor — usually `html` — and let inheritance work. Do not restate them on children.
 - Layout goes on the container, sizing on the items. A child's `margin` fights a parent's `gap`: pick one.
 - A conditional layer overrides the base ONLY for what changes under that condition. A layer restating the base is dead weight; a layer per breakpoint nobody asked for is invented responsiveness. Write the widest-reaching state as the base.
-- No `!important`, ever. Each element has one style map and ordered layers; later wins, and that is the whole cascade here.
-- One reason per element. A wrapper that exists only to carry a declaration should give the declaration to its child or parent and disappear.
+- No `!important`, ever. Shared styling is a rule, its selector naming who shares it; a one-off is on the element's map, which is inline and beats every rule — an element's conditional layer beats a rule's `@media`. Never restate on an element what a rule sets: the redundancy finding blocks it. Write a rule before the elements it styles.
+- One reason per element. A wrapper that exists only to carry a declaration gives it to its child or parent and disappears.
 
 ## 4. The loop
 
-1. This file rides the `dream-author` prompt; `knowledge_bundle {query}` brings the format rules with the nearest example in one call.
+1. This file rides the `dream-author` prompt; `knowledge_bundle {query}` brings the format rules with the nearest example.
 2. Gather the source or the intent; decide each container's formatting context with §1.
 3. Author the smallest document; pass every declaration through §2 and §3.
-4. Land it (the server instructions name the tool: new document, or one viewport reworked in place) and let every gate run there — format, static, necessity; a refusal's findings say what to fix, then land again.
+4. Land it (the server instructions name the tool) and let every gate run there — format, static, necessity; a refusal's findings say what to fix, then land again.
 5. Then read what came back: it names what still needs fixing, if anything, with the element to fix it on. Your reply comes from that, not from a second look; the track summaries are `measure`'s.
