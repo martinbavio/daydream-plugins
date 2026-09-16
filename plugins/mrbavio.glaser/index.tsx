@@ -149,25 +149,40 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     name: HTML_TOOL,
     title: "Glaser HTML",
     description:
-      "One viewport as a standalone HTML file — the page exactly as the canvas renders it, styles and fonts inline — for Impeccable's detector: write it to a file and run `impeccable detect --json <file>`. Answers {viewportId, html, bytes}. Reads only.",
+      "One viewport as a standalone HTML file — the page exactly as the canvas renders it, styles and fonts inline — for Impeccable's detector: write it to a file and run `impeccable detect --json <file>`. With `element`, that element and everything under it carry data-glaser-target=\"\" in the page, so a finding is the target's when its element has the attribute (and every element keeps its data-dream-id). Answers {viewportId, html, bytes, target?: {id, marked}}. Reads only.",
     inputSchema: {
       type: "object",
-      properties: { viewport: { type: "string", description: "A viewport id from canvas_state" } },
+      properties: {
+        viewport: { type: "string", description: "A viewport id from canvas_state" },
+        element: {
+          type: "string",
+          description: "An element id inside it: the target to mark, subtree included",
+        },
+      },
       required: ["viewport"],
     },
     annotations: { readOnlyHint: true },
     run: async (input) => {
       const id = String(input["viewport"] ?? "");
+      const element = typeof input["element"] === "string" ? input["element"] : undefined;
       const viewport = dd.core.viewportItems(dd.document()).find((v) => v.id === id);
       if (viewport === undefined) throw new Error(`no viewport with id "${id}"`);
       const mounted = await dd.mountViewport(viewport, { still: true });
       try {
         const doc = mounted.document();
+        let target: { id: string; marked: number } | undefined;
+        if (element !== undefined) {
+          const node = doc.querySelector(`[data-dream-id="${CSS.escape(element)}"]`);
+          if (node === null) throw new Error(`no element with id "${element}" in viewport "${id}"`);
+          const nodes = [node, ...node.querySelectorAll("*")];
+          for (const n of nodes) n.setAttribute("data-glaser-target", "");
+          target = { id: element, marked: nodes.length };
+        }
         const html = `<!doctype html>\n${doc.documentElement.outerHTML}`.replace(
           /(src|href)="\/assets\//g,
           `$1="${window.location.origin}/assets/`,
         );
-        return { viewportId: id, html, bytes: html.length };
+        return { viewportId: id, html, bytes: html.length, ...(target === undefined ? {} : { target }) };
       } finally {
         mounted.dispose();
       }

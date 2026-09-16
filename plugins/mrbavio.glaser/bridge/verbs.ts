@@ -256,8 +256,14 @@ function deliverableSection(input: PromptInput): string {
   const id = target?.viewport.id ?? "<viewport id>";
   if (spec.mode === "report") {
     const detect = `${input.skillDir}/scripts/impeccable detect --json`;
+    const el = target?.elementId ?? null;
+    const call = el === null ? `glaser_html {viewport: "${id}"}` : `glaser_html {viewport: "${id}", element: "${el}"}`;
+    const scope =
+      el === null
+        ? ""
+        : ` The target and everything under it carry data-glaser-target="" in that page (every element keeps its data-dream-id): a finding is the target's when its element has the attribute; the rest of the page is context you judge against, not what you report on.`;
     return [
-      `DELIVERABLE: THE REPORT, in chat — nothing lands on the canvas. The playbook's evidence step is Impeccable's detector, and it runs over the RENDERED PAGE, not the JSON: call glaser_html {viewport: "${id}"} — the viewport as one standalone HTML file, styles and fonts inline, exactly as the canvas renders it — write it to a file (say /tmp/glaser-${id}.html; a harness that saved the answer to a file for you already has it on disk), then run \`${detect} /tmp/glaser-${id}.html\` and read its JSON. Where the playbook says a browser, a screenshot or a URL, the file IS the page; where it names a sub-command to run, name it for the user instead (a Glaser verb of the same name, picked on the canvas). Where it wants a snapshot persisted, skip it. Write the report the playbook describes, scoped to the target and ordered by what to fix first; when it wants sub-agents and the user allows them, use them. Then glaser_done. Never open a draft or change the page: this verb only judges it.`,
+      `DELIVERABLE: THE REPORT, in chat — nothing lands on the canvas. The playbook's evidence step is Impeccable's detector, and it runs over the RENDERED PAGE, not the JSON: call ${call} — the viewport as one standalone HTML file, styles and fonts inline, exactly as the canvas renders it — write it to a file (say /tmp/glaser-${id}.html; a harness that saved the answer to a file for you already has it on disk), then run \`${detect} /tmp/glaser-${id}.html\` and read its JSON.${scope} Where the playbook says a browser, a screenshot or a URL, the file IS the page; where it names a sub-command to run, name it for the user instead (a Glaser verb of the same name, picked on the canvas). Where it wants a snapshot persisted, skip it. Write the report the playbook describes, scoped to the target and ordered by what to fix first; when it wants sub-agents and the user allows them, use them. Then glaser_done. Never open a draft or change the page: this verb only judges it.`,
     ].join("\n");
   }
   if (spec.mode === "in-place") {

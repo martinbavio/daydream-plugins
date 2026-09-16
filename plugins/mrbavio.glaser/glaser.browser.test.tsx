@@ -333,6 +333,18 @@ describe("mrbavio.glaser in the shell", () => {
     await settle();
     expect(document.querySelectorAll("iframe").length).toBe(0);
     await expect(tool(HTML_TOOL).run({ viewport: "nope" })).rejects.toThrow(/no viewport/);
+    // With an element: it and its subtree are marked, nothing else.
+    const grid = fixtureRoot(doc).children[0]!.children[0]!;
+    const marked = (await tool(HTML_TOOL).run({ viewport: viewport.id, element: grid.id })) as {
+      html: string;
+      target?: { id: string; marked: number };
+    };
+    expect(marked.target).toEqual({ id: grid.id, marked: 1 + grid.children.length });
+    const page = new DOMParser().parseFromString(marked.html, "text/html");
+    expect(page.querySelectorAll("[data-glaser-target]").length).toBe(1 + grid.children.length);
+    expect(page.querySelector(`[data-dream-id="${grid.id}"]`)!.hasAttribute("data-glaser-target")).toBe(true);
+    expect(page.body.hasAttribute("data-glaser-target")).toBe(false);
+    await expect(tool(HTML_TOOL).run({ viewport: viewport.id, element: "nope" })).rejects.toThrow(/no element/);
 
     select(viewport.payload.root.id);
     run("mrbavio.glaser.pick");

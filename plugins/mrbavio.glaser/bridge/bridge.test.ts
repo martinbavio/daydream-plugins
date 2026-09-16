@@ -296,6 +296,13 @@ describe("glaser host part", () => {
     expect(text).not.toContain("VARIANTS");
     expect(text).not.toContain("draft_open {from:");
     expect(text).toContain("The audit playbook.");
+    expect(text).not.toContain("data-glaser-target");
+    // On an element: the export marks the target, the report keeps to it.
+    const scoped = fakeHost(state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [] }));
+    await activate(scoped.host);
+    const on = await (scoped.prompts.find((p) => p.name === "glaser-critique")!.build as Build)({});
+    expect(on).toContain('glaser_html {viewport: "vp_pricing", element: "el_card"}');
+    expect(on).toContain('data-glaser-target=""');
   });
 
   test("instructionsText and stateSlice are plain", () => {
