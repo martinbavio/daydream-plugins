@@ -762,13 +762,20 @@ describe("the sheet (decisions.md #71)", () => {
 
   test("a style block under a noscript goes with the noscript, counted once under its tag: the page never applies it", () => {
     const conversion = convert(
-      '<noscript><style>.n { display: none }</style></noscript><p class="n">shown</p>',
+      '<p class="n">shown</p><noscript><style>.n { display: none }</style></noscript>',
     );
     expect(conversion.item.payload.sheet).toBeUndefined();
     expect(conversion.report).toEqual({
       ...emptyReport(),
       dropped: { noscript: 1 },
     });
+    // A leading noscript is the parser's "in head noscript": the head is
+    // packaging, so nothing is reported — and still nothing lands.
+    const hoisted = convert(
+      '<noscript><style>.n { display: none }</style></noscript><p class="n">shown</p>',
+    );
+    expect(hoisted.item.payload.sheet).toBeUndefined();
+    expect(hoisted.report).toEqual(emptyReport());
   });
 
   test("an svg's style block styles the drawing and goes with it, under the svg's own downgrade count and nothing more", () => {
