@@ -149,7 +149,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     name: HTML_TOOL,
     title: "Glaser HTML",
     description:
-      "One viewport as a standalone HTML file — the page exactly as the canvas renders it, styles and fonts inline — for Impeccable's detector: write it to a file and run `impeccable detect --json <file>`. With `element`, that element and everything under it carry data-glaser-target=\"\" in the page, so a finding is the target's when its element has the attribute (and every element keeps its data-dream-id). Answers {viewportId, html, bytes, target?: {id, marked}}. Reads only.",
+      "One viewport as a standalone HTML file — the page exactly as the canvas renders it, styles and fonts inline — for Impeccable's detector: write it to a file and run `impeccable detect --json <file>`. With `element`, the page is PRUNED to that element: its subtree and its ancestors (the cascade it inherits from), every ancestor's other children removed — so every finding over the file is the target's; the subtree also carries data-glaser-target=\"\". Answers {viewportId, html, bytes, target?: {id, kept, pruned}}. Reads only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -170,13 +170,27 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
       const mounted = await dd.mountViewport(viewport, { still: true });
       try {
         const doc = mounted.document();
-        let target: { id: string; marked: number } | undefined;
+        let target: { id: string; kept: number; pruned: number } | undefined;
         if (element !== undefined) {
           const node = doc.querySelector(`[data-dream-id="${CSS.escape(element)}"]`);
           if (node === null) throw new Error(`no element with id "${element}" in viewport "${id}"`);
-          const nodes = [node, ...node.querySelectorAll("*")];
-          for (const n of nodes) n.setAttribute("data-glaser-target", "");
-          target = { id: element, marked: nodes.length };
+          // PRUNE the page to the target: its subtree, its ancestors (the
+          // cascade the detector's contrast and size rules read — inherited
+          // colour and font, the backgrounds behind it), and nothing else
+          // — every ancestor's other children go. The detector reports no
+          // element, only text and colours, so a page holding nothing but
+          // the target is the one way a finding is the target's for sure.
+          const subtree = [node, ...node.querySelectorAll("*")];
+          for (const n of subtree) n.setAttribute("data-glaser-target", "");
+          let pruned = 0;
+          for (let el: Element | null = node.parentElement; el !== null; el = el.parentElement) {
+            for (const child of [...el.children]) {
+              if (child === node || child.contains(node) || child.tagName === "HEAD") continue;
+              child.remove();
+              pruned += 1;
+            }
+          }
+          target = { id: element, kept: subtree.length, pruned };
         }
         const html = `<!doctype html>\n${doc.documentElement.outerHTML}`.replace(
           /(src|href)="\/assets\//g,

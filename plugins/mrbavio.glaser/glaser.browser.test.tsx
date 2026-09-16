@@ -333,17 +333,27 @@ describe("mrbavio.glaser in the shell", () => {
     await settle();
     expect(document.querySelectorAll("iframe").length).toBe(0);
     await expect(tool(HTML_TOOL).run({ viewport: "nope" })).rejects.toThrow(/no viewport/);
-    // With an element: it and its subtree are marked, nothing else.
-    const grid = fixtureRoot(doc).children[0]!.children[0]!;
-    const marked = (await tool(HTML_TOOL).run({ viewport: viewport.id, element: grid.id })) as {
+    // With an element: the page is pruned to it — its subtree, its
+    // ancestors, the style block — and the subtree is marked.
+    const body = fixtureRoot(doc).children[0]!;
+    const grid = body.children[0]!.children[0]!;
+    const pruned = (await tool(HTML_TOOL).run({ viewport: viewport.id, element: grid.id })) as {
       html: string;
-      target?: { id: string; marked: number };
+      target?: { id: string; kept: number; pruned: number };
     };
-    expect(marked.target).toEqual({ id: grid.id, marked: 1 + grid.children.length });
-    const page = new DOMParser().parseFromString(marked.html, "text/html");
+    expect(pruned.target).toMatchObject({ id: grid.id, kept: 1 + grid.children.length });
+    expect(pruned.target!.pruned).toBeGreaterThan(0);
+    const page = new DOMParser().parseFromString(pruned.html, "text/html");
+    expect(page.querySelector("style")).not.toBeNull();
     expect(page.querySelectorAll("[data-glaser-target]").length).toBe(1 + grid.children.length);
-    expect(page.querySelector(`[data-dream-id="${grid.id}"]`)!.hasAttribute("data-glaser-target")).toBe(true);
+    expect(page.querySelector(`[data-dream-id="${grid.id}"]`)).not.toBeNull();
+    // Every element left is an ancestor of the target or inside it.
+    const gridNode = page.querySelector(`[data-dream-id="${grid.id}"]`)!;
+    for (const el of page.body.querySelectorAll("*")) {
+      expect(el.contains(gridNode) || gridNode.contains(el)).toBe(true);
+    }
     expect(page.body.hasAttribute("data-glaser-target")).toBe(false);
+    expect(page.body.querySelectorAll("*").length).toBeLessThan(reply.html.split("<").length);
     await expect(tool(HTML_TOOL).run({ viewport: viewport.id, element: "nope" })).rejects.toThrow(/no element/);
 
     select(viewport.payload.root.id);

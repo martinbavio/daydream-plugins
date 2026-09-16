@@ -302,7 +302,8 @@ describe("glaser host part", () => {
     await activate(scoped.host);
     const on = await (scoped.prompts.find((p) => p.name === "glaser-critique")!.build as Build)({});
     expect(on).toContain('glaser_html {viewport: "vp_pricing", element: "el_card"}');
-    expect(on).toContain('data-glaser-target=""');
+    expect(on).toContain("PRUNED to the target");
+    expect(on).toContain("not npx");
   });
 
   test("instructionsText and stateSlice are plain", () => {
