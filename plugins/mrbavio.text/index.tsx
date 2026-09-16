@@ -1,5 +1,5 @@
 import type { DaydreamApi, DreamItem } from "@daydream/plugin-api";
-import { createSignal, onCleanup, Show } from "solid-js";
+import { createSignal, Show } from "solid-js";
 
 import { registerClipboard } from "./clipboard";
 import { registerTextCommands } from "./commands";
@@ -12,16 +12,20 @@ import TextItemView from "./TextItem";
 export default function activate(dd: DaydreamApi): void {
   const editing = createTextEditing();
   const [draft, setDraft] = createSignal<DreamItem | null>(null);
-  // Install before registering the kind: ingest can measure immediately.
-  const style = document.createElement("style");
-  style.dataset["daydreamTextStyles"] = "";
-  style.textContent = textStyles;
-  document.head.append(style);
-  onCleanup(() => style.remove());
 
+  // The kind's CSS rides its registration: the kernel mounts it inside
+  // each item root, in the dream-plugin layer, below the seal — so a page
+  // element carrying `class="daydream-text-item"` gets none of it
+  // (decisions.md #71). A <style> appended to the head, as before, was
+  // unlayered and outside any plugin root the kernel guards. The draft
+  // overlay carries the same string: its root is mounted for as long as
+  // the plugin is, and a <style> applies document-wide, so the sheet is
+  // in the document before any item lands — the measurement helper's
+  // body-mounted node (measurement.ts) reads the same rules.
   dd.registerItemKind({
     kind: TEXT_KIND,
     payloadProblem: textPayloadProblem,
+    styles: textStyles,
     render: (props) => (
       <Show when={draft()?.id !== props.item.id}>
         <TextItemView dd={dd} editing={editing} item={props.item} />
@@ -51,6 +55,7 @@ export default function activate(dd: DaydreamApi): void {
   dd.registerOverlay({
     id: "draft",
     slot: "overlay.world",
+    styles: textStyles,
     render: () => (
       <Show when={draft()}>
         {(item) => (

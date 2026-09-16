@@ -15,11 +15,15 @@
 import type { DaydreamApi } from "@daydream/plugin-api";
 
 import createGridOverlay from "./GridOverlay";
+import { classPrefix, css } from "./styles";
 
 export default function activate(dd: DaydreamApi): void {
   dd.registerOverlay({
     id: "grid",
     slot: "overlay.screen",
+    // The overlay's CSS, mounted by the kernel in the plugin layer
+    // (decisions.md #71) — never a <style> of the overlay's own.
+    styles: css(classPrefix(dd.plugin.id)),
     render: () => createGridOverlay(dd),
   });
 }

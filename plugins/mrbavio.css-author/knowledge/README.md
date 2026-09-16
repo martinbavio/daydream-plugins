@@ -15,7 +15,7 @@ Markdown files with YAML frontmatter, in three of the four tiers:
 - `reference` — `reference/`, longer synthesis read on demand through
   `knowledge_search` / `knowledge_read`.
 
-The fourth tier, `format` — the .dream v5 rules — is CORE's
+The fourth tier, `format` — the .dream v6 rules — is CORE's
 (`knowledge/format.md` at the repo root): the MCP server's own instructions
 carry it, and the bundle returns it as `format.md`. Nothing here restates
 it (tools/knowledge/singleSource.test.ts).

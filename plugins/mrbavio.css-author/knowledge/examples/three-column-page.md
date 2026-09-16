@@ -1,9 +1,9 @@
 ---
 topic: three-column-page
 title: Three-column page — fixed sidebars, fluid article
-tags: [example, grid, columns, fr, gap, media, stacking]
+tags: [example, grid, columns, fr, gap, media, stacking, sheet, rule, class]
 tier: example
-summary: A navigation, article and aside as one grid — fixed rem sidebars, a fluid fr article — that stacks into one column below 640px through a single media layer on the body.
+summary: A navigation, article and aside as one grid — fixed rem sidebars, a fluid fr article — that stacks into one column below 640px through a single media layer on the body; the two sidebars share one .card rule in the sheet.
 intent: A page with navigation on the left, an article in the middle and an aside on the right. The sidebars keep their width, the article takes the rest, and under 640px everything stacks.
 ---
 
@@ -15,8 +15,19 @@ container owns the spacing (`gap`). Flex would spread the same decision
 over the items (`flex: 1` on the article, a width on each sidebar) and hide
 the track structure the lesson is about; grid states it in one declaration.
 
+## Why a rule
+
+Procedures §3: the two sidebars share their padding, so it is written ONCE
+as a `.card` rule in the sheet, and `class: "card"` on each names who
+shares it. What is each sidebar's alone — its background — stays on the
+element's map, which beats every rule. The article is not a card: its
+padding is its own, so it stays on the element. The rule comes first in
+the document, before the elements it styles.
+
 ## What was NOT written
 
+- `padding` on the navigation and the aside — the `.card` rule sets it
+  (§3); restating it on the element would be redundant.
 - `display: block` on `nav`, `main`, `aside` — the UA already says so
   (§2.3), and grid items are blockified regardless
   (reference/formatting-contexts.md).
@@ -28,7 +39,7 @@ the track structure the lesson is about; grid states it in one declaration.
 
 ```json
 {
-  "version": 5,
+  "version": 6,
   "meta": { "title": "Three-column page" },
   "items": [
     {
@@ -39,6 +50,7 @@ the track structure the lesson is about; grid states it in one declaration.
         "meta": {
           "title": "Three-column page — fixed sidebars, fluid article"
         },
+        "sheet": [{ "selector": ".card", "styles": { "padding": "1rem" } }],
         "root": {
           "tag": "html",
           "styles": {
@@ -68,7 +80,8 @@ the track structure the lesson is about; grid states it in one declaration.
                 {
                   "tag": "nav",
                   "label": "Navigation",
-                  "styles": { "background": "#dfe6d9", "padding": "1rem" },
+                  "attrs": { "class": "card" },
+                  "styles": { "background": "#dfe6d9" },
                   "children": [
                     { "tag": "p", "text": "Overview", "children": [] },
                     { "tag": "p", "text": "Getting started", "children": [] },
@@ -107,7 +120,8 @@ the track structure the lesson is about; grid states it in one declaration.
                 {
                   "tag": "aside",
                   "label": "Aside",
-                  "styles": { "background": "#e8dfd0", "padding": "1rem" },
+                  "attrs": { "class": "card" },
+                  "styles": { "background": "#e8dfd0" },
                   "children": [
                     { "tag": "p", "text": "Related", "children": [] },
                     { "tag": "p", "text": "Short.", "children": [] }

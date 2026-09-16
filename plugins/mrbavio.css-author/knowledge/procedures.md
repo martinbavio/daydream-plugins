@@ -35,23 +35,23 @@ Ask four questions; if any answers yes, do not write it.
 
 1. **Is it the initial value of a non-inherited property?** `position: static`, `flex-direction: row`, `width: auto`, `opacity: 1`. An initial in base styles changes nothing there; the static lint reports the common non-inherited ones. An INHERITED property restated at its initial (`line-height: normal` under a parent's 1.5) is a real reset — judge it under question 2.
 2. **Is it inherited from an ancestor already?** `color`, `font-*`, `line-height`, `text-align`, `letter-spacing` flow down; a child restating its parent's value is noise. Set them once, high.
-3. **Does the UA stylesheet already set it on this tag?** `div`, `p`, `section` are block; `h1` is bold and large; `p` and `h*` carry vertical margins; `ul` carries left padding; `body` carries 8px margin; `img` is inline; `button` has its own font, padding and border. Restate only to CHANGE it.
+3. **Does the UA stylesheet already set it on this tag?** `h1` is bold and large; `p` and `h*` carry vertical margins; `ul` carries left padding; `body` carries 8px margin; `img` is inline; `button` has its own font, padding and border. Restate only to CHANGE it.
 4. **Is it implied or made inert by another declaration?** `align-items` on a box that is not flex or grid, `flex-wrap` without `display: flex`, `top` or `inset` on a static box, `width: 100%` on a block child, `justify-content` where `gap` already does the job, `min-width: 0` where nothing overflows. Drop it.
 
 Then: would the page change if this line went — at this width or at another? If at none, the necessity lint will report it dead; remove it before landing, not after.
 
 ## 3. Cascade reasoning
 
-- Set inherited properties (font, color, line-height) on the nearest common ancestor — usually `html` — and let inheritance work. Do not restate them on children.
+- Set inherited properties (font, color, line-height) on the nearest common ancestor — usually `html` — and let inheritance work.
 - Layout goes on the container, sizing on the items. A child's `margin` fights a parent's `gap`: pick one.
 - A conditional layer overrides the base ONLY for what changes under that condition. A layer restating the base is dead weight; a layer per breakpoint nobody asked for is invented responsiveness. Write the widest-reaching state as the base.
-- No `!important`, ever. Each element has one style map and ordered layers; later wins, and that is the whole cascade here.
-- One reason per element. A wrapper that exists only to carry a declaration should give the declaration to its child or parent and disappear.
+- No `!important`, ever. Shared styling is a rule, its selector naming who shares it; a one-off is the element's own map — inline, above every rule, its conditional layer above a rule's `@media`. Never restate on an element what a rule sets (the lint blocks it); write a rule before the elements it styles.
+- One reason per element. A wrapper that exists only to carry a declaration gives it to its child or parent and disappears.
 
 ## 4. The loop
 
-1. This file rides the `dream-author` prompt; `knowledge_bundle {query}` brings the format rules with the nearest example in one call.
+1. This file rides the `dream-author` prompt; `knowledge_bundle {query}` brings the format rules with the nearest example.
 2. Gather the source or the intent; decide each container's formatting context with §1.
 3. Author the smallest document; pass every declaration through §2 and §3.
-4. Land it (the server instructions name the tool: new document, or one viewport reworked in place) and let every gate run there — format, static, necessity; a refusal's findings say what to fix, then land again.
+4. Land it (the server instructions name the tool) and let every gate run there — format, static, necessity; a refusal's findings say what to fix, then land again.
 5. Then read what came back: it names what still needs fixing, if anything, with the element to fix it on. Your reply comes from that, not from a second look; the track summaries are `measure`'s.

@@ -72,7 +72,7 @@ const notes = (): HTMLElement | null =>
   mounted!.panel()!.querySelector('[aria-label="Document notes"]');
 
 const title = (): string | undefined =>
-  notes()?.querySelector(".daydream-notes-title")?.textContent ?? undefined;
+  notes()?.querySelector(".mrbavio-notes-title")?.textContent ?? undefined;
 
 function select(id: ElementId | null): void {
   mounted!.store.setSelectedId(id);
@@ -100,7 +100,7 @@ describe("mrbavio.notes in the shell", () => {
     expect(section).not.toBeNull();
     expect(title()).toBe("Holy grail");
 
-    const paragraph = section!.querySelector(".daydream-notes-paragraph")!;
+    const paragraph = section!.querySelector(".mrbavio-notes-paragraph")!;
     expect(paragraph.textContent).toBe(
       "What this teaches. Three columns from one grid.",
     );
@@ -108,7 +108,7 @@ describe("mrbavio.notes in the shell", () => {
       "What this teaches.",
     );
 
-    const items = section!.querySelectorAll(".daydream-notes-list li");
+    const items = section!.querySelectorAll(".mrbavio-notes-list li");
     expect(Array.from(items, (li) => li.textContent)).toEqual([
       "Drag the frame under 600px.",
       "Read the gap.",
@@ -116,7 +116,7 @@ describe("mrbavio.notes in the shell", () => {
     expect(items[1]!.querySelector("strong")!.textContent).toBe("gap");
 
     const link = section!.querySelector<HTMLAnchorElement>(
-      ".daydream-notes-source",
+      ".mrbavio-notes-source",
     )!;
     expect(link.href).toBe("https://example.com/holy-grail");
     expect(link.textContent).toBe("example.com/holy-grail");
@@ -135,13 +135,13 @@ describe("mrbavio.notes in the shell", () => {
       document: two.doc,
     });
     expect(title()).toBe("The canvas");
-    expect(notes()!.querySelector(".daydream-notes-source")).toBeNull();
+    expect(notes()!.querySelector(".mrbavio-notes-source")).toBeNull();
 
     select(two.gridInFirst);
     expect(title()).toBe("Holy grail");
     select(two.gridInSecond);
     expect(title()).toBe("Sidebar");
-    expect(notes()!.querySelector(".daydream-notes-source")).toBeNull();
+    expect(notes()!.querySelector(".mrbavio-notes-source")).toBeNull();
     select(null);
     expect(title()).toBe("The canvas");
   });
@@ -192,11 +192,15 @@ describe("mrbavio.notes in the shell", () => {
     const panel = mounted.panel()!;
     expect(panel).not.toBeNull();
     expect(notes()).toBeNull();
-    // The root holds its one <style> and nothing else — and takes no
+    // The root holds nothing (its CSS is the kernel's <style> in the
+    // panel section, from `styles` — decisions.md #71) — and takes no
     // height: the padding is the body's, so an empty pane is a zero-height
     // row under the dock's caption, not a blank inset.
-    const body = panel.querySelector<HTMLElement>(".daydream-notes-panel")!;
-    expect(Array.from(body.children, (el) => el.tagName)).toEqual(["STYLE"]);
+    const styles = panel.querySelectorAll("style");
+    expect(styles).toHaveLength(1);
+    expect(styles[0]!.textContent).toMatch(/^@layer dream-plugin \{/);
+    const body = panel.querySelector<HTMLElement>(".mrbavio-notes-panel")!;
+    expect(body.children).toHaveLength(0);
     expect(body.getBoundingClientRect().height).toBe(0);
     select(grid);
     expect(notes()).toBeNull();
@@ -220,20 +224,20 @@ describe("mrbavio.notes in the shell", () => {
     });
     const ours = mounted.panel()!;
     const theirs = mounted.panel("acme.notes")!;
-    expect(ours.querySelector(".daydream-notes-title")!.textContent).toBe(
+    expect(ours.querySelector(".mrbavio-notes-title")!.textContent).toBe(
       "Sidebar",
     );
     expect(theirs.querySelector(".acme-notes-title")!.textContent).toBe(
       "Sidebar",
     );
     // Neither carries the other's classes; each stylesheet targets its own.
-    expect(theirs.querySelector("[class^='daydream-notes']")).toBeNull();
+    expect(theirs.querySelector("[class^='mrbavio-notes']")).toBeNull();
     expect(ours.querySelector("[class^='acme-notes']")).toBeNull();
     expect(ours.querySelector("style")!.textContent).toContain(
-      ".daydream-notes-panel",
+      ".mrbavio-notes-panel",
     );
     expect(theirs.querySelector("style")!.textContent).not.toContain(
-      "daydream-notes",
+      "mrbavio-notes",
     );
   });
 });

@@ -12,7 +12,7 @@
 // agent in a session watches that file (impeccable_session). The canvas never
 // calls an agent; it leaves a note where the agent is already looking.
 
-import { createSignal, onCleanup, untrack } from "solid-js";
+import { createSignal, untrack } from "solid-js";
 
 import type { DaydreamApi } from "@daydream/plugin-api";
 
@@ -21,7 +21,7 @@ import { VERBS as VERB_SPECS } from "./bridge/verbs";
 import createCaption from "./Caption";
 import createPicker, { type PickerEntry } from "./Picker";
 import { createSession, SESSION_KEY } from "./session";
-import { css } from "./styles";
+import { captionCss, pickerCss } from "./styles";
 
 const ID = "mrbavio.impeccable";
 /** The verbs, in the picker's order — the host part's list, shared. */
@@ -36,12 +36,6 @@ export const DONE_TOOL = "impeccable_done";
 export const HTML_TOOL = "impeccable_html";
 
 export default async function activate(dd: DaydreamApi): Promise<void> {
-  const style = document.createElement("style");
-  style.dataset["impeccableStyles"] = "";
-  style.textContent = css;
-  document.head.append(style);
-  onCleanup(() => style.remove());
-
   const session = createSession(dd);
 
   /** The selection's viewport and, unless the viewport item itself is
@@ -127,9 +121,13 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     },
   });
 
+  // Each overlay's CSS rides its registration: the kernel mounts it in the
+  // overlay root, inside the dream-plugin layer (decisions.md #71) — a
+  // <style> the plugin appended to the head itself would be unlayered.
   dd.registerOverlay({
     id: "caption",
     slot: "overlay.screen",
+    styles: captionCss,
     render: () =>
       createCaption(dd, session, (verb) =>
         modeOf(verb) === "report" ? "reviewing" : "building",
@@ -138,6 +136,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   dd.registerOverlay({
     id: "picker",
     slot: "overlay.interactive",
+    styles: pickerCss,
     render: () => createPicker(dd, entries, picker),
   });
 

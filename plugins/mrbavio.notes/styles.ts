@@ -1,8 +1,10 @@
 // The panel's CSS as a string (decisions.md #48: plugins ship no CSS
-// files — runtime loading cannot serve them). Mounted ONCE, as the first
-// child of the panel root (NotesPanel.tsx). Class names carry a prefix
+// files — runtime loading cannot serve them). Handed to `registerPanel` as
+// `styles` (index.tsx): the kernel mounts it once, first in the panel
+// root, inside the dream-plugin layer (decisions.md #71) — a <style> of
+// the panel's own would be unlayered and is refused. Class names carry a prefix
 // DERIVED from `dd.plugin.id` (classPrefix — `mrbavio.notes` →
-// `daydream-notes-…`), so a copy of this plugin under another id styles
+// `mrbavio-notes-…`), so a copy of this plugin under another id styles
 // its own nodes and never this plugin's. Values are literal: this panel
 // shares no tokens with any other.
 

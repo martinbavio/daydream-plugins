@@ -23,6 +23,7 @@ import type { DaydreamApi, ElementId } from "@daydream/plugin-api";
 
 import { removeElement, type ViewportPayload } from "./edit";
 import createHtmlPanel, { type Draft, type PanelState } from "./HtmlPanel";
+import { classPrefix, css } from "./styles";
 
 export const BLUR_COMMAND = "mrbavio.html-editor.blur";
 export const UNDO_COMMAND = "mrbavio.html-editor.undo";
@@ -125,6 +126,9 @@ export default function activate(dd: DaydreamApi): void {
     // A third of the dock's spare height by default, under the CSS
     // editor's two thirds; the dock's divider moves the split.
     grow: 1,
+    // The panel's CSS, mounted by the kernel in the plugin layer
+    // (decisions.md #71) — never a <style> of the panel's own.
+    styles: css(classPrefix(dd.plugin.id)),
     render: () => createHtmlPanel(state),
   });
 }

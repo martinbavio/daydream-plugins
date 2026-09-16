@@ -46,24 +46,29 @@ describe("mrbavio.grid", () => {
         .closest("[data-plugin-overlay-slot]")
         ?.getAttribute("data-plugin-overlay-slot"),
     ).toBe("overlay.screen");
-    // One <style>, prefixed classes, nothing drawn without a selection.
-    expect(overlay!.querySelectorAll("style")).toHaveLength(1);
+    // One <style> — the kernel's, from `styles`, in the plugin layer
+    // (decisions.md #71); prefixed classes; nothing drawn without a
+    // selection.
+    const styles = overlay!.querySelectorAll("style");
+    expect(styles).toHaveLength(1);
+    expect(styles[0]!.textContent).toMatch(/^@layer dream-plugin \{/);
+    expect(styles[0]!.textContent).toContain(".mrbavio-grid-line");
     expect(overlay!.querySelectorAll("line")).toHaveLength(0);
 
     mounted.store.setSelectedId(grid.id);
     flush();
     // Class names and the hatch pattern id derive from the plugin id
-    // (`mrbavio.grid` → `daydream-grid-…`), so a copy under another id
+    // (`mrbavio.grid` → `mrbavio-grid-…`), so a copy under another id
     // collides with neither; the gap bands reference THIS pattern.
     expect(
-      overlay!.querySelectorAll("line.daydream-grid-line").length,
+      overlay!.querySelectorAll("line.mrbavio-grid-line").length,
     ).toBeGreaterThan(0);
-    expect(overlay!.querySelector("#daydream-grid-gap-hatch")).not.toBeNull();
+    expect(overlay!.querySelector("#mrbavio-grid-gap-hatch")).not.toBeNull();
     expect(overlay!.querySelector("[id^='dd-grid']")).toBeNull();
     expect(
-      getComputedStyle(overlay!.querySelector("rect.daydream-grid-gap-band")!)
+      getComputedStyle(overlay!.querySelector("rect.mrbavio-grid-gap-band")!)
         .fill,
-    ).toContain("daydream-grid-gap-hatch");
+    ).toContain("mrbavio-grid-gap-hatch");
     // Three columns → column lines 1..4 badged; positive numbers only.
     const labels = Array.from(overlay!.querySelectorAll("text")).map(
       (t) => t.textContent,

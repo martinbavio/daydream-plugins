@@ -181,7 +181,11 @@ describe("mrbavio.html-editor", () => {
       ].join("\n"),
     );
     expect(text).not.toMatch(/style|class|id=|Headline|red/);
-    expect(panel().querySelectorAll("style")).toHaveLength(1);
+    // The panel's one <style> is the kernel's, from `styles`, in the
+    // plugin layer (decisions.md #71).
+    const styles = panel().querySelectorAll("style");
+    expect(styles).toHaveLength(1);
+    expect(styles[0]!.textContent).toMatch(/^@layer dream-plugin \{/);
   });
 
   test("editing a heading's text applies live, keeps its styles and selection, and the session is one undo step", async () => {

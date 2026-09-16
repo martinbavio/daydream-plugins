@@ -134,7 +134,9 @@ test("disabling text keeps its data, removes interactions and styles, and re-ena
   expect(
     host.querySelector('[data-item-kind="mrbavio.text"]')?.textContent,
   ).toContain("mrbavio.text");
-  expect(document.querySelector("[data-daydream-text-styles]")).toBeNull();
+  // The kind's CSS lived in the item root the kernel mounted (decisions.md
+  // #71); with the plugin gone, so is every sheet of its.
+  expect(document.querySelector('[data-plugin-item="mrbavio.text"]')).toBeNull();
   expect(JSON.stringify(store.document)).toBe(before);
 
   const clipboardData = new DataTransfer();
@@ -170,9 +172,11 @@ test("disabling text keeps its data, removes interactions and styles, and re-ena
     "Keep this annotation",
   );
   expect(JSON.stringify(store.document)).toBe(before);
-  expect(document.querySelectorAll("[data-daydream-text-styles]")).toHaveLength(
-    1,
+  const sheet = host.querySelector<HTMLStyleElement>(
+    '[data-plugin-item="mrbavio.text"] > style',
   );
+  expect(sheet?.textContent).toMatch(/^@layer dream-plugin \{/);
+  expect(sheet?.textContent).toContain(".daydream-text-item");
 });
 
 test("unloading during an editor session cancels its draft without losing the committed text", async () => {
