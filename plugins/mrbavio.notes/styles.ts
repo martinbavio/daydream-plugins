@@ -4,7 +4,7 @@
 // root, inside the dream-plugin layer (decisions.md #71) — a <style> of
 // the panel's own would be unlayered and is refused. Class names carry a prefix
 // DERIVED from `dd.plugin.id` (classPrefix — `mrbavio.notes` →
-// `daydream-notes-…`), so a copy of this plugin under another id styles
+// `mrbavio-notes-…`), so a copy of this plugin under another id styles
 // its own nodes and never this plugin's. Values are literal: this panel
 // shares no tokens with any other.
 

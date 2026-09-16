@@ -52,7 +52,7 @@ describe("mrbavio.grid", () => {
     const styles = overlay!.querySelectorAll("style");
     expect(styles).toHaveLength(1);
     expect(styles[0]!.textContent).toMatch(/^@layer dream-plugin \{/);
-    expect(styles[0]!.textContent).toContain(".daydream-grid-line");
+    expect(styles[0]!.textContent).toContain(".mrbavio-grid-line");
     expect(overlay!.querySelectorAll("line")).toHaveLength(0);
 
     mounted.store.setSelectedId(grid.id);

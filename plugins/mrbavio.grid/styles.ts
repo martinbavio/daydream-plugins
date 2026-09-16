@@ -4,7 +4,7 @@
 // root, inside the dream-plugin layer (decisions.md #71) — a <style> of the
 // overlay's own would be unlayered and is refused. Class names and the hatch pattern
 // id carry a prefix DERIVED from `dd.plugin.id` (classPrefix —
-// `mrbavio.grid` → `daydream-grid-…`), so a copy of this plugin under
+// `mrbavio.grid` → `mrbavio-grid-…`), so a copy of this plugin under
 // another id styles its own nodes, and its gap bands reference its own
 // <pattern>, never this plugin's.
 //

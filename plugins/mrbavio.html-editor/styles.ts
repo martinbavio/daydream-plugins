@@ -3,7 +3,7 @@
 // mounts it once, first in the panel root, inside the dream-plugin layer
 // (decisions.md #71) — a <style> of the panel's own would be unlayered and
 // is refused. Class names carry a prefix derived from `dd.plugin.id`
-// (`mrbavio.html-editor` → `daydream-html-editor-…`), so a copy of this
+// (`mrbavio.html-editor` → `mrbavio-html-editor-…`), so a copy of this
 // folder under another id styles its own nodes and never this one's. The
 // --panel-* tokens are scoped to the panel root, not :root, so nothing of
 // the app leaks into a rendered document.
