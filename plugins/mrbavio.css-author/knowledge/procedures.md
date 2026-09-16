@@ -1,8 +1,20 @@
 ---
 topic: procedures
 title: Layout procedures
-tags: [procedure, formatting-context, flow, flex, grid, absolute, cascade, declarations, loop]
+tags:
+  [
+    procedure,
+    formatting-context,
+    flow,
+    flex,
+    grid,
+    absolute,
+    cascade,
+    declarations,
+    loop,
+  ]
 tier: procedure
+status: v1 draft from general expertise — to be corrected against the maintainer's notes; hard budget about 1,200 tokens
 summary: Decision procedures against the three judgment failures — which formatting context, whether a declaration is needed at all, where in the cascade to set it (a rule or the element) — and the author → land → fix → land loop.
 ---
 
