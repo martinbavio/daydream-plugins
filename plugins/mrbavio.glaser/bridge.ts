@@ -22,22 +22,25 @@ import { z } from "zod";
 
 import type { DaydreamHostApi } from "@daydream/plugin-api/host";
 
-import {
-  candidateSkillDirs,
-  findSkillDir,
-  readReference,
-  SKILL_MISSING,
-  skillVersion,
-} from "./bridge/skill.ts";
-import {
-  composePrompt,
-  promptName,
-  resolveTarget,
-  stateSlice,
-  variantCount,
-  VERBS,
-  type VerbSpec,
-} from "./bridge/verbs.ts";
+import type * as Skill from "./bridge/skill.ts";
+import type * as Verbs from "./bridge/verbs.ts";
+
+/** The helpers, imported FRESH on every activation. The host re-imports
+ * bridge.ts with a cache-busting query on each reload, but a helper
+ * imported statically from bridge/ stays in Node's module cache for the
+ * life of the host — so a shipped change to verbs.ts (the verb list,
+ * every deliverable) would sit inert until a restart. A dynamic import
+ * with its own query is the kernel's trick, applied one level down.
+ * (variants.ts, which verbs.ts imports statically, still needs a restart
+ * when it changes; it rarely does.) */
+async function helpers(): Promise<{ skill: typeof Skill; verbs: typeof Verbs }> {
+  const t = Date.now();
+  const [skill, verbs] = await Promise.all([
+    import(/* @vite-ignore */ `./bridge/skill.ts?t=${t}`) as Promise<typeof Skill>,
+    import(/* @vite-ignore */ `./bridge/verbs.ts?t=${t}`) as Promise<typeof Verbs>,
+  ]);
+  return { skill, verbs };
+}
 
 export const VERB_TOOL = "glaser_verb";
 export const SESSION_TOOL = "glaser_session";
@@ -111,37 +114,67 @@ export function sessionText(dataFile: string): string {
 export function instructionsText(
   manifestText: string,
   skill: { dir: string; version: string | null } | null,
+  lookedIn: readonly string[] = [],
 ): string {
   if (skill === null) {
-    return `${manifestText} NOTE: the Impeccable skill is NOT installed on this machine (looked in ${candidateSkillDirs().join(", ")}); every verb answers with the install line until it is.`;
+    return `${manifestText} NOTE: the Impeccable skill is NOT installed on this machine (looked in ${lookedIn.join(", ")}); every verb answers with the install line until it is.`;
   }
   const version = skill.version === null ? "" : ` ${skill.version}`;
   return `${manifestText} Impeccable${version} was found at ${skill.dir}.`;
 }
 
 export default async function activate(host: DaydreamHostApi): Promise<void> {
+  const { skill, verbs } = await helpers();
+  const { candidateSkillDirs, findSkillDir, readReference, SKILL_MISSING, skillVersion } = skill;
+  const { composePrompt, promptName, resolveTarget, stateSlice, variantCount, VERBS } = verbs;
   const dir = await findSkillDir();
   const version = dir === null ? null : await skillVersion(dir).catch(() => null);
   host.instructions(
     instructionsText(
       host.plugin.manifest.contributes?.instructions ?? "",
       dir === null ? null : { dir, version },
+      candidateSkillDirs(),
     ),
   );
 
-  const verbs = VERBS.map((v) => v.verb);
+  const verbNames = VERBS.map((v) => v.verb);
+  /** The one text both surfaces answer. */
+  const build = async (spec: Verbs.VerbSpec, args: VerbArgs): Promise<string> => {
+    // Located per request: the skill may be installed after activation.
+    const dir = await findSkillDir();
+    if (dir === null) return SKILL_MISSING;
+    const [playbook, craftFloor, version, raw] = await Promise.all([
+      readReference(dir, spec.verb),
+      readReference(dir, "craft-floor"),
+      skillVersion(dir).catch(() => null),
+      host.tab.state().catch(() => null),
+    ]);
+    const state = stateSlice(raw);
+    return composePrompt({
+      spec,
+      state,
+      target: state === null ? null : resolveTarget(state, args),
+      ...(args.brief === undefined ? {} : { brief: args.brief }),
+      variants: variantCount(args.variants),
+      playbook,
+      craftFloor,
+      skillVersion: version,
+      skillDir: dir,
+    });
+  };
+
   host.registerTool({
     name: VERB_TOOL,
     title: "Glaser verb",
-    description: `The playbook for one design verb over a viewport on the canvas, with the target resolved from the selection (or the arguments) and the deliverable spelled out — call it, then follow it. Verbs: ${verbs.join(", ")}. ${VERBS.filter((v) => v.mode === "variants").length} of them open draft variants beside the source, ${VERBS.filter((v) => v.mode === "in-place").length} rework it in place, and critique and audit answer a report over the rendered page (glaser_html + Impeccable's detector) and land nothing. After a canvas pick, pass the pick's viewport and element.`,
+    description: `The playbook for one design verb over a viewport on the canvas, with the target resolved from the selection (or the arguments) and the deliverable spelled out — call it, then follow it. Verbs: ${verbNames.join(", ")}. ${VERBS.filter((v) => v.mode === "variants").length} of them open draft variants beside the source, ${VERBS.filter((v) => v.mode === "in-place").length} rework it in place, and critique and audit answer a report over the rendered page (glaser_html + Impeccable's detector) and land nothing. After a canvas pick, pass the pick's viewport and element.`,
     inputSchema: {
-      verb: z.enum(verbs as [string, ...string[]]).describe("The verb."),
+      verb: z.enum(verbNames as [string, ...string[]]).describe("The verb."),
       ...TARGET_ARGS,
     },
     annotations: { readOnlyHint: true },
     run: async ({ verb, ...args }) => {
       const spec = VERBS.find((v) => v.verb === verb)!;
-      const text = await build(host, spec, args);
+      const text = await build(spec, args);
       return { text, isError: text === SKILL_MISSING };
     },
   });
@@ -162,36 +195,8 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
       title: spec.title,
       description: spec.description,
       argsSchema: TARGET_ARGS,
-      build: (args: VerbArgs) => build(host, spec, args),
+      build: (args: VerbArgs) => build(spec, args),
     });
   }
 }
 
-/** The one text both surfaces answer. */
-async function build(
-  host: DaydreamHostApi,
-  spec: VerbSpec,
-  args: VerbArgs,
-): Promise<string> {
-  // Located per request: the skill may be installed after activation.
-  const dir = await findSkillDir();
-  if (dir === null) return SKILL_MISSING;
-  const [playbook, craftFloor, version, raw] = await Promise.all([
-    readReference(dir, spec.verb),
-    readReference(dir, "craft-floor"),
-    skillVersion(dir).catch(() => null),
-    host.tab.state().catch(() => null),
-  ]);
-  const state = stateSlice(raw);
-  return composePrompt({
-    spec,
-    state,
-    target: state === null ? null : resolveTarget(state, args),
-    ...(args.brief === undefined ? {} : { brief: args.brief }),
-    variants: variantCount(args.variants),
-    playbook,
-    craftFloor,
-    skillVersion: version,
-    skillDir: dir,
-  });
-}
