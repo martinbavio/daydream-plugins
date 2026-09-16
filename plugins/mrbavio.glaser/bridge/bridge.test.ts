@@ -148,6 +148,7 @@ describe("glaser host part", () => {
     expect(text).toContain("do not search one");
     expect(text).toContain("IN PARALLEL");
     expect(text).toContain("writes its own rewrite");
+    expect(text).toContain("FIRST touches its draft");
     expect(text).toContain("never send the whole page");
     // Then Impeccable's own text, verbatim, in order.
     const playbook = text.indexOf("# Impeccable's playbook: bolder");
