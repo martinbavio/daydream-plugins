@@ -14,6 +14,7 @@ import type {
 } from "@daydream/plugin-api";
 import {
   createTestKernel,
+  documentFrom,
   fixtureDocument,
   fixtureRoot,
   flush,
@@ -99,5 +100,39 @@ describe("css-author gates", () => {
       /^--unused: 1px on Aside changes nothing \(in base\) at /,
     );
     expect(document.querySelectorAll("iframe")).toHaveLength(0);
+  });
+
+  // The eval regression (2026-09-17 raw eval jsonl): the static gate,
+  // through the real registration `activate` installed above, judging a
+  // document straight from `documentFrom` — never loaded into the app
+  // store, never rendered on the canvas, exactly how `src/ai/requests.ts`
+  // hands a gate an incoming ingest/replace_viewport document. A `.card`
+  // rule whose element is plainly in the tree must not be refused as
+  // dead just because nothing was ever on the canvas to read a match
+  // fact from (matchLint.ts's header).
+  test("the static gate does not refuse a landing whose sheet rules match elements that were never on the canvas", async () => {
+    const result = documentFrom({
+      version: 6,
+      items: [
+        {
+          kind: "daydream.viewport",
+          frame: { width: 960, height: 600 },
+          payload: {
+            root: {
+              tag: "html",
+              children: [
+                {
+                  tag: "body",
+                  children: [{ tag: "div", attrs: { class: "card" } }],
+                },
+              ],
+            },
+            sheet: [{ selector: ".card", styles: { color: "red" } }],
+          },
+        },
+      ],
+    });
+    if (!result.ok) throw new Error(result.error);
+    expect(await judge(STATIC_GATE, result.doc)).toEqual([]);
   });
 });
