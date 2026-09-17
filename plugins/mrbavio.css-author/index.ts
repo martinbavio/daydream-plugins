@@ -3,7 +3,8 @@
 // P9). Core guarantees a landed document is valid; this plugin judges it.
 // The browser part registers the two lints as gates on every landing path
 // — the static lint (staticLint.ts's JSON-only facts, plus matchLint.ts's
-// match-dependent ones: redundancy, dead rules, a rule's own
+// match-dependent ones: redundancy — an element's against a rule, and a
+// rule's against the rule beneath it — dead rules, a rule's own
 // container-query-without-container, decisions.md #71 plan phase 9 —
 // judged by MOUNTING the incoming document, never by reading canvas match
 // facts, since a gate's document is not on the canvas; see matchLint.ts's
