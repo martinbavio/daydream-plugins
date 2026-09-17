@@ -657,17 +657,32 @@ describe("necessity on rules (decisions.md #71, plan phase 9)", () => {
     ]);
   });
 
-  test("a pseudo-element rule's declaration is judged too, addressed at sheet[i] — necessity has no read of a pseudo-element's own box or computed style", async () => {
-    // .card::before is neither a state pseudo-class (hasStatePseudo is
-    // for :hover and its kin, never a pseudo-ELEMENT) nor media-inactive,
-    // so judgeRules creates a candidate for it same as any other rule.
-    // The observation baseline reads only `[data-dream-id]` real element
-    // nodes, never a pseudo-element's own generated box or computed
-    // style, so removing the declaration never registers as a change —
-    // dead, reported at the rule's own sheet[i], not at any element.
+  test("a pseudo-element rule's declaration is necessary when nothing else sets it: the baseline reads getComputedStyle(node, '::before') too", async () => {
+    // .card::before is neither a state pseudo-class (hasStatePseudo is for
+    // :hover and its kin, never a pseudo-ELEMENT) nor media-inactive, so
+    // judgeRules creates a candidate for it same as any other rule — and
+    // since pseudoElementsInSheet finds a ::before selector here, the
+    // baseline also snapshots getComputedStyle(node, "::before"), so
+    // removing the declaration is observable even though the pseudo-
+    // element has no `[data-dream-id]` node of its own to enumerate.
     const card = build({ id: "card", attrs: { class: "card" } });
     const doc = makeDocument(FRAME, [card], undefined, [
-      { selector: ".card::before", styles: { color: "red" } },
+      { selector: ".card::before", styles: { content: '""', color: "red" } },
+    ]);
+    expect(await necessityLint(doc)).toEqual([]);
+  });
+
+  test("a pseudo-element declaration a later rule on the same pseudo-element always overrides is dead, reported at its own sheet[i]", async () => {
+    // Two unconditional .card::before rules at the same specificity: the
+    // later one always wins the cascade regardless of the earlier one's
+    // presence, so removing rule 0's color changes nothing — genuinely
+    // dead, and the finding is addressed at sheet[0], never sheet[1] (rule
+    // 1's own color is what the page actually shows, and removing IT
+    // would reveal rule 0's — necessary, no finding for it).
+    const card = build({ id: "card", attrs: { class: "card" } });
+    const doc = makeDocument(FRAME, [card], undefined, [
+      { selector: ".card::before", styles: { content: '""', color: "red" } },
+      { selector: ".card::before", styles: { color: "blue" } },
     ]);
     const vpId = doc.items[0]!.id;
     const findings = await necessityLint(doc);

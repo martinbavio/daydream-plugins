@@ -227,6 +227,10 @@ interface Probe {
   nodes: Element[];
   /** The computed-style property names the snapshot reads, fixed once. */
   properties: string[];
+  /** Pseudo-elements also snapshotted per node (decisions.md #71, plan
+   * phase 9) — empty unless the sheet names at least one pseudo-element
+   * selector, so a page with none pays nothing for this. */
+  pseudoElements: readonly string[];
   baseline: Observation[];
 }
 
@@ -237,6 +241,10 @@ async function lintViewport(
   dd: NecessityHost,
   vp: DreamViewport,
 ): Promise<ViewportVerdicts> {
+  // Computed once per viewport: which pseudo-elements the baseline must
+  // also read (decisions.md #71, plan phase 9) — [] when the sheet names
+  // none, the frame's own mount and every probe mount alike pay nothing.
+  const pseudoElements = pseudoElementsInSheet(vp.payload.sheet ?? []);
   // The width the page was rendered at is the mount's to say (a viewport
   // with no frame renders at the measurer's default), so it is read back
   // rather than guessed here. Element and rule candidates share ONE mount
@@ -250,8 +258,8 @@ async function lintViewport(
       const own = mounted.read().frame.width;
       return {
         own,
-        elementCandidates: judgeAll(dd.core, vp, mounted, own),
-        ruleCandidates: judgeRules(dd.core, vp, mounted, own),
+        elementCandidates: judgeAll(dd.core, vp, mounted, own, pseudoElements),
+        ruleCandidates: judgeRules(dd.core, vp, mounted, own, pseudoElements),
       };
     },
   );
@@ -261,7 +269,7 @@ async function lintViewport(
   for (const width of probeWidths(dd.core, vp, own)) {
     if (pendingEl.length === 0 && pendingRule.length === 0) break;
     await withMount(dd, vp, width, (mounted) => {
-      const probe = baseline(mounted);
+      const probe = baseline(mounted, pseudoElements);
       for (const c of pendingEl) {
         c.verdict.dead = isDead(
           probe,
@@ -371,8 +379,9 @@ function judgeAll(
   vp: DreamViewport,
   mounted: MountedViewport,
   own: number,
+  pseudoElements: readonly string[],
 ): Candidate[] {
-  const probe = baseline(mounted);
+  const probe = baseline(mounted, pseudoElements);
   const labels = labelCounts(vp.payload.root);
   // Rule 1, mirrored: a base declaration a matching, UNCONDITIONAL rule
   // ALSO sets verbatim (decisions.md #71, plan phase 9) is paired with
@@ -499,12 +508,24 @@ function judgeRules(
   vp: DreamViewport,
   mounted: MountedViewport,
   own: number,
+  pseudoElements: readonly string[],
 ): RuleCandidate[] {
-  const probe = baseline(mounted);
+  const probe = baseline(mounted, pseudoElements);
   const sheet = vp.payload.sheet ?? [];
   const byId = elementsById(vp.payload.root);
   const candidates: RuleCandidate[] = [];
+  // How many EARLIER rules in this sheet share a base key, counted over
+  // the WHOLE sheet regardless of the skips below — two rules can share
+  // one selector and conditions text (a later one shadowing an earlier
+  // one is exactly what "genuinely dead" looks like for a rule), and the
+  // occurrence number is what keeps their correspondence keys apart
+  // within ONE viewport while still lining up the Nth such rule across
+  // viewports whose sheets share that shape.
+  const occurrences = new Map<string, number>();
   sheet.forEach((rule, index) => {
+    const base = `${rule.selector}\u0000${(rule.conditions ?? []).join("\u0000")}`;
+    const occurrence = occurrences.get(base) ?? 0;
+    occurrences.set(base, occurrence + 1);
     if (hasStatePseudo(rule.selector)) return;
     if (!ruleActiveAtOwnFrame(core, vp, rule)) return;
     // The live strategy scopes nothing (decisions.md #71): the mounted
@@ -512,7 +533,7 @@ function judgeRules(
     // asked of it verbatim — no kernel rewrite needed, unlike matchLint.ts's
     // canvas reads.
     const matched = mountedRuleMatches(mounted, rule.selector);
-    const key = `${rule.selector}\u0000${(rule.conditions ?? []).join("\u0000")}`;
+    const key = `${base}\u0000${occurrence}`;
     for (const [property, value] of Object.entries(rule.styles)) {
       if (!isChecked(core, property, value)) continue;
       const targets: RemovalTarget[] = [{ rule: index }];
@@ -808,9 +829,14 @@ function nameOf(el: DreamElement): string {
  * The page as it stands, before any removal. The node list and the
  * property list are fixed here: removals never add or drop elements, and
  * the set of standard longhands the engine enumerates is the same for every
- * element, so both are read once.
+ * element, so both are read once. `pseudoElements` (decisions.md #71, plan
+ * phase 9) is threaded straight through to `observe`: empty unless the
+ * viewport's sheet names at least one, so a page with none pays nothing.
  */
-function baseline(mounted: MountedViewport): Probe {
+function baseline(
+  mounted: MountedViewport,
+  pseudoElements: readonly string[] = [],
+): Probe {
   const nodes = Array.from(
     mounted.document().querySelectorAll("[data-dream-id]"),
   );
@@ -820,14 +846,16 @@ function baseline(mounted: MountedViewport): Probe {
   return {
     nodes,
     properties,
-    baseline: nodes.map((node) => observe(node, properties)),
+    pseudoElements,
+    baseline: nodes.map((node) => observe(node, properties, pseudoElements)),
   };
 }
 
 function unchanged(probe: Probe): boolean {
   for (let i = 0; i < probe.nodes.length; i++) {
     if (
-      observe(probe.nodes[i] as Element, probe.properties) !== probe.baseline[i]
+      observe(probe.nodes[i] as Element, probe.properties, probe.pseudoElements) !==
+      probe.baseline[i]
     ) {
       return false;
     }
@@ -835,13 +863,31 @@ function unchanged(probe: Probe): boolean {
   return true;
 }
 
-/** Border box to 0.01px plus every snapshotted computed value, joined. */
-function observe(node: Element, properties: string[]): Observation {
+/**
+ * Border box to 0.01px, every snapshotted computed value, then — per
+ * pseudo-element the sheet names (decisions.md #71, plan phase 9) — the
+ * SAME property set read from `getComputedStyle(node, pseudo)` instead,
+ * no rect (a pseudo-element has none of its own to read): a
+ * `::before`/`::after` rule's declaration is otherwise invisible to this
+ * lint, since a pseudo-element carries no `[data-dream-id]` node of its
+ * own to enumerate.
+ */
+function observe(
+  node: Element,
+  properties: string[],
+  pseudoElements: readonly string[] = [],
+): Observation {
   const rect = node.getBoundingClientRect();
   const style = computedStyleOf(node);
   let out = `${hundredths(rect.left)},${hundredths(rect.top)},${hundredths(rect.width)},${hundredths(rect.height)}`;
   for (const property of properties) {
     out += `|${style.getPropertyValue(property)}`;
+  }
+  for (const pseudo of pseudoElements) {
+    const pseudoStyle = computedStyleOf(node, pseudo);
+    for (const property of properties) {
+      out += `|${pseudo}:${property}=${pseudoStyle.getPropertyValue(property)}`;
+    }
   }
   return out;
 }
@@ -863,10 +909,60 @@ function snapshotProperties(style: CSSStyleDeclaration): string[] {
   return Array.from(style).filter((name) => !name.startsWith("--"));
 }
 
+/** The pseudo-elements a viewport's `sheet` needs baselined (decisions.md
+ * #71, plan phase 9): every trailing `::pseudo` a rule's selector list
+ * names, collected once — plus the two a page most commonly draws with,
+ * `::before` and `::after`, so a rule that styles one of those without
+ * naming the other is still judged against a page that already has
+ * SOME pseudo-element rule. Empty when the sheet names none at all: a
+ * page with no pseudo-element rule pays nothing extra here.
+ */
+function pseudoElementsInSheet(sheet: readonly StyleRule[]): string[] {
+  const found = new Set<string>();
+  for (const rule of sheet) {
+    for (const member of splitTopLevelCommas(rule.selector)) {
+      const match = /::([a-z-]+)\s*$/i.exec(member.trim());
+      if (match !== null) found.add(`::${(match[1] as string).toLowerCase()}`);
+    }
+  }
+  if (found.size === 0) return [];
+  found.add("::before");
+  found.add("::after");
+  return Array.from(found).sort();
+}
+
+/** The selector list's members, split at top-level commas — outside
+ * parens, brackets and strings, the same grain `rule.selector` is
+ * already stored in (the CSSOM's `", "`). */
+function splitTopLevelCommas(selector: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 0;
+  for (let i = 0; i < selector.length; i++) {
+    const ch = selector[i] as string;
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    else if (ch === "," && depth === 0) {
+      parts.push(selector.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(selector.slice(start));
+  return parts;
+}
+
 /** The iframe's own getComputedStyle: the node lives in the frame's realm,
  * and its window is the honest handle (the parent's answers too — same
- * origin — but this never depends on it). */
-function computedStyleOf(node: Element): CSSStyleDeclaration {
+ * origin — but this never depends on it). `pseudo` reads a pseudo-element's
+ * own computed style instead of the node's (decisions.md #71, plan phase
+ * 9) — valid whether or not the pseudo-element currently generates a box. */
+function computedStyleOf(node: Element, pseudo?: string): CSSStyleDeclaration {
   const view = node.ownerDocument.defaultView ?? window;
-  return view.getComputedStyle(node);
+  return view.getComputedStyle(node, pseudo);
 }
