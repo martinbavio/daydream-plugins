@@ -10,12 +10,22 @@
 //
 // WHAT COUNTS. For a rule A and a property p, walk each reached element's
 // winner-first list from A downward to the first rule beneath that
-// declares p at all. Redundant only when, for every reached element, that
-// rule is CERTAIN — unconditional and free of state pseudo-classes, so it
-// applies whenever A does — and carries p at the identical verbatim
-// value. Any element where the next declarer beneath is conditional, a
-// state rule, absent, or differs makes A's p genuinely load-bearing
-// somewhere, and there is no finding. A itself is judged only when
+// declares p — or anything RELATED to p, since a shorthand and its
+// longhands cascade together: `margin-top: 4px` sitting between two
+// `margin: 0` rules is exactly what A's line holds off, and removing it
+// would change the page. Redundant only when, for every reached element,
+// that rule is CERTAIN — unconditional and free of state pseudo-classes,
+// so it applies whenever A does — carries p at the identical verbatim
+// value, and declares nothing else related to p (a `margin: 0` beside a
+// `margin-top: 4px` in the same rule is not the same margin). Any element
+// where the next declarer beneath is conditional, a state rule, absent,
+// merely related, or different makes A's p genuinely load-bearing
+// somewhere, and there is no finding. "Related" is approximate on
+// purpose and errs toward related — same first segment (`margin` ↔
+// `margin-top`, `border` ↔ `border-top-color`, `font` ↔ `font-size`),
+// `all`, and the few groups whose names share no prefix (`inset` and the
+// four sides, `gap` and its two, `place-*` with `align-*`/`justify-*`) —
+// so a false "related" only withholds a finding, never invents one. A itself is judged only when
 // certain by the same test; a rule matching nothing is the dead-rule
 // finding's, never this one's; and a rule reaching some element through a
 // `::before`-style member styles a box of its own and is left alone
@@ -42,6 +52,40 @@ export interface RuleRestatement {
   property: string;
   value: string;
   restates: number[];
+}
+
+/** Shorthand families whose member names share no prefix; everything else
+ * a shorthand covers shares its first segment. */
+const RELATED_GROUPS: readonly (readonly string[])[] = [
+  [
+    "inset",
+    "top",
+    "right",
+    "bottom",
+    "left",
+    "inset-block",
+    "inset-inline",
+    "inset-block-start",
+    "inset-block-end",
+    "inset-inline-start",
+    "inset-inline-end",
+  ],
+  ["gap", "row-gap", "column-gap"],
+  ["place-items", "align-items", "justify-items"],
+  ["place-content", "align-content", "justify-content"],
+  ["place-self", "align-self", "justify-self"],
+];
+
+/** Whether declaring `other` can touch what `property` sets (see the
+ * header). A custom property relates to nothing but itself. */
+export function relatedProperties(property: string, other: string): boolean {
+  if (property === other) return true;
+  if (property.startsWith("--") || other.startsWith("--")) return false;
+  if (property === "all" || other === "all") return true;
+  if (property.split("-")[0] === other.split("-")[0]) return true;
+  return RELATED_GROUPS.some(
+    (group) => group.includes(property) && group.includes(other),
+  );
 }
 
 /** Every redundant rule declaration in `sheet`, given each mounted
@@ -82,10 +126,18 @@ export function ruleRestatements(
           if (match.pseudo !== undefined) continue;
           const other = sheet[match.index];
           if (other === undefined) continue;
-          if (!Object.prototype.hasOwnProperty.call(other.styles, property)) {
-            continue;
-          }
-          if (!uncertain(other) && other.styles[property] === value) {
+          const touching = Object.keys(other.styles).filter((name) =>
+            relatedProperties(property, name),
+          );
+          if (touching.length === 0) continue;
+          // The first rule beneath that touches p decides: it must BE p,
+          // alone among its related names, certain, and identical.
+          if (
+            touching.length === 1 &&
+            touching[0] === property &&
+            !uncertain(other) &&
+            other.styles[property] === value
+          ) {
             found = match.index;
           }
           break;

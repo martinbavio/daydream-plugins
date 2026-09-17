@@ -5,7 +5,11 @@ import { describe, expect, test } from "vitest";
 
 import type { StyleRule } from "@daydream/plugin-api";
 
-import { ruleRestatements, type RankedMatch } from "./ruleRedundancy";
+import {
+  relatedProperties,
+  ruleRestatements,
+  type RankedMatch,
+} from "./ruleRedundancy";
 
 const hasState = (selector: string): boolean => /:hover|:focus|:active/.test(selector);
 
@@ -73,6 +77,39 @@ describe("ruleRestatements", () => {
       { selector: ".card", styles: { color: "#333" }, conditions: ["@media (width < 600px)"] },
     ];
     expect(ruleRestatements(own, matches({ a: [2, 1, 0] }), hasState)).toEqual([]);
+  });
+
+  test("a related longhand or shorthand between the two, or beside the one beneath, keeps the line load-bearing", () => {
+    const between: StyleRule[] = [
+      { selector: "div", styles: { margin: "0" } },
+      { selector: ".card", styles: { "margin-top": "4px" } },
+      { selector: ".card.featured", styles: { margin: "0" } },
+    ];
+    expect(ruleRestatements(between, matches({ a: [2, 1, 0] }), hasState)).toEqual([]);
+    const beside: StyleRule[] = [
+      { selector: "div", styles: { margin: "0", "margin-top": "4px" } },
+      { selector: ".card", styles: { margin: "0" } },
+    ];
+    expect(ruleRestatements(beside, matches({ a: [1, 0] }), hasState)).toEqual([]);
+    const all: StyleRule[] = [
+      { selector: "div", styles: { color: "#333" } },
+      { selector: ".card", styles: { all: "unset" } },
+      { selector: ".card.featured", styles: { color: "#333" } },
+    ];
+    expect(ruleRestatements(all, matches({ a: [2, 1, 0] }), hasState)).toEqual([]);
+  });
+
+  test("relatedProperties: same first segment, the prefix-less groups, all; custom properties only themselves", () => {
+    expect(relatedProperties("margin", "margin-top")).toBe(true);
+    expect(relatedProperties("border-top-color", "border")).toBe(true);
+    expect(relatedProperties("inset", "left")).toBe(true);
+    expect(relatedProperties("gap", "row-gap")).toBe(true);
+    expect(relatedProperties("align-items", "place-items")).toBe(true);
+    expect(relatedProperties("color", "all")).toBe(true);
+    expect(relatedProperties("color", "padding")).toBe(false);
+    expect(relatedProperties("--x", "--x")).toBe(true);
+    expect(relatedProperties("--x", "--y")).toBe(false);
+    expect(relatedProperties("--color", "color")).toBe(false);
   });
 
   test("the first declarer beneath decides: an intermediate rule without the property is walked past", () => {
