@@ -21,7 +21,7 @@ import type {
   DreamViewport,
   StyleRule,
 } from "@daydream/plugin-api";
-import type { FontFace } from "@daydream/plugin-api/document";
+import type { FontFace } from "@daydream/plugin-api";
 
 import { count, emptyReport, type PasteReport } from "./report";
 import {

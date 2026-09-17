@@ -27,7 +27,7 @@
 // an at-rule, and nothing of what is inside.
 
 import type { CoreApi, StyleRule } from "@daydream/plugin-api";
-import type { FontFace } from "@daydream/plugin-api/document";
+import type { FontFace } from "@daydream/plugin-api";
 
 import { count } from "./report";
 import { parseStyleAttribute, stripComments } from "./styleAttribute";
