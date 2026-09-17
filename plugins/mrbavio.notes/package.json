@@ -6,5 +6,12 @@
   "peerDependencies": {
     "@solidjs/web": "2.0.0-rc.0",
     "solid-js": "2.0.0-rc.0"
+  },
+  "dependencies": {
+    "@daydream/plugin-api": "github:mbavio-phota/daydream#3ef8547b06630d6c9af7677f1c9d41ba19dfe4ec&path:packages/plugin-api"
+  },
+  "devDependencies": {
+    "@daydream/plugin-testing": "github:mbavio-phota/daydream#3ef8547b06630d6c9af7677f1c9d41ba19dfe4ec&path:packages/plugin-testing",
+    "vitest": "^4.1.11"
   }
 }
