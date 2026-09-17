@@ -263,6 +263,7 @@ function matchedRulesFor(
   sheet.forEach((rule, index) => {
     let best: { specificity: [number, number, number]; pseudo?: string } | null =
       null;
+    let plain = false;
     for (const member of splitTopLevelCommas(rule.selector)) {
       const trimmed = member.trim();
       const trailing = trailingPseudoElement(trimmed);
@@ -274,6 +275,7 @@ function matchedRulesFor(
         ok = false;
       }
       if (!ok) continue;
+      if (trailing === null) plain = true;
       const rank = core.specificity(trimmed);
       if (best === null || isMoreSpecific(rank, best.specificity)) {
         best =
@@ -283,7 +285,16 @@ function matchedRulesFor(
       }
     }
     if (best !== null) {
-      out.push({ index, specificity: best.specificity, ...(best.pseudo === undefined ? {} : { pseudo: best.pseudo }) });
+      // A rule reaching the element through a plain member AND a
+      // pseudo-element one (`.card, .card::before`) reaches the real box:
+      // the pseudo mark is kept only when every matching member ended in
+      // one, so neither redundancy question skips a rule that does style
+      // the element itself (review of this file).
+      out.push({
+        index,
+        specificity: best.specificity,
+        ...(best.pseudo === undefined || plain ? {} : { pseudo: best.pseudo }),
+      });
     }
   });
   out.sort((a, b) => {

@@ -396,4 +396,27 @@ describe("matchLint", () => {
     );
     expect(findings).toEqual([]);
   });
+
+  test("a rule reaching the element through a plain member and a ::before member styles the real box: judged, not skipped", async () => {
+    const root = createElement({
+      tag: "html",
+      children: [
+        createElement({
+          tag: "body",
+          label: "body",
+          children: [createElement({ tag: "div", label: "A", attrs: { class: "card featured" } })],
+        }),
+      ],
+    });
+    const findings = await matchLint(
+      build(
+        [
+          { selector: ".card", styles: { color: "#333" } },
+          { selector: ".card.featured, .card.featured::before", styles: { color: "#333" } },
+        ],
+        root,
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([[1, "color"]]);
+  });
 });

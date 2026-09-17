@@ -702,11 +702,18 @@ function lintUnusedFontFaces(
 // names `card` whether or not it matches this element right now). Named
 // means: a `.class` compound anywhere in any rule's selector (inside
 // `:is()`, `:not()`, `:where()` too — the regex reads the whole text),
-// or a `[class…="…"]` attribute selector whose value lists it. Only
-// `class` is judged: an `id` may be a fragment link's target and a
-// `data-*` a state hook, neither of which a rule has to name.
+// or a `[class…="…"]` attribute selector: `=` and `~=` name their value's
+// tokens outright, while `^=`, `$=`, `*=` and `|=` match the attribute
+// STRING by prefix, suffix or substring, so a class counts as named by one
+// of those when the token itself satisfies the test (`[class*="i-"]`
+// names `i-home`) — approximate, erring toward named, since a false
+// "unreferenced" would refuse a valid landing. Only `class` is judged: an
+// `id` may be a fragment link's target and a `data-*` a state hook,
+// neither of which a rule has to name.
 
-/** Every class name some rule of `sheet` names, escapes resolved. */
+/** Every class name some rule of `sheet` names OUTRIGHT (a `.class`
+ * compound, a `[class=]`/`[class~=]` token), escapes resolved. The
+ * prefix/suffix/substring attribute forms are `classNamer`'s. */
 export function referencedClasses(
   sheet: readonly { selector: string }[],
 ): Set<string> {
@@ -717,25 +724,63 @@ export function referencedClasses(
     )) {
       named.add((match[1] as string).replace(/\\(.)/g, "$1"));
     }
-    for (const match of rule.selector.matchAll(
-      /\[\s*class\s*[~|^$*]?=\s*(?:"([^"]*)"|'([^']*)'|([^\]\s]+))\s*[is]?\s*\]/gi,
-    )) {
-      const value = match[1] ?? match[2] ?? match[3] ?? "";
+    for (const { operator, value } of classAttributeSelectors(rule.selector)) {
+      if (operator !== "=" && operator !== "~=") continue;
       for (const token of value.split(/\s+/)) if (token !== "") named.add(token);
     }
   }
   return named;
 }
 
+/** Whether some rule of `sheet` names a class token: outright
+ * (`referencedClasses`) or through a prefix/suffix/substring `[class…=]`
+ * test the token satisfies. */
+export function classNamer(
+  sheet: readonly { selector: string }[],
+): (token: string) => boolean {
+  const named = referencedClasses(sheet);
+  const tests: ((token: string) => boolean)[] = [];
+  for (const rule of sheet) {
+    for (const { operator, value } of classAttributeSelectors(rule.selector)) {
+      if (value === "") continue;
+      if (operator === "^=" || operator === "|=") {
+        tests.push((token) => token.startsWith(value));
+      } else if (operator === "$=") {
+        tests.push((token) => token.endsWith(value));
+      } else if (operator === "*=") {
+        // A value with whitespace spans tokens; no single token can be
+        // told apart, so every token counts as named.
+        tests.push((token) => /\s/.test(value) || token.includes(value));
+      }
+    }
+  }
+  return (token) => named.has(token) || tests.some((test) => test(token));
+}
+
+function classAttributeSelectors(
+  selector: string,
+): { operator: string; value: string }[] {
+  const out: { operator: string; value: string }[] = [];
+  for (const match of selector.matchAll(
+    /\[\s*class\s*([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\]\s]+))\s*[is]?\s*\]/gi,
+  )) {
+    out.push({
+      operator: match[1] as string,
+      value: match[2] ?? match[3] ?? match[4] ?? "",
+    });
+  }
+  return out;
+}
+
 export function lintUnreferencedClasses(
   vp: DreamViewport,
   findings: Finding[],
 ): void {
-  const named = referencedClasses(vp.payload.sheet ?? []);
+  const names = classNamer(vp.payload.sheet ?? []);
   const visit = (el: DreamElement): void => {
     const classes = (el.attrs?.["class"] ?? "").split(/\s+/).filter(Boolean);
     for (const name of classes) {
-      if (named.has(name)) continue;
+      if (names(name)) continue;
       findings.push({
         tier: "static",
         severity: "blocking",

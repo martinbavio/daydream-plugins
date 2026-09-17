@@ -14,6 +14,7 @@ import type { DreamViewport, StyleRule } from "@daydream/plugin-api";
 import {
   lintRestatedInitialsOnRules,
   lintUnitlessLengthsOnRules,
+  classNamer,
   lintUnreferencedClasses,
   referencedClasses,
 } from "./staticLint";
@@ -167,6 +168,27 @@ describe("lintUnreferencedClasses (rule 5)", () => {
         { selector: "[class~=\"pill\"] , [class=\"one two\"]" },
       ])].sort(),
     ).toEqual(["a", "b", "c", "card", "one", "pill", "title", "two", "x:y"]);
+  });
+
+  test("prefix, suffix and substring [class…=] forms name every token that satisfies them; [class=] and [class~=] name their tokens", () => {
+    const names = classNamer([
+      { selector: '[class*="i-"]' },
+      { selector: "[class^=btn]" },
+      { selector: "[class$='-lg']" },
+      { selector: '[class~="pill"]' },
+    ]);
+    expect(names("i-home")).toBe(true);
+    expect(names("btn-primary")).toBe(true);
+    expect(names("xbtn")).toBe(false);
+    expect(names("card-lg")).toBe(true);
+    expect(names("pill")).toBe(true);
+    expect(names("pills")).toBe(false);
+    expect([...referencedClasses([{ selector: '[class*="i-"]' }])]).toEqual([]);
+    // The lint itself: an element only a substring form reaches is not refused.
+    const vp = viewportWith([{ selector: '[class*="i-"]', styles: { color: "red" } }], ["i-home"]);
+    const out: Parameters<typeof lintUnreferencedClasses>[1] = [];
+    lintUnreferencedClasses(vp, out);
+    expect(out).toEqual([]);
   });
 
   test("a class no rule names is a finding on its element; a named one, and an empty class, are not", () => {
