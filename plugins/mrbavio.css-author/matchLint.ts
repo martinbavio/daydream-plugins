@@ -96,6 +96,10 @@ export async function matchLint(
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
   for (const vp of dd.core.viewportItems(doc) as DreamViewport[]) {
+    // Every question here is about a rule, so a viewport without a sheet
+    // has nothing to ask and pays for no mount (decisions.md #71).
+    const sheet = vp.payload.sheet;
+    if (sheet === undefined || sheet.length === 0) continue;
     const mounted = await dd.mountViewport(vp);
     try {
       const byId = mountedNodesById(mounted);
