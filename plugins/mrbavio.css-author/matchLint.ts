@@ -24,7 +24,14 @@
 // truly dead selector (src/canvas/ruleMatch.ts ruleIsActive), and this
 // lint has no width sweep of its own to tell the two apart — the
 // necessity lint's sweep is what judges a responsive rule's declarations
-// (necessity.ts).
+// (necessity.ts); a container query's own dead-match question is judged
+// separately below, from the rule's matched elements' ancestors.
+//
+// CONTAINER-QUERY-WITHOUT-CONTAINER ON RULES: the same fact staticLint.ts
+// asks of an element's `@container` layer (rule 1), asked of a rule's
+// `@container` condition instead — the ancestors in question are every
+// matched element's own (`dd.core.findPath`), since a rule has no single
+// element position of its own.
 
 import type {
   CoreApi,
@@ -35,7 +42,12 @@ import type {
   Finding,
 } from "@daydream/plugin-api";
 
-import { nameOf } from "./staticLint";
+import {
+  containerDeclaration,
+  nameOf,
+  queryNeeds,
+  splitContainerPrelude,
+} from "./staticLint";
 import { hasStatePseudo, stripStatePseudo } from "./statePseudo";
 
 /** What the match-dependent findings need: the pure helpers and the
@@ -57,6 +69,7 @@ export function matchLint(dd: MatchHost, doc: DreamDocument): Finding[] {
   for (const vp of dd.core.viewportItems(doc) as DreamViewport[]) {
     lintRedundancy(dd, vp, findings);
     lintDeadRules(dd, vp, findings);
+    lintContainerQueriesOnRules(dd, doc, vp, findings);
   }
   return findings;
 }
@@ -172,4 +185,50 @@ function elementIds(root: DreamElement): string[] {
   };
   visit(root);
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Container-query-without-container, asked of a rule's matched elements.
+
+function lintContainerQueriesOnRules(
+  dd: MatchHost,
+  doc: DreamDocument,
+  vp: DreamViewport,
+  findings: Finding[],
+): void {
+  const sheet = vp.payload.sheet ?? [];
+  sheet.forEach((rule, index) => {
+    for (const condition of rule.conditions ?? []) {
+      if (dd.core.conditionKind(condition) !== "container") continue;
+      const prelude = condition.trim();
+      const { name, condition: inner } = splitContainerPrelude(prelude);
+      const needs = queryNeeds(inner);
+      if (!needs.size && !needs.scrollState) continue; // style()-only
+      const matched = dd.ruleMatches(vp.id, index);
+      // A rule matching no element is the dead-rule finding's to report;
+      // there is no matched element here to read ancestors from, and a
+      // second finding on the same rule would only repeat it.
+      if (matched.length === 0) continue;
+      const satisfied = matched.some((elementId) => {
+        const path = dd.core.findPath(doc, elementId);
+        if (path === undefined) return false;
+        const ancestors = path.slice(0, -1);
+        return ancestors.some((ancestor) => {
+          const decl = containerDeclaration(dd.core, ancestor as DreamElement);
+          const typed =
+            (!needs.size || decl.size) &&
+            (!needs.scrollState || decl.scrollState);
+          if (!typed) return false;
+          return name === null || decl.names.has(name);
+        });
+      });
+      if (satisfied) continue;
+      findings.push({
+        tier: "static",
+        severity: "blocking",
+        rule: index,
+        message: `container query \`${prelude}\` in rule ${rule.selector} (sheet[${index}]) of viewport ${vp.id} can never match: no matched element has a satisfying ancestor`,
+      });
+    }
+  });
 }

@@ -160,6 +160,56 @@ describe("matchLint", () => {
     expect(await matchLint(doc)).toEqual([]);
   });
 
+  test("a container query on a rule with no satisfying ancestor among its matched elements is a finding", async () => {
+    const doc = build([
+      {
+        selector: ".card",
+        conditions: ["@container (width > 400px)"],
+        styles: { display: "flex" },
+      },
+    ]);
+    const findings = await matchLint(doc);
+    expect(findings.map((f) => f.message)).toEqual([
+      "container query `@container (width > 400px)` in rule .card (sheet[0]) of viewport v1 can never match: no matched element has a satisfying ancestor",
+    ]);
+  });
+
+  test("a container-type ancestor of the matched element satisfies the rule's container query", async () => {
+    const card = createElement({ tag: "div", label: "Card", attrs: { class: "card" } });
+    const wrapper = createElement({
+      tag: "div",
+      styles: { "container-type": "inline-size" },
+      children: [card],
+    });
+    const doc = build(
+      [
+        {
+          selector: ".card",
+          conditions: ["@container (width > 400px)"],
+          styles: { display: "flex" },
+        },
+      ],
+      createElement({
+        tag: "html",
+        children: [createElement({ tag: "body", label: "body", children: [wrapper] })],
+      }),
+    );
+    expect(await matchLint(doc)).toEqual([]);
+  });
+
+  test("a rule matching no element reports only the dead-rule finding, never a second container-query one", async () => {
+    const doc = build([
+      {
+        selector: ".nope",
+        conditions: ["@container (width > 400px)"],
+        styles: { display: "flex" },
+      },
+    ]);
+    const findings = await matchLint(doc);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain("matches no element");
+  });
+
   test("a clean document is clean", async () => {
     expect(await matchLint(build([]))).toEqual([]);
   });
