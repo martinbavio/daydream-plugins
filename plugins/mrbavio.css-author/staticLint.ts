@@ -39,7 +39,7 @@ export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
  * element into a container (environment.ts, containerAxes), a container
  * layer can too, and a static lint cannot know at which width the query is
  * asked, so any map counts. */
-interface ContainerDeclaration {
+export interface ContainerDeclaration {
   /** `container-type: size | inline-size` — what size features query. */
   size: boolean;
   /** `container-type: scroll-state` — what scroll-state() queries. */
@@ -125,7 +125,7 @@ function lintContainerQueries(
  * `card not (…)`. `not (…)` opens a condition, and `style(…)` /
  * `scroll-state(…)` run straight into their parenthesis, so neither reads
  * as a name. */
-function splitContainerPrelude(prelude: string): {
+export function splitContainerPrelude(prelude: string): {
   name: string | null;
   condition: string;
 } {
@@ -138,7 +138,7 @@ function splitContainerPrelude(prelude: string): {
   return { name, condition: rest.slice(name.length).trim() };
 }
 
-interface QueryNeeds {
+export interface QueryNeeds {
   size: boolean;
   scrollState: boolean;
 }
@@ -150,7 +150,7 @@ interface QueryNeeds {
  * flagged); a bare `(` followed by `not`, another `(`, or a function is a
  * grouping paren, and a bare `(` followed by anything else — `(width …`,
  * `(min-width: …)`, `(orientation: …)` — is a size feature. */
-function queryNeeds(condition: string): QueryNeeds {
+export function queryNeeds(condition: string): QueryNeeds {
   const needs: QueryNeeds = { size: false, scrollState: false };
   for (let i = 0; i < condition.length; i++) {
     if (condition[i] !== "(") continue;
@@ -198,7 +198,7 @@ function closingParen(text: string, open: number): number {
   return text.length;
 }
 
-function containerDeclaration(
+export function containerDeclaration(
   core: CoreApi,
   el: DreamElement,
 ): ContainerDeclaration {
@@ -552,6 +552,6 @@ function lintUnusedFontFaces(
 /** The label when present, else `tag#id` — the same naming the measure
  * report uses (core's src/measure/findings.ts), so every tier's findings
  * name an element the same way. */
-function nameOf(el: DreamElement): string {
+export function nameOf(el: DreamElement): string {
   return el.label ?? `${el.tag}#${el.id}`;
 }
