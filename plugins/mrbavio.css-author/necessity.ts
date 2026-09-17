@@ -72,7 +72,10 @@ import type {
   DreamViewport,
   Finding,
   MountedViewport,
+  StyleRule,
 } from "@daydream/plugin-api";
+
+import { hasStatePseudo } from "./statePseudo";
 
 /** What the lint needs from the API object: the pure helpers and the
  * live mount. A gate hands in its `dd`; a test hands in a test kernel's. */
@@ -119,11 +122,14 @@ export async function necessityLint(
   doc: DreamDocument,
   options: NecessityOptions = {},
 ): Promise<Finding[]> {
-  const perViewport: Verdict[][] = [];
+  const perViewport: ViewportVerdicts[] = [];
   for (const vp of selectViewports(dd.core, doc, options.viewportIds)) {
     perViewport.push(await lintViewport(dd, vp));
   }
-  return intersect(perViewport);
+  return [
+    ...intersect(perViewport.map((v) => v.elements)),
+    ...intersectRules(perViewport.map((v) => v.rules)),
+  ];
 }
 
 /** The document's viewports, or the named subset in document order. An
@@ -168,6 +174,45 @@ interface Candidate {
   at: (string | undefined)[];
 }
 
+/** A rule declaration's fate (decisions.md #71, plan phase 9): the
+ * correspondence key pairs it with the same declaration in another
+ * viewport by selector and conditions text, never by index — an index is
+ * only a position in ONE viewport's sheet. */
+interface RuleVerdict {
+  key: string;
+  property: string;
+  dead: boolean;
+  finding: Finding;
+}
+
+/** Where a declaration is removed from — an element's base map or one
+ * layer (the existing shape `isDead` already takes), or a rule of the
+ * viewport's `sheet` by its stored index (the phase-9 kernel seam,
+ * `MountedViewport.withoutDeclaration({ rule }, property)`). */
+type RemovalTarget = { elementId: string; layer?: string } | { rule: number };
+
+/** A rule declaration as the probe mounts re-judge it: `targets` is the
+ * PAIRED removal set (rule 1's own trick, extended to rules) — the rule's
+ * declaration together with every element it matches that shadows the
+ * same property inline, removed TOGETHER so the rule reads dead only when
+ * NOTHING relies on the property regardless of source. A rule dead only
+ * because its matched elements shadow it inline is the redundancy
+ * finding's story, not this one's (matchLint.ts). */
+interface RuleCandidate {
+  verdict: RuleVerdict;
+  rule: StyleRule;
+  index: number;
+  value: string;
+  targets: RemovalTarget[];
+}
+
+/** Every viewport's element and rule verdicts, kept apart: each has its
+ * own correspondence key and its own cross-viewport intersection. */
+interface ViewportVerdicts {
+  elements: Verdict[];
+  rules: RuleVerdict[];
+}
+
 /** One element's observation: its border box (to 0.01px) and its computed
  * style, as one comparable string. */
 type Observation = string;
@@ -186,21 +231,33 @@ interface Probe {
 async function lintViewport(
   dd: NecessityHost,
   vp: DreamViewport,
-): Promise<Verdict[]> {
+): Promise<ViewportVerdicts> {
   // The width the page was rendered at is the mount's to say (a viewport
   // with no frame renders at the measurer's default), so it is read back
-  // rather than guessed here.
-  const { own, candidates } = await withMount(dd, vp, undefined, (mounted) => {
-    const own = mounted.read().frame.width;
-    return { own, candidates: judgeAll(dd.core, vp, mounted, own) };
-  });
-  let pending = candidates.filter((c) => c.verdict.dead);
+  // rather than guessed here. Element and rule candidates share ONE mount
+  // per width — the same baseline serves both judgements, so a document
+  // with a sheet costs no more mounts than one without.
+  const { own, elementCandidates, ruleCandidates } = await withMount(
+    dd,
+    vp,
+    undefined,
+    (mounted) => {
+      const own = mounted.read().frame.width;
+      return {
+        own,
+        elementCandidates: judgeAll(dd.core, vp, mounted, own),
+        ruleCandidates: judgeRules(dd.core, vp, mounted, own),
+      };
+    },
+  );
+  let pendingEl = elementCandidates.filter((c) => c.verdict.dead);
+  let pendingRule = ruleCandidates.filter((c) => c.verdict.dead);
   const swept = [own];
   for (const width of probeWidths(dd.core, vp, own)) {
-    if (pending.length === 0) break;
+    if (pendingEl.length === 0 && pendingRule.length === 0) break;
     await withMount(dd, vp, width, (mounted) => {
       const probe = baseline(mounted);
-      for (const c of pending) {
+      for (const c of pendingEl) {
         c.verdict.dead = isDead(
           probe,
           mounted,
@@ -209,11 +266,15 @@ async function lintViewport(
           c.at,
         );
       }
+      for (const c of pendingRule) {
+        c.verdict.dead = isDeadAt(probe, mounted, c.verdict.property, c.targets);
+      }
     });
     swept.push(width);
-    pending = pending.filter((c) => c.verdict.dead);
+    pendingEl = pendingEl.filter((c) => c.verdict.dead);
+    pendingRule = pendingRule.filter((c) => c.verdict.dead);
   }
-  for (const c of pending) {
+  for (const c of pendingEl) {
     c.verdict.finding = finding(
       c.el,
       c.verdict.property,
@@ -222,7 +283,13 @@ async function lintViewport(
       swept,
     );
   }
-  return candidates.map((c) => c.verdict);
+  for (const c of pendingRule) {
+    c.verdict.finding = ruleFinding(vp, c.rule, c.index, c.verdict.property, c.value, swept);
+  }
+  return {
+    elements: elementCandidates.map((c) => c.verdict),
+    rules: ruleCandidates.map((c) => c.verdict),
+  };
 }
 
 /** Mount (motion pinned off), run, dispose — the one lifecycle every mount
@@ -358,6 +425,131 @@ function judgeAll(
   return candidates;
 }
 
+/**
+ * Every checked declaration of the viewport's `sheet`, rule 1's paired
+ * check extended to rules (decisions.md #71, plan phase 9): a rule's
+ * declaration goes together with every element it matches that ALSO
+ * carries its own inline (base-map) declaration of the same property,
+ * removed in one combined set — so a rule reads dead only when nothing
+ * relies on the property AT ALL, never merely because its matched
+ * elements happen to restate it (that shape is matchLint.ts's redundancy
+ * finding). A rule under a state pseudo-class is skipped outright — in a
+ * rule `:hover` belongs to the selector, and nobody hovers a lint run
+ * (statePseudo.ts) — as is one whose own `@media` condition is not active
+ * at the viewport's frame: the generated sheet never emits an inactive
+ * group's rule at all (decisions.md #71), so there is nothing here to
+ * remove yet: `isDeadAt` skips a width it cannot reach anyway.
+ */
+function judgeRules(
+  core: CoreApi,
+  vp: DreamViewport,
+  mounted: MountedViewport,
+  own: number,
+): RuleCandidate[] {
+  const probe = baseline(mounted);
+  const sheet = vp.payload.sheet ?? [];
+  const byId = elementsById(vp.payload.root);
+  const candidates: RuleCandidate[] = [];
+  sheet.forEach((rule, index) => {
+    if (hasStatePseudo(rule.selector)) return;
+    if (!ruleActiveAtOwnFrame(core, vp, rule)) return;
+    // The live strategy scopes nothing (decisions.md #71): the mounted
+    // iframe is its own unnamespaced document, so the stored selector is
+    // asked of it verbatim — no kernel rewrite needed, unlike matchLint.ts's
+    // canvas reads.
+    const matched = mountedRuleMatches(mounted, rule.selector);
+    const key = `${rule.selector} ${(rule.conditions ?? []).join(" ")}`;
+    for (const [property, value] of Object.entries(rule.styles)) {
+      if (!isChecked(core, property, value)) continue;
+      const targets: RemovalTarget[] = [{ rule: index }];
+      for (const elementId of matched) {
+        const el = byId.get(elementId);
+        if (el !== undefined && property in el.styles) {
+          targets.push({ elementId });
+        }
+      }
+      candidates.push({
+        verdict: {
+          key,
+          property,
+          dead: isDeadAt(probe, mounted, property, targets),
+          finding: ruleFinding(vp, rule, index, property, value, [own]),
+        },
+        rule,
+        index,
+        value,
+        targets,
+      });
+    }
+  });
+  return candidates;
+}
+
+/** Whether a rule's OWN `@media` condition holds at the viewport's frame
+ * — the same evaluator the kernel's match cache runs
+ * (src/canvas/ruleMatch.ts ruleIsActive), rebuilt here from `dd.core`'s
+ * public pieces since a plugin has no import of the kernel's internals.
+ * `@container`/`@supports` conditions are left in (the browser decides
+ * those when it renders the generated sheet); only a DEFINITE `false`
+ * excludes — "unknown" (no frame to evaluate against) is left checkable. */
+function ruleActiveAtOwnFrame(
+  core: CoreApi,
+  vp: DreamViewport,
+  rule: StyleRule,
+): boolean {
+  const conditions = rule.conditions ?? [];
+  if (conditions.length === 0) return true;
+  const env = core.viewportMediaEnvironment(vp);
+  for (const condition of conditions) {
+    if (core.conditionKind(condition) !== "media") continue;
+    const result = env === null ? "unknown" : core.evaluateMediaCondition(condition, env);
+    if (result === false) return false;
+  }
+  return true;
+}
+
+/** Which of the mounted page's elements a selector matches, by id — the
+ * live strategy's unscoped DOM asked directly (see judgeRules), never
+ * `dd.ruleMatches` (that reads the CANVAS's own rendered document, a
+ * different DOM than the one `dd.mountViewport` renders off-screen here).
+ * A selector list is asked whole, as `Element.matches` already handles
+ * one; a pseudo-element member throws on `matches` in most engines and is
+ * caught as no match — there is no inline declaration on an element for a
+ * pseudo-element's box to shadow anyway. */
+function mountedRuleMatches(
+  mounted: MountedViewport,
+  selector: string,
+): string[] {
+  const out: string[] = [];
+  for (const node of Array.from(
+    mounted.document().querySelectorAll("[data-dream-id]"),
+  )) {
+    let ok: boolean;
+    try {
+      ok = node.matches(selector);
+    } catch {
+      ok = false;
+    }
+    if (!ok) continue;
+    const id = (node as HTMLElement).dataset["dreamId"];
+    if (id !== undefined) out.push(id);
+  }
+  return out;
+}
+
+/** Every element of the viewport keyed by its stored id — the document's
+ * own tree, never the mounted page's, since we need each element's
+ * inline declarations (the paired check), not its geometry. */
+function elementsById(root: DreamElement): Map<string, DreamElement> {
+  const map = new Map<string, DreamElement>();
+  const visit = (el: DreamElement): void => {
+    map.set(el.id, el);
+    el.children.forEach(visit);
+  };
+  visit(root);
+  return map;
+}
+
 /** How many elements of the viewport carry each label: a label is an
  * address only when one element answers to it. */
 function labelCounts(root: DreamElement): Map<string, number> {
@@ -380,6 +572,29 @@ function intersect(perViewport: Verdict[][]): Finding[] {
   for (const verdicts of perViewport) {
     for (const verdict of verdicts) {
       const key = `${verdict.element}\u0000${verdict.property}\u0000${verdict.layer ?? ""}`;
+      const seen = merged.get(key);
+      if (seen === undefined) {
+        merged.set(key, { dead: verdict.dead, finding: verdict.finding });
+      } else {
+        seen.dead = seen.dead && verdict.dead;
+      }
+    }
+  }
+  const out: Finding[] = [];
+  for (const entry of merged.values()) if (entry.dead) out.push(entry.finding);
+  return out;
+}
+
+/** The same cross-viewport intersection as `intersect`, keyed on a rule's
+ * selector and conditions text instead of an element's label/path
+ * (decisions.md #71, plan phase 9): a rule's stored INDEX is only a
+ * position in one viewport's own sheet, never a correspondence a second
+ * viewport could share. */
+function intersectRules(perViewport: RuleVerdict[][]): Finding[] {
+  const merged = new Map<string, { dead: boolean; finding: Finding }>();
+  for (const verdicts of perViewport) {
+    for (const verdict of verdicts) {
+      const key = `${verdict.key} ${verdict.property}`;
       const seen = merged.get(key);
       if (seen === undefined) {
         merged.set(key, { dead: verdict.dead, finding: verdict.finding });
@@ -426,6 +641,44 @@ function isDead(
   }
 }
 
+/** One removal, addressed at either shape `withoutDeclaration` takes
+ * (the phase-9 kernel seam): an element's own declaration, or a rule of
+ * the sheet by its stored index. */
+function withoutAt(mounted: MountedViewport, target: RemovalTarget, property: string): () => void {
+  return "rule" in target
+    ? mounted.withoutDeclaration({ rule: target.rule }, property)
+    : mounted.withoutDeclaration(target.elementId, property, target.layer);
+}
+
+/** The general form of `isDead`, for a rule's paired removal set (targets
+ * spanning a rule address and any number of matched elements' inline
+ * declarations, judgeRules's `at`). A removal that THROWS — the rule's own
+ * `@media` condition inactive at THIS width, so the generated sheet never
+ * marked it here at all (decisions.md #71) — is not evidence either way:
+ * the declaration is left ALIVE for this width rather than risk a false
+ * dead verdict the sweep cannot actually support here. */
+function isDeadAt(
+  probe: Probe,
+  mounted: MountedViewport,
+  property: string,
+  targets: RemovalTarget[],
+): boolean {
+  const restores: (() => void)[] = [];
+  try {
+    for (const target of targets) {
+      restores.push(withoutAt(mounted, target, property));
+    }
+  } catch {
+    for (const restore of restores.reverse()) restore();
+    return false;
+  }
+  try {
+    return unchanged(probe);
+  } finally {
+    for (const restore of restores.reverse()) restore();
+  }
+}
+
 /** The finding's sentence names every width the declaration was dead at,
  * ascending — the fact is "changes nothing at any of these", never
  * "changes nothing". */
@@ -446,6 +699,27 @@ function finding(
   };
   if (layer !== undefined) out.layer = layer;
   return out;
+}
+
+/** A rule declaration's finding: `Finding.rule` names `sheet[i]` — a rule
+ * finding carries no element coordinates of its own, and its viewport
+ * only appears in the message, the same way the dead-rule finding names
+ * it (matchLint.ts). */
+function ruleFinding(
+  vp: DreamViewport,
+  rule: StyleRule,
+  index: number,
+  property: string,
+  value: string,
+  widths: number[],
+): Finding {
+  return {
+    tier: "necessity",
+    severity: "blocking",
+    rule: index,
+    property,
+    message: `${property}: ${value} in rule ${rule.selector} (sheet[${index}]) of viewport ${vp.id} changes nothing at ${widthsText(widths)}`,
+  };
 }
 
 /** `360, 400, 768, 1280 or 1920px`; one width is `400px`. */

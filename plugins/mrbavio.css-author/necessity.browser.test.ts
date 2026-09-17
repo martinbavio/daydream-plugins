@@ -12,6 +12,7 @@ import type {
   DreamElement,
   DreamViewport,
   Finding,
+  StyleRule,
 } from "@daydream/plugin-api";
 import {
   createElement,
@@ -55,6 +56,9 @@ interface Spec {
   styles?: Record<string, string>;
   layers?: ConditionalLayer[];
   children?: DreamElement[];
+  /** Real HTML attributes — a rule's selector hook (decisions.md #71),
+   * never the kernel id `id` already addresses above. */
+  attrs?: Record<string, string>;
 }
 
 function build(spec: Spec): DreamElement {
@@ -62,6 +66,7 @@ function build(spec: Spec): DreamElement {
     tag: spec.tag ?? "div",
     styles: spec.styles ?? {},
     children: spec.children ?? [],
+    ...(spec.attrs === undefined ? {} : { attrs: spec.attrs }),
   });
   if (spec.id !== undefined) element.id = spec.id;
   if (spec.label !== undefined) element.label = spec.label;
@@ -70,11 +75,13 @@ function build(spec: Spec): DreamElement {
   return element;
 }
 
-/** html › body (margin 0) › children, in one viewport of the given frame. */
+/** html › body (margin 0) › children, in one viewport of the given frame,
+ * with an optional `sheet` (decisions.md #71, plan phase 9). */
 function makeDocument(
   frame: { width: number; height?: number },
   bodyChildren: DreamElement[],
   bodyStyles: Record<string, string> = { margin: "0" },
+  sheet?: StyleRule[],
 ): DreamDocument {
   const vp: DreamViewport = createViewportItem(
     build({
@@ -88,9 +95,9 @@ function makeDocument(
         }),
       ],
     }),
-    { frame },
+    { frame, ...(sheet === undefined ? {} : { sheet }) },
   );
-  return { version: 5, items: [vp] };
+  return { version: 6, items: [vp] };
 }
 
 const FRAME = { width: 400, height: 300 };
@@ -628,5 +635,111 @@ describe("cost", () => {
     const findings = await necessityLint(doc);
     expect(findings).toHaveLength(40);
     expect(new Set(properties(findings))).toEqual(new Set(["position"]));
+  });
+});
+
+describe("necessity on rules (decisions.md #71, plan phase 9)", () => {
+  test("a rule's custom property nobody reads is dead, reported at sheet[i]", async () => {
+    const box = build({ id: "box", attrs: { class: "a" }, text: "hi" });
+    const doc = makeDocument(FRAME, [box], undefined, [
+      { selector: ".a", styles: { "--unused": "1px" } },
+    ]);
+    const vpId = doc.items[0]!.id;
+    const findings = await necessityLint(doc);
+    expect(findings).toEqual([
+      {
+        tier: "necessity",
+        severity: "blocking",
+        rule: 0,
+        property: "--unused",
+        message: `--unused: 1px in rule .a (sheet[0]) of viewport ${vpId} changes nothing at ${sweptAt(400)}`,
+      },
+    ]);
+  });
+
+  test("a rule's width that sizes its matched element is live", async () => {
+    const box = build({ id: "box", attrs: { class: "a" }, styles: { height: "20px" } });
+    const doc = makeDocument(FRAME, [box], undefined, [
+      { selector: ".a", styles: { width: "120px" } },
+    ]);
+    expect(await necessityLint(doc)).toEqual([]);
+  });
+
+  test("a rule's declaration every matched element also shadows inline is judged WITH the shadow, so it is not falsely dead — that shape is the redundancy finding's, not this one's", async () => {
+    const box = build({
+      id: "box",
+      attrs: { class: "a" },
+      text: "hi",
+      styles: { color: "red" },
+    });
+    const doc = makeDocument(FRAME, [box], undefined, [
+      { selector: ".a", styles: { color: "red" } },
+    ]);
+    // Removed alone, the rule's declaration would read dead (the inline
+    // copy keeps the element red); removed together with the element's
+    // own shadowing declaration (the paired check), color really does
+    // change — so the rule is alive, and the element's own line is the
+    // redundancy finding's story (matchLint.ts), never necessity's.
+    expect(await necessityLint(doc)).toEqual([]);
+  });
+
+  test("a rule under a state pseudo-class is never judged — in a rule, :hover belongs to the selector", async () => {
+    const box = build({ id: "box", attrs: { class: "a" } });
+    const doc = makeDocument(FRAME, [box], undefined, [
+      { selector: ".a:hover", styles: { color: "red" } },
+    ]);
+    expect(await necessityLint(doc)).toEqual([]);
+  });
+
+  test("a rule under an @media condition inactive at the frame is left alone: the generated sheet never marks it here to judge", async () => {
+    const box = build({ id: "box", attrs: { class: "a" } });
+    const doc = makeDocument(FRAME, [box], undefined, [
+      {
+        selector: ".a",
+        conditions: ["@media (min-width: 2000px)"],
+        styles: { color: "red" },
+      },
+    ]);
+    expect(await necessityLint(doc)).toEqual([]);
+  });
+
+  test("rule verdicts intersect across viewports by selector and conditions, never by index — dead in one, live in the other, stays alive overall", async () => {
+    const dead = makeDocument(
+      { width: 360 },
+      [build({ id: "n", attrs: { class: "a" } })],
+      undefined,
+      [{ selector: ".a", styles: { "--unused": "1px" } }],
+    );
+    const alive = makeDocument(
+      { width: 1280 },
+      [build({ id: "w", attrs: { class: "a" }, styles: { width: "var(--unused)", height: "10px" } })],
+      undefined,
+      [{ selector: ".a", styles: { "--unused": "1px" } }],
+    );
+    const doc: DreamDocument = { version: 6, items: [...dead.items, ...alive.items] };
+    // The first viewport's element reads nothing from --unused (dead
+    // there); the second's `width: var(--unused)` does (live there). The
+    // SAME rule (same selector, same conditions — both empty) is dead
+    // only where dead EVERYWHERE it exists, so the intersection reports
+    // nothing.
+    expect(await necessityLint(doc)).toEqual([]);
+  });
+
+  test("the same rule's declaration dead in every viewport it exists in is reported once", async () => {
+    const a = makeDocument(
+      { width: 360 },
+      [build({ id: "n1", attrs: { class: "a" } })],
+      undefined,
+      [{ selector: ".a", styles: { "--unused": "1px" } }],
+    );
+    const b = makeDocument(
+      { width: 1280 },
+      [build({ id: "n2", attrs: { class: "a" } })],
+      undefined,
+      [{ selector: ".a", styles: { "--unused": "1px" } }],
+    );
+    const doc: DreamDocument = { version: 6, items: [...a.items, ...b.items] };
+    const findings = await necessityLint(doc);
+    expect(findings.map((f) => f.property)).toEqual(["--unused"]);
   });
 });
