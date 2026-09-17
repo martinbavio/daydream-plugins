@@ -122,6 +122,29 @@ describe("matchLint", () => {
     expect(await matchLint(doc)).toEqual([]);
   });
 
+  test("a pseudo-element rule matches its element (not dead) but is never compared for redundancy against the element's own map", async () => {
+    // .card::before matches the Card node once its trailing pseudo-element
+    // is stripped (dd.ruleMatches/dd.matchedRules do this), so the rule is
+    // not dead — but dd.matchedRules reports it with `pseudo: "before"`,
+    // and lintRedundancy skips a pseudo match outright: the element's own
+    // base map has no declaration for a pseudo-element's box to restate,
+    // even though the property and value happen to coincide here.
+    const card = createElement({
+      tag: "div",
+      label: "Card",
+      attrs: { class: "card" },
+      styles: { color: "red" },
+    });
+    const doc = build(
+      [{ selector: ".card::before", styles: { color: "red" } }],
+      createElement({
+        tag: "html",
+        children: [createElement({ tag: "body", label: "body", children: [card] })],
+      }),
+    );
+    expect(await matchLint(doc)).toEqual([]);
+  });
+
   test("a rule matching no element is dead", async () => {
     const doc = build([{ selector: ".nope", styles: { color: "red" } }]);
     const findings = await matchLint(doc);

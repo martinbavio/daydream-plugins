@@ -657,6 +657,31 @@ describe("necessity on rules (decisions.md #71, plan phase 9)", () => {
     ]);
   });
 
+  test("a pseudo-element rule's declaration is judged too, addressed at sheet[i] — necessity has no read of a pseudo-element's own box or computed style", async () => {
+    // .card::before is neither a state pseudo-class (hasStatePseudo is
+    // for :hover and its kin, never a pseudo-ELEMENT) nor media-inactive,
+    // so judgeRules creates a candidate for it same as any other rule.
+    // The observation baseline reads only `[data-dream-id]` real element
+    // nodes, never a pseudo-element's own generated box or computed
+    // style, so removing the declaration never registers as a change —
+    // dead, reported at the rule's own sheet[i], not at any element.
+    const card = build({ id: "card", attrs: { class: "card" } });
+    const doc = makeDocument(FRAME, [card], undefined, [
+      { selector: ".card::before", styles: { color: "red" } },
+    ]);
+    const vpId = doc.items[0]!.id;
+    const findings = await necessityLint(doc);
+    expect(findings).toEqual([
+      {
+        tier: "necessity",
+        severity: "blocking",
+        rule: 0,
+        property: "color",
+        message: `color: red in rule .card::before (sheet[0]) of viewport ${vpId} changes nothing at ${sweptAt(400)}`,
+      },
+    ]);
+  });
+
   test("a rule's width that sizes its matched element is live", async () => {
     const box = build({ id: "box", attrs: { class: "a" }, styles: { height: "20px" } });
     const doc = makeDocument(FRAME, [box], undefined, [
