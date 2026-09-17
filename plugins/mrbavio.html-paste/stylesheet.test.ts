@@ -14,33 +14,63 @@ import {
   type SheetRules,
 } from "./stylesheet";
 
+const selectorProblem = (selector: string): string | null =>
+  selector.trim() === ""
+    ? "selector must not be empty"
+    : /&/.test(selector)
+      ? "carries &"
+      : /:host|:visited/.test(selector)
+        ? "excluded by name"
+        : null;
+
+/** The `@supports` lexical checks the kernel's rule grammar applies —
+ * inlined here only for this stand-in, so its own edge cases (an empty
+ * condition, unbalanced parens, embedded sheet punctuation) still refuse
+ * the way the real `dd.core.ruleProblem` does. */
+function supportsConditionProblem(prelude: string): string | null {
+  const trimmed = prelude.trim();
+  if (/[{};"']|\/\*|\*\//.test(prelude)) {
+    return `A condition cannot contain sheet punctuation: "${trimmed}"`;
+  }
+  const condition = trimmed.slice("@supports".length).trim();
+  if (condition === "") return "@supports needs a condition";
+  let depth = 0;
+  for (const ch of condition) {
+    if (ch === "(") depth++;
+    else if (ch === ")" && --depth < 0) break;
+  }
+  return depth === 0 ? null : "@supports condition has unbalanced parentheses";
+}
+
 /** The kernel's grammars, roughly: enough to tell a refusal from an
- * acceptance in each of the four seams the walker asks. */
+ * acceptance in each of the seams the walker asks. `ruleProblem` judges
+ * the whole candidate rule `conditionRefused` builds (selector, one
+ * condition, empty styles) — a state prelude refused, `@supports` judged
+ * lexically, `@media`/`@container` needing a real condition after the
+ * keyword. */
 const rules: SheetRules = {
-  selectorProblem: (selector) =>
-    selector.trim() === ""
-      ? "selector must not be empty"
-      : /&/.test(selector)
-        ? "carries &"
-        : /:host|:visited/.test(selector)
-          ? "excluded by name"
-          : null,
-  conditionKind: (prelude) =>
-    prelude.startsWith("&:")
-      ? "state"
-      : prelude.startsWith("@media")
-        ? "media"
-        : prelude.startsWith("@container")
-          ? "container"
-          : prelude.startsWith("@supports")
-            ? "supports"
-            : null,
-  conditionPreludeProblem: (prelude) =>
-    prelude.startsWith("@supports")
-      ? "@supports conditions are not storable yet"
-      : /^@(media|container) \S/.test(prelude)
-        ? null
-        : "not a condition",
+  selectorProblem,
+  ruleProblem: (rule) => {
+    const candidate = rule as {
+      selector: string;
+      conditions?: string[];
+      styles: Record<string, string>;
+    };
+    const badSelector = selectorProblem(candidate.selector);
+    if (badSelector !== null) return badSelector;
+    for (const prelude of candidate.conditions ?? []) {
+      if (prelude.startsWith("&:")) {
+        return "a state prelude belongs to the selector";
+      }
+      if (prelude.startsWith("@supports")) {
+        const problem = supportsConditionProblem(prelude);
+        if (problem !== null) return problem;
+        continue;
+      }
+      if (!/^@(media|container) \S/.test(prelude)) return "not a condition";
+    }
+    return null;
+  },
   isPropertyName: (name) => /^(--[\w-]+|[a-z-]+)$/.test(name),
   isSafeValue: (value) => !/[{};]|\/\*|!\s*important/i.test(value),
   attrProblem: (name, value) =>
@@ -155,7 +185,7 @@ describe("walkStyleSheet", () => {
     ]);
   });
 
-  test("at-rule ancestry becomes conditions, outermost first, on every rule inside — @supports too, judged lexically until dd.core.ruleProblem; a refused prelude drops each rule under its keyword", () => {
+  test("at-rule ancestry becomes conditions, outermost first, on every rule inside — @supports too, judged through dd.core.ruleProblem; a refused prelude drops each rule under its keyword", () => {
     const out = walk([
       group("@media screen and (min-width: 600px)", [
         style(".btn", "padding: 8px"),
