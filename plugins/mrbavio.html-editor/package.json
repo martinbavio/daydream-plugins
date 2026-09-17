@@ -10,7 +10,7 @@
     "@codemirror/language": "^6.12.4",
     "@codemirror/state": "^6.7.1",
     "@codemirror/view": "^6.43.9",
-    "@daydream/plugin-api": "github:mbavio-phota/daydream#bbbc23d66b53aa1ed4f7551191fb14c0f8f949ee&path:packages/plugin-api",
+    "@daydream/plugin-api": "github:mbavio-phota/daydream#4363de9dc5ad0ab81860d78a28d357031357dcef&path:packages/plugin-api",
     "@lezer/highlight": "^1.2.3"
   },
   "peerDependencies": {
@@ -18,7 +18,7 @@
     "solid-js": "2.0.0-rc.0"
   },
   "devDependencies": {
-    "@daydream/plugin-testing": "github:mbavio-phota/daydream#bbbc23d66b53aa1ed4f7551191fb14c0f8f949ee&path:packages/plugin-testing",
+    "@daydream/plugin-testing": "github:mbavio-phota/daydream#4363de9dc5ad0ab81860d78a28d357031357dcef&path:packages/plugin-testing",
     "vitest": "^4.1.11"
   }
 }

@@ -33,13 +33,12 @@ import { count } from "./report";
 import { parseStyleAttribute, stripComments } from "./styleAttribute";
 
 /** The kernel's faces the walk asks, as `dd.core` hands them: the
- * selector grammar, the condition grammar, the declaration grammars, the
- * `src` rule and the family splitter. */
+ * selector grammar, the whole-rule grammar (conditions included), the
+ * declaration grammars, the `src` rule and the family splitter. */
 export type SheetRules = Pick<
   CoreApi,
   | "selectorProblem"
-  | "conditionKind"
-  | "conditionPreludeProblem"
+  | "ruleProblem"
   | "isPropertyName"
   | "isSafeValue"
   | "attrProblem"
@@ -286,44 +285,21 @@ function storeRule(
 
 /**
  * Whether a rule's condition is one the format refuses: a state prelude
- * (in a rule, `:hover` belongs to the selector — the kernel's ruleProblem
- * says the same) or a prelude the layer grammar refuses.
- *
- * `@supports` is a RULE's to carry (decisions.md #71: emitted verbatim for
- * the browser), and the kernel's sheet validator admits it — but `dd.core`
- * hands out only the ELEMENT-LAYER face, `conditionPreludeProblem`, which
- * still reserves it (#38). So a `@supports` prelude is judged HERE by the
- * same lexical checks that face applies before its reservation: a
- * non-empty condition, balanced parentheses, none of the sheet-text
- * hazards (braces, semicolons, comment delimiters, quotes, control
- * characters). TEMPORARY: the kernel's next phase exposes
- * `dd.core.ruleProblem`, and this branch goes with it.
+ * (in a rule, `:hover` belongs to the selector) or a prelude the rule
+ * grammar refuses — judged through `dd.core.ruleProblem` on a throwaway
+ * rule carrying only this one condition, a universal selector (always
+ * storable) and no declarations (an empty style map raises nothing of its
+ * own), so the paste refuses exactly what a landing would (decisions.md
+ * #71, plan phase 9: `ruleProblem` admits `@supports`, which the
+ * element-layer face `conditionPreludeProblem` still reserves for #38 —
+ * this retires the lexical `@supports` stand-in the kernel not yet
+ * exposing `ruleProblem` used to need).
  */
 function conditionRefused(prelude: string, core: SheetRules): boolean {
-  const kind = core.conditionKind(prelude);
-  if (kind === "state") return true;
-  if (kind === "supports") return supportsPreludeProblem(prelude) !== null;
-  return core.conditionPreludeProblem(prelude) !== null;
-}
-
-const PRELUDE_HAZARD = /[{};"']|\/\*|\*\/|[\u0000-\u001f]/;
-
-/** The layer grammar's lexical checks over a `@supports` prelude — one
- * grammar, so a refused prelude never becomes sheet text. */
-function supportsPreludeProblem(prelude: string): string | null {
-  const trimmed = prelude.trim();
-  if (PRELUDE_HAZARD.test(prelude)) {
-    return `A condition cannot contain sheet punctuation: "${trimmed}"`;
-  }
-  const condition = trimmed.slice("@supports".length).trim();
-  if (condition === "") return "@supports needs a condition";
-  let depth = 0;
-  for (const ch of condition) {
-    if (ch === "(") depth++;
-    else if (ch === ")" && --depth < 0) break;
-  }
-  if (depth !== 0) return "@supports condition has unbalanced parentheses";
-  return null;
+  return (
+    core.ruleProblem({ selector: "*", conditions: [prelude], styles: {} }) !==
+    null
+  );
 }
 
 /** The `url()` sources a `src` descriptor names, unquoted — the kernel's

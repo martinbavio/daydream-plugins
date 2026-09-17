@@ -21,7 +21,10 @@ import type {
 
 /** Every static finding for the document, in tree order, one element's
  * findings together (container queries, then unit-less lengths, then
- * restated initials). Empty when the document is clean. */
+ * restated initials), then the viewport's rule-level findings (decisions.md
+ * #71, plan phase 9: the same four facts extended to a viewport's `sheet` —
+ * everything here is JSON-only, no browser). Empty when the document is
+ * clean. */
 export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
   const findings: Finding[] = [];
   for (const viewport of core.viewportItems(doc) as DreamViewport[]) {
@@ -29,6 +32,8 @@ export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
     // in one viewport is invisible to a query in another.
     lintElement(core, viewport.payload.root, [], findings);
     lintUnusedFontFaces(core, viewport, findings);
+    lintUnitlessLengthsOnRules(viewport, findings);
+    lintRestatedInitialsOnRules(viewport, findings);
   }
   return findings;
 }
@@ -39,7 +44,7 @@ export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
  * element into a container (environment.ts, containerAxes), a container
  * layer can too, and a static lint cannot know at which width the query is
  * asked, so any map counts. */
-interface ContainerDeclaration {
+export interface ContainerDeclaration {
   /** `container-type: size | inline-size` — what size features query. */
   size: boolean;
   /** `container-type: scroll-state` — what scroll-state() queries. */
@@ -125,7 +130,7 @@ function lintContainerQueries(
  * `card not (…)`. `not (…)` opens a condition, and `style(…)` /
  * `scroll-state(…)` run straight into their parenthesis, so neither reads
  * as a name. */
-function splitContainerPrelude(prelude: string): {
+export function splitContainerPrelude(prelude: string): {
   name: string | null;
   condition: string;
 } {
@@ -138,7 +143,7 @@ function splitContainerPrelude(prelude: string): {
   return { name, condition: rest.slice(name.length).trim() };
 }
 
-interface QueryNeeds {
+export interface QueryNeeds {
   size: boolean;
   scrollState: boolean;
 }
@@ -150,7 +155,7 @@ interface QueryNeeds {
  * flagged); a bare `(` followed by `not`, another `(`, or a function is a
  * grouping paren, and a bare `(` followed by anything else — `(width …`,
  * `(min-width: …)`, `(orientation: …)` — is a size feature. */
-function queryNeeds(condition: string): QueryNeeds {
+export function queryNeeds(condition: string): QueryNeeds {
   const needs: QueryNeeds = { size: false, scrollState: false };
   for (let i = 0; i < condition.length; i++) {
     if (condition[i] !== "(") continue;
@@ -198,7 +203,7 @@ function closingParen(text: string, open: number): number {
   return text.length;
 }
 
-function containerDeclaration(
+export function containerDeclaration(
   core: CoreApi,
   el: DreamElement,
 ): ContainerDeclaration {
@@ -411,6 +416,29 @@ function topLevelTokens(value: string): string[] {
   return tokens;
 }
 
+/** Rule 2, extended to a viewport's `sheet` (decisions.md #71, plan phase
+ * 9): a rule's declarations are the same grain as an element's base map,
+ * so the same unit check applies verbatim — no layers to walk, a rule has
+ * one flat style map. */
+export function lintUnitlessLengthsOnRules(
+  vp: DreamViewport,
+  findings: Finding[],
+): void {
+  (vp.payload.sheet ?? []).forEach((rule, index) => {
+    for (const [property, value] of Object.entries(rule.styles)) {
+      if (!LENGTH_PROPERTIES.has(property.trim().toLowerCase())) continue;
+      if (!topLevelTokens(value).some(isNonZeroBareNumber)) continue;
+      findings.push({
+        tier: "static",
+        severity: "blocking",
+        rule: index,
+        property,
+        message: `${property}: ${value.trim()} in rule ${rule.selector} (sheet[${index}]) of viewport ${vp.id} has no unit; a length needs one (px, rem, %, …)`,
+      });
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Rule 3 — an explicit initial value the UA never overrides.
 //
@@ -489,6 +517,106 @@ function lintRestatedInitials(el: DreamElement, findings: Finding[]): void {
   }
 }
 
+/** Rule 3, extended to a viewport's `sheet` (decisions.md #71, plan phase
+ * 9): a rule has no concrete tag, so the `img`/`hr` overflow exception is
+ * APPROXIMATED from the selector alone — excused when its rightmost
+ * compound (in any list member) could reach one of them: no type selector
+ * at all (a bare `.card`, `#x`, `[attr]` or pseudo-class matches any tag),
+ * an explicit universal `*`, or the literal `img`/`hr` type. A rule typed
+ * to a different tag (`div`, `p`, …) can never match either replaced
+ * element, so it is held to the table like an element is. */
+export function lintRestatedInitialsOnRules(
+  vp: DreamViewport,
+  findings: Finding[],
+): void {
+  (vp.payload.sheet ?? []).forEach((rule, index) => {
+    for (const [property, value] of Object.entries(rule.styles)) {
+      const initial = INITIAL_VALUES.get(property.trim().toLowerCase());
+      if (initial === undefined) continue;
+      if (value.trim().toLowerCase() !== initial.value) continue;
+      if (
+        initial.except !== undefined &&
+        selectorCanReachReplacedOrRuled(rule.selector)
+      ) {
+        continue;
+      }
+      findings.push({
+        tier: "static",
+        severity: "blocking",
+        rule: index,
+        property,
+        message: `${property}: ${value.trim()} in rule ${rule.selector} (sheet[${index}]) of viewport ${vp.id} restates the initial value`,
+      });
+    }
+  });
+}
+
+/** Whether some member of the selector list could, by its rightmost
+ * compound alone, match an `img` or `hr` — the same excuse
+ * `lintRestatedInitials` gives those two tags, approximated from the
+ * selector text since a rule carries no element to ask. */
+function selectorCanReachReplacedOrRuled(selector: string): boolean {
+  return splitSelectorList(selector).some((member) => {
+    const type = rightmostTypeSelector(member.trim());
+    return type === null || type === "*" || REPLACED_OR_RULED.has(type);
+  });
+}
+
+/** The selector list's members, split at top-level commas (outside
+ * parens, brackets and strings) — the same grain a rule's `selector`
+ * already stores it in (the CSSOM's `", "`), kept general for a
+ * hand-written one too. */
+function splitSelectorList(selector: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < selector.length; i++) {
+    const ch = selector[i] as string;
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    else if (ch === "," && depth === 0) {
+      parts.push(selector.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(selector.slice(start));
+  return parts;
+}
+
+/** The rightmost compound's type selector, lower-cased — the tag a
+ * `div.card` or `.a > img` names last — or null when the compound opens
+ * with a class, id, attribute or pseudo instead (matches any tag). Split
+ * at the last top-level combinator (whitespace, `>`, `+`, `~`), outside
+ * parens, brackets and strings, so `:is(a, b) c` still finds `c`. */
+function rightmostTypeSelector(complex: string): string | null {
+  let depth = 0;
+  let quote: string | null = null;
+  let cut = 0;
+  for (let i = 0; i < complex.length; i++) {
+    const ch = complex[i] as string;
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    else if (depth === 0 && (ch === " " || ch === ">" || ch === "+" || ch === "~")) {
+      cut = i + 1;
+    }
+  }
+  const compound = complex.slice(cut).trim();
+  if (compound === "" || /^[.#:[]/.test(compound)) return null;
+  const match = /^(\*|[a-z][\w-]*)/i.exec(compound);
+  return match === null ? null : (match[1] as string).toLowerCase();
+}
+
 // ---------------------------------------------------------------------------
 // Rule 4 — a @font-face no element names.
 //
@@ -534,6 +662,20 @@ function lintUnusedFontFaces(
     for (const child of el.children) visit(child);
   };
   visit(vp.payload.root);
+  // A rule's font-family counts as a use too (decisions.md #71, plan
+  // phase 9): the sheet is the same page the elements render into, and a
+  // face named only by a rule is exactly as used as one named by an
+  // element's own map.
+  for (const rule of vp.payload.sheet ?? []) {
+    for (const [property, value] of Object.entries(rule.styles)) {
+      const key = property.trim().toLowerCase();
+      if (key === "font-family") {
+        for (const name of core.familyNames(value)) named.add(name.toLowerCase());
+      } else if (key === "font" || key.startsWith("--")) {
+        loose.push(value.toLowerCase());
+      }
+    }
+  }
   for (const face of fonts) {
     const family = core.familyNames(face["font-family"] ?? "")[0];
     if (family === undefined) continue;
@@ -552,6 +694,6 @@ function lintUnusedFontFaces(
 /** The label when present, else `tag#id` — the same naming the measure
  * report uses (core's src/measure/findings.ts), so every tier's findings
  * name an element the same way. */
-function nameOf(el: DreamElement): string {
+export function nameOf(el: DreamElement): string {
   return el.label ?? `${el.tag}#${el.id}`;
 }

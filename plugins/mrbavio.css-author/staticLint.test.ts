@@ -727,4 +727,56 @@ describe("rule 4 — a @font-face no element names", () => {
       },
     ]);
   });
+
+  test("a face named only by a rule's font-family is fine (decisions.md #71, plan phase 9)", () => {
+    const document = withFonts([face("Montserrat")]);
+    fixtureViewport(document).payload.sheet = [
+      { selector: "h1", styles: { "font-family": "Montserrat, sans-serif" } },
+    ];
+    expect(staticLint(document)).toEqual([]);
+  });
+});
+
+describe("rule-level static findings (decisions.md #71, plan phase 9)", () => {
+  test("a unit-less length in a rule is a finding at sheet[i]", () => {
+    const document = doc([]);
+    fixtureViewport(document).payload.sheet = [
+      { selector: ".card", styles: { width: "100" } },
+    ];
+    expect(staticLint(document)).toEqual([
+      {
+        tier: "static",
+        severity: "blocking",
+        rule: 0,
+        property: "width",
+        message:
+          "width: 100 in rule .card (sheet[0]) of viewport v1 has no unit; a length needs one (px, rem, %, …)",
+      },
+    ]);
+  });
+
+  test("a restated initial in a rule is a finding at sheet[i]", () => {
+    const document = doc([]);
+    fixtureViewport(document).payload.sheet = [
+      { selector: ".card", styles: { position: "static" } },
+    ];
+    expect(staticLint(document)).toEqual([
+      {
+        tier: "static",
+        severity: "blocking",
+        rule: 0,
+        property: "position",
+        message:
+          "position: static in rule .card (sheet[0]) of viewport v1 restates the initial value",
+      },
+    ]);
+  });
+
+  test("a rule typed to img is excused overflow: visible, the same exception an element gets", () => {
+    const document = doc([]);
+    fixtureViewport(document).payload.sheet = [
+      { selector: "img.hero", styles: { overflow: "visible" } },
+    ];
+    expect(staticLint(document)).toEqual([]);
+  });
 });
