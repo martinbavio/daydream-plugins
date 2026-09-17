@@ -46,6 +46,13 @@
 // matched element's own (`dd.core.findPath`, over the DOCUMENT tree, which
 // needs no mount), since a rule has no single element position of its own.
 //
+// RULE-AGAINST-RULE REDUNDANCY (the CSS author's review after the
+// selectors step landed): a rule's declaration restating, for EVERY
+// element the rule reaches, what the next rule beneath it in that
+// element's cascade already sets — the same fact as REDUNDANCY, one level
+// up. The judgment is ruleRedundancy.ts's (pure, node-proved); this file
+// only hands it the ranked matches the mount answered.
+//
 // A selector member's trailing `::pseudo-element` has no element of its
 // own for `Element.matches` to test — asking it throws or silently
 // answers false — so every match this file makes strips a member's
@@ -76,6 +83,7 @@ import {
   queryNeeds,
   splitContainerPrelude,
 } from "./staticLint";
+import { ruleRestatements } from "./ruleRedundancy";
 import { hasStatePseudo, stripStatePseudo } from "./statePseudo";
 
 /** What the match-dependent findings need: the pure helpers and core's
@@ -85,11 +93,12 @@ import { hasStatePseudo, stripStatePseudo } from "./statePseudo";
 export type MatchHost = Pick<DaydreamApi, "core" | "mountViewport">;
 
 /** Every match-dependent static finding for the document (decisions.md
- * #71, plan phase 9): redundancy, dead rules, and a rule's own
- * container-query-without-container. Each viewport is mounted once —
- * `matched` answers every question this file asks — and disposed before
- * moving to the next. Empty when nothing in the mounted document
- * disagrees with the sheet. */
+ * #71, plan phase 9): redundancy (an element's, and a rule's against the
+ * rule beneath it), dead rules, and a rule's own
+ * container-query-without-container. Each viewport is mounted once — the
+ * ranked matches are read once for every node and answer every question
+ * this file asks — and disposed before moving to the next. Empty when
+ * nothing in the mounted document disagrees with the sheet. */
 export async function matchLint(
   dd: MatchHost,
   doc: DreamDocument,
@@ -103,7 +112,9 @@ export async function matchLint(
     const mounted = await dd.mountViewport(vp);
     try {
       const byId = mountedNodesById(mounted);
-      lintRedundancy(dd.core, vp, byId, findings);
+      const ranked = rankedMatches(dd.core, sheet, byId);
+      lintRedundancy(vp, ranked, findings);
+      lintRuleRestatements(vp, ranked, findings);
       lintDeadRules(dd.core, vp, byId, findings);
       lintContainerQueriesOnRules(dd.core, doc, vp, byId, findings);
     } finally {
@@ -252,6 +263,7 @@ function matchedRulesFor(
   sheet.forEach((rule, index) => {
     let best: { specificity: [number, number, number]; pseudo?: string } | null =
       null;
+    let plain = false;
     for (const member of splitTopLevelCommas(rule.selector)) {
       const trimmed = member.trim();
       const trailing = trailingPseudoElement(trimmed);
@@ -263,6 +275,7 @@ function matchedRulesFor(
         ok = false;
       }
       if (!ok) continue;
+      if (trailing === null) plain = true;
       const rank = core.specificity(trimmed);
       if (best === null || isMoreSpecific(rank, best.specificity)) {
         best =
@@ -272,7 +285,16 @@ function matchedRulesFor(
       }
     }
     if (best !== null) {
-      out.push({ index, specificity: best.specificity, ...(best.pseudo === undefined ? {} : { pseudo: best.pseudo }) });
+      // A rule reaching the element through a plain member AND a
+      // pseudo-element one (`.card, .card::before`) reaches the real box:
+      // the pseudo mark is kept only when every matching member ended in
+      // one, so neither redundancy question skips a rule that does style
+      // the element itself (review of this file).
+      out.push({
+        index,
+        specificity: best.specificity,
+        ...(best.pseudo === undefined || plain ? {} : { pseudo: best.pseudo }),
+      });
     }
   });
   out.sort((a, b) => {
@@ -303,17 +325,27 @@ function compareSpecificityDescending(
   return 0;
 }
 
-function lintRedundancy(
+/** Every mounted node's ranked matches, keyed by element id — read once
+ * per viewport and shared by both redundancy questions. */
+function rankedMatches(
   core: CoreApi,
-  vp: DreamViewport,
+  sheet: readonly StyleRule[],
   byId: ReadonlyMap<string, Element>,
+): Map<string, RuleMatch[]> {
+  const out = new Map<string, RuleMatch[]>();
+  for (const [id, node] of byId) out.set(id, matchedRulesFor(core, sheet, node));
+  return out;
+}
+
+function lintRedundancy(
+  vp: DreamViewport,
+  ranked: ReadonlyMap<string, readonly RuleMatch[]>,
   findings: Finding[],
 ): void {
   const sheet = vp.payload.sheet ?? [];
   const visit = (el: DreamElement): void => {
-    const node = byId.get(el.id);
-    if (node !== undefined) {
-      const matches = matchedRulesFor(core, sheet, node);
+    const matches = ranked.get(el.id);
+    if (matches !== undefined) {
       for (const [property, value] of Object.entries(el.styles)) {
         // Winner first: the first matching rule that restates the
         // declaration is the one worth naming — a rule further down the
@@ -348,6 +380,32 @@ function lintRedundancy(
     el.children.forEach(visit);
   };
   visit(vp.payload.root);
+}
+
+// ---------------------------------------------------------------------------
+// Rule-against-rule redundancy — a rule's declaration the rule beneath it
+// already makes, everywhere the rule reaches (ruleRedundancy.ts).
+
+function lintRuleRestatements(
+  vp: DreamViewport,
+  ranked: ReadonlyMap<string, readonly RuleMatch[]>,
+  findings: Finding[],
+): void {
+  const sheet = vp.payload.sheet ?? [];
+  for (const hit of ruleRestatements(sheet, ranked, hasStatePseudo)) {
+    const rule = sheet[hit.rule];
+    if (rule === undefined) continue;
+    const named = hit.restates
+      .map((index) => `${sheet[index]?.selector ?? "?"} (sheet[${index}])`)
+      .join(" and ");
+    findings.push({
+      tier: "static",
+      severity: "blocking",
+      rule: hit.rule,
+      property: hit.property,
+      message: `${hit.property}: ${hit.value} in rule ${rule.selector} (sheet[${hit.rule}]) of viewport ${vp.id} restates ${hit.restates.length === 1 ? "rule" : "rules"} ${named} for every element it reaches; remove it from ${rule.selector}`,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------

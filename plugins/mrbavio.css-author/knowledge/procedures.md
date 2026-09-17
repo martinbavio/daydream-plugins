@@ -46,6 +46,8 @@ Then: would the page change if this line went — at this width or at another? I
 - Layout goes on the container, sizing on the items. A child's `margin` fights a parent's `gap`: pick one.
 - A conditional layer overrides the base ONLY for what changes under that condition. A layer restating the base is dead weight; a layer per breakpoint nobody asked for is invented responsiveness. Write the widest-reaching state as the base.
 - No `!important`, ever. Shared styling is a rule, its selector naming who shares it; a one-off is the element's own map — inline, above every rule, its conditional layer above a rule's `@media`. Never restate on an element what a rule sets (the lint blocks it); write a rule before the elements it styles.
+- **When to write a rule.** Two or more elements carrying the same declarations are ONE rule plus a class saying what they are (`.card`; never `.card-1`, `.card-2`), and each element's own map keeps only what is its alone. A tag selector where the tag already says it (`nav a`, `h2`); a class where the markup does not. Ask it before the second card, not after the third.
+- Dead weight the static lint blocks: a class no rule names, a rule no element matches, and a rule's line that repeats, for everything it reaches, what the rule beneath it already sets. Drop the hook, the rule, or the line.
 - One reason per element. A wrapper that exists only to carry a declaration gives it to its child or parent and disappears.
 
 ## 4. The loop

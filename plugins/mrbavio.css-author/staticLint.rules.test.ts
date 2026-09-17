@@ -14,6 +14,9 @@ import type { DreamViewport, StyleRule } from "@daydream/plugin-api";
 import {
   lintRestatedInitialsOnRules,
   lintUnitlessLengthsOnRules,
+  classNamer,
+  lintUnreferencedClasses,
+  referencedClasses,
 } from "./staticLint";
 
 function viewport(sheet: StyleRule[]): DreamViewport {
@@ -132,5 +135,83 @@ describe("lintRestatedInitialsOnRules", () => {
     const out: Parameters<typeof lintRestatedInitialsOnRules>[1] = [];
     lintRestatedInitialsOnRules(vp, out);
     expect(out).toEqual([]);
+  });
+});
+
+describe("lintUnreferencedClasses (rule 5)", () => {
+  function tree(classes: string[]): DreamViewport["payload"]["root"] {
+    return {
+      id: "root",
+      tag: "html",
+      styles: {},
+      children: classes.map((value, i) => ({
+        id: `e${i}`,
+        tag: "div",
+        label: `Box ${i}`,
+        styles: {},
+        attrs: { class: value },
+        children: [],
+      })),
+    } as unknown as DreamViewport["payload"]["root"];
+  }
+  function viewportWith(sheet: StyleRule[], classes: string[]): DreamViewport {
+    const vp = viewport(sheet);
+    (vp.payload as { root: unknown }).root = tree(classes);
+    return vp;
+  }
+
+  test("referencedClasses reads every .class compound, nested or escaped, and [class=] values", () => {
+    expect(
+      [...referencedClasses([
+        { selector: ".card .title, nav:is(.a, .b) > *:not(.c)" },
+        { selector: ".x\\:y" },
+        { selector: "[class~=\"pill\"] , [class=\"one two\"]" },
+      ])].sort(),
+    ).toEqual(["a", "b", "c", "card", "one", "pill", "title", "two", "x:y"]);
+  });
+
+  test("prefix, suffix and substring [class…=] forms name every token that satisfies them; [class=] and [class~=] name their tokens", () => {
+    const names = classNamer([
+      { selector: '[class*="i-"]' },
+      { selector: "[class^=btn]" },
+      { selector: "[class$='-lg']" },
+      { selector: '[class~="pill"]' },
+    ]);
+    expect(names("i-home")).toBe(true);
+    expect(names("btn-primary")).toBe(true);
+    expect(names("xbtn")).toBe(false);
+    expect(names("card-lg")).toBe(true);
+    expect(names("pill")).toBe(true);
+    expect(names("pills")).toBe(false);
+    expect([...referencedClasses([{ selector: '[class*="i-"]' }])]).toEqual([]);
+    // The lint itself: an element only a substring form reaches is not refused.
+    const vp = viewportWith([{ selector: '[class*="i-"]', styles: { color: "red" } }], ["i-home"]);
+    const out: Parameters<typeof lintUnreferencedClasses>[1] = [];
+    lintUnreferencedClasses(vp, out);
+    expect(out).toEqual([]);
+  });
+
+  test("a class no rule names is a finding on its element; a named one, and an empty class, are not", () => {
+    const vp = viewportWith(
+      [{ selector: ".card", styles: { padding: "16px" } }],
+      ["card", "card featured", ""],
+    );
+    const out: Parameters<typeof lintUnreferencedClasses>[1] = [];
+    lintUnreferencedClasses(vp, out);
+    expect(out).toEqual([
+      {
+        tier: "static",
+        severity: "blocking",
+        elementId: "e1",
+        message: 'class "featured" on Box 1 in viewport v1 is named by no rule; drop it, or write the rule that uses it',
+      },
+    ]);
+  });
+
+  test("with no sheet at all every class is unreferenced", () => {
+    const vp = viewportWith([], ["a", "b c"]);
+    const out: Parameters<typeof lintUnreferencedClasses>[1] = [];
+    lintUnreferencedClasses(vp, out);
+    expect(out.map((f) => f.elementId)).toEqual(["e0", "e1", "e1"]);
   });
 });

@@ -335,4 +335,88 @@ describe("matchLint", () => {
   test("a clean document is clean", async () => {
     expect(await matchLint(build([]))).toEqual([]);
   });
+
+  // Rule-against-rule redundancy (ruleRedundancy.ts, proved under node;
+  // this is the mount-backed end to end): two featured cards, `.card`
+  // and `.card.featured` both `color: #333`.
+  test("a rule declaration restating the rule beneath it everywhere it reaches is refused, named at sheet[i]", async () => {
+    const root = createElement({
+      tag: "html",
+      children: [
+        createElement({
+          tag: "body",
+          label: "body",
+          children: [
+            createElement({ tag: "div", label: "A", attrs: { class: "card featured" } }),
+            createElement({ tag: "div", label: "B", attrs: { class: "card featured" } }),
+          ],
+        }),
+      ],
+    });
+    const findings = await matchLint(
+      build(
+        [
+          { selector: ".card", styles: { color: "#333", padding: "16px" } },
+          { selector: ".card.featured", styles: { color: "#333", border: "1px solid #333" } },
+        ],
+        root,
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property, f.message])).toEqual([
+      [
+        1,
+        "color",
+        "color: #333 in rule .card.featured (sheet[1]) of viewport v1 restates rule .card (sheet[0]) for every element it reaches; remove it from .card.featured",
+      ],
+    ]);
+  });
+
+  test("a rule reaching an element the rule beneath does not is load-bearing there: no finding", async () => {
+    const root = createElement({
+      tag: "html",
+      children: [
+        createElement({
+          tag: "body",
+          label: "body",
+          children: [
+            createElement({ tag: "div", label: "A", attrs: { class: "card featured" } }),
+            createElement({ tag: "div", label: "B", attrs: { class: "featured" } }),
+          ],
+        }),
+      ],
+    });
+    const findings = await matchLint(
+      build(
+        [
+          { selector: ".card", styles: { color: "#333" } },
+          { selector: ".featured", styles: { color: "#333" } },
+        ],
+        root,
+      ),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  test("a rule reaching the element through a plain member and a ::before member styles the real box: judged, not skipped", async () => {
+    const root = createElement({
+      tag: "html",
+      children: [
+        createElement({
+          tag: "body",
+          label: "body",
+          children: [createElement({ tag: "div", label: "A", attrs: { class: "card featured" } })],
+        }),
+      ],
+    });
+    const findings = await matchLint(
+      build(
+        [
+          { selector: ".card", styles: { color: "#333" } },
+          { selector: ".card.featured, .card.featured::before", styles: { color: "#333" } },
+        ],
+        root,
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([[1, "color"]]);
+  });
 });

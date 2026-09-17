@@ -1,9 +1,9 @@
 // The STATIC lint (docs/agent-css-knowledge-prd.md, "Lints"; decisions.md
 // #43, #48 P9): what can be said about a document from its JSON alone, with
-// no render. Deliberately small — four rules, each a fact about CSS the
+// no render. Deliberately small — five rules, each a fact about CSS the
 // browser would enforce silently (a query that can never match, a
 // declaration the parser drops, a declaration that changes nothing, a font
-// face nothing names) — because anything that needs a render is the
+// face nothing names, a class no selector names) — because anything that needs a render is the
 // necessity lint's job (necessity.ts), never this file's. Runs on a
 // validated document; the format gate (core) comes first. The facts about
 // CSS it reads — container axes, family names, the condition grammar —
@@ -34,6 +34,7 @@ export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
     lintUnusedFontFaces(core, viewport, findings);
     lintUnitlessLengthsOnRules(viewport, findings);
     lintRestatedInitialsOnRules(viewport, findings);
+    lintUnreferencedClasses(viewport, findings);
   }
   return findings;
 }
@@ -689,6 +690,107 @@ function lintUnusedFontFaces(
       message: `@font-face ${family} in viewport ${vp.id} is named by no element's font-family — remove the face or use it`,
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Rule 5 — a class no rule names (decisions.md #71's `class` hook; the CSS
+// author's review after the selectors step landed). The mirror of the
+// dead-rule finding (matchLint.ts): a class on an element that no selector
+// in the viewport's sheet mentions is a hook nothing hangs on — the
+// element carries it for nobody. Static by nature: whether a selector
+// NAMES a class is read from its text, never from a match (a `.card` rule
+// names `card` whether or not it matches this element right now). Named
+// means: a `.class` compound anywhere in any rule's selector (inside
+// `:is()`, `:not()`, `:where()` too — the regex reads the whole text),
+// or a `[class…="…"]` attribute selector: `=` and `~=` name their value's
+// tokens outright, while `^=`, `$=`, `*=` and `|=` match the attribute
+// STRING by prefix, suffix or substring, so a class counts as named by one
+// of those when the token itself satisfies the test (`[class*="i-"]`
+// names `i-home`) — approximate, erring toward named, since a false
+// "unreferenced" would refuse a valid landing. Only `class` is judged: an
+// `id` may be a fragment link's target and a `data-*` a state hook,
+// neither of which a rule has to name.
+
+/** Every class name some rule of `sheet` names OUTRIGHT (a `.class`
+ * compound, a `[class=]`/`[class~=]` token), escapes resolved. The
+ * prefix/suffix/substring attribute forms are `classNamer`'s. */
+export function referencedClasses(
+  sheet: readonly { selector: string }[],
+): Set<string> {
+  const named = new Set<string>();
+  for (const rule of sheet) {
+    for (const match of rule.selector.matchAll(
+      /\.((?:\\.|[\w-]|[^\x00-\x7f])+)/g,
+    )) {
+      named.add((match[1] as string).replace(/\\(.)/g, "$1"));
+    }
+    for (const { operator, value } of classAttributeSelectors(rule.selector)) {
+      if (operator !== "=" && operator !== "~=") continue;
+      for (const token of value.split(/\s+/)) if (token !== "") named.add(token);
+    }
+  }
+  return named;
+}
+
+/** Whether some rule of `sheet` names a class token: outright
+ * (`referencedClasses`) or through a prefix/suffix/substring `[class…=]`
+ * test the token satisfies. */
+export function classNamer(
+  sheet: readonly { selector: string }[],
+): (token: string) => boolean {
+  const named = referencedClasses(sheet);
+  const tests: ((token: string) => boolean)[] = [];
+  for (const rule of sheet) {
+    for (const { operator, value } of classAttributeSelectors(rule.selector)) {
+      if (value === "") continue;
+      if (operator === "^=" || operator === "|=") {
+        tests.push((token) => token.startsWith(value));
+      } else if (operator === "$=") {
+        tests.push((token) => token.endsWith(value));
+      } else if (operator === "*=") {
+        // A value with whitespace spans tokens; no single token can be
+        // told apart, so every token counts as named.
+        tests.push((token) => /\s/.test(value) || token.includes(value));
+      }
+    }
+  }
+  return (token) => named.has(token) || tests.some((test) => test(token));
+}
+
+function classAttributeSelectors(
+  selector: string,
+): { operator: string; value: string }[] {
+  const out: { operator: string; value: string }[] = [];
+  for (const match of selector.matchAll(
+    /\[\s*class\s*([~|^$*]?=)\s*(?:"([^"]*)"|'([^']*)'|([^\]\s]+))\s*[is]?\s*\]/gi,
+  )) {
+    out.push({
+      operator: match[1] as string,
+      value: match[2] ?? match[3] ?? match[4] ?? "",
+    });
+  }
+  return out;
+}
+
+export function lintUnreferencedClasses(
+  vp: DreamViewport,
+  findings: Finding[],
+): void {
+  const names = classNamer(vp.payload.sheet ?? []);
+  const visit = (el: DreamElement): void => {
+    const classes = (el.attrs?.["class"] ?? "").split(/\s+/).filter(Boolean);
+    for (const name of classes) {
+      if (names(name)) continue;
+      findings.push({
+        tier: "static",
+        severity: "blocking",
+        elementId: el.id,
+        message: `class "${name}" on ${nameOf(el)} in viewport ${vp.id} is named by no rule; drop it, or write the rule that uses it`,
+      });
+    }
+    for (const child of el.children) visit(child);
+  };
+  visit(vp.payload.root);
 }
 
 /** The label when present, else `tag#id` — the same naming the measure
