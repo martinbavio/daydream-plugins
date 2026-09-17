@@ -2,8 +2,9 @@
 // #71, plan phase 9; docs/agent-css-knowledge-prd.md, "Testing
 // Decisions"): a document goes in, findings come out, and matching is
 // asked of the CANVAS's own rendered document (the simulated strategy),
-// never hand-rolled — `dd.matchedRules` reads `appStore.document` once a
-// viewport is actually mounted (`renderViewport`). Real Chromium only.
+// never hand-rolled — `dd.matchedRules`, `dd.ruleMatches` and
+// `dd.geometry.node` all read `appStore.document` once a viewport is
+// actually mounted (`renderViewport`). Real Chromium only.
 import { afterEach, describe, expect, test } from "vitest";
 
 import type { DreamDocument, DreamViewport, Finding, StyleRule } from "@daydream/plugin-api";
@@ -118,6 +119,44 @@ describe("matchLint", () => {
         children: [createElement({ tag: "body", label: "body", children: [card] })],
       }),
     );
+    expect(await matchLint(doc)).toEqual([]);
+  });
+
+  test("a rule matching no element is dead", async () => {
+    const doc = build([{ selector: ".nope", styles: { color: "red" } }]);
+    const findings = await matchLint(doc);
+    expect(findings).toEqual([
+      {
+        tier: "static",
+        severity: "blocking",
+        elementId: expect.any(String),
+        rule: 0,
+        message: "rule .nope (sheet[0]) in viewport v1 matches no element",
+      },
+    ]);
+  });
+
+  test("a state-pseudo rule matching its base selector, state stripped, is not dead", async () => {
+    const doc = build([{ selector: ".card:hover", styles: { color: "red" } }]);
+    expect(await matchLint(doc)).toEqual([]);
+  });
+
+  test("a state-pseudo rule matching nothing even state-stripped is dead", async () => {
+    const doc = build([{ selector: ".nope:hover", styles: { color: "red" } }]);
+    const findings = await matchLint(doc);
+    expect(findings.map((f) => f.message)).toEqual([
+      "rule .nope:hover (sheet[0]) in viewport v1 matches no element",
+    ]);
+  });
+
+  test("a rule under an @media condition inactive at the frame is never called dead on that evidence alone", async () => {
+    const doc = build([
+      {
+        selector: ".card",
+        conditions: ["@media (min-width: 2000px)"],
+        styles: { color: "red" },
+      },
+    ]);
     expect(await matchLint(doc)).toEqual([]);
   });
 
