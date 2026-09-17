@@ -2,7 +2,7 @@
   "id": "mrbavio.text",
   "name": "Text",
   "version": "0.1.1",
-  "minCore": "0.1.0",
+  "minCore": "0.1.21",
   "contributes": {
     "itemKinds": [
       "mrbavio.text"
