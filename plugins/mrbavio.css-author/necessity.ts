@@ -166,12 +166,17 @@ interface Verdict {
 }
 
 /** A declaration as the probe mounts re-judge it: where it is removed from
- * (`at`, the paired set of rule 1) and what its finding would say. */
+ * (`at`, the paired set of rule 1) and what its finding would say.
+ * `ruleTargets` extends the pairing to a BASE declaration's matching,
+ * UNCONDITIONAL rules that restate it verbatim (decisions.md #71, plan
+ * phase 9's redundancy shape, mirrored the other way) — empty for a layer
+ * declaration, which is never paired against a rule. */
 interface Candidate {
   verdict: Verdict;
   el: DreamElement;
   value: string;
   at: (string | undefined)[];
+  ruleTargets: readonly number[];
 }
 
 /** A rule declaration's fate (decisions.md #71, plan phase 9): the
@@ -264,6 +269,7 @@ async function lintViewport(
           c.el.id,
           c.verdict.property,
           c.at,
+          c.ruleTargets,
         );
       }
       for (const c of pendingRule) {
@@ -368,6 +374,18 @@ function judgeAll(
 ): Candidate[] {
   const probe = baseline(mounted);
   const labels = labelCounts(vp.payload.root);
+  // Rule 1, mirrored: a base declaration a matching, UNCONDITIONAL rule
+  // ALSO sets verbatim (decisions.md #71, plan phase 9) is paired with
+  // that rule too, so removing the element's own line alone never reads
+  // dead just because the rule's identical value is still there —
+  // exactly the shape the static REDUNDANCY finding names (matchLint.ts);
+  // without the pairing this necessity check would flag the SAME
+  // declaration as "changes nothing" for the wrong reason.
+  const redundantRules = redundantRuleIndices(
+    vp.payload.sheet ?? [],
+    mounted,
+    elementsById(vp.payload.root),
+  );
   const candidates: Candidate[] = [];
   const visit = (el: DreamElement, path: string): void => {
     const element =
@@ -389,18 +407,20 @@ function judgeAll(
       value: string,
       layer: string | undefined,
       at: (string | undefined)[],
+      ruleTargets: readonly number[] = [],
     ): void => {
       candidates.push({
         verdict: {
           element,
           property,
           layer,
-          dead: isDead(probe, mounted, el.id, property, at),
+          dead: isDead(probe, mounted, el.id, property, at, ruleTargets),
           finding: finding(el, property, value, layer, [own]),
         },
         el,
         value,
         at,
+        ruleTargets,
       });
     };
     for (const [property, value] of Object.entries(el.styles)) {
@@ -409,7 +429,8 @@ function judgeAll(
       const paired = layers
         .filter((layer) => property in layer.styles)
         .map((layer) => layer.condition);
-      record(property, value, undefined, [undefined, ...paired]);
+      const ruleTargets = redundantRules.get(el.id)?.get(property) ?? [];
+      record(property, value, undefined, [undefined, ...paired], ruleTargets);
     }
     for (const layer of layers) {
       for (const [property, value] of Object.entries(layer.styles)) {
@@ -423,6 +444,39 @@ function judgeAll(
   };
   visit(vp.payload.root, "");
   return candidates;
+}
+
+/** For each element id, the property → indices of every UNCONDITIONAL
+ * rule matching it whose declaration restates the element's own inline
+ * value verbatim — the redundancy shape (matchLint.ts), asked here so
+ * `judgeAll` can pair a base declaration against it (see judgeAll's
+ * comment). A conditional rule is excluded, the same reason redundancy
+ * excludes one: it may not apply everywhere the element does. */
+function redundantRuleIndices(
+  sheet: readonly StyleRule[],
+  mounted: MountedViewport,
+  byId: ReadonlyMap<string, DreamElement>,
+): Map<string, Map<string, number[]>> {
+  const out = new Map<string, Map<string, number[]>>();
+  sheet.forEach((rule, index) => {
+    if (rule.conditions !== undefined && rule.conditions.length > 0) return;
+    for (const elementId of mountedRuleMatches(mounted, rule.selector)) {
+      const el = byId.get(elementId);
+      if (el === undefined) continue;
+      for (const [property, value] of Object.entries(rule.styles)) {
+        if (el.styles[property] !== value) continue;
+        let byProperty = out.get(elementId);
+        if (byProperty === undefined) {
+          byProperty = new Map();
+          out.set(elementId, byProperty);
+        }
+        const list = byProperty.get(property);
+        if (list === undefined) byProperty.set(property, [index]);
+        else list.push(index);
+      }
+    }
+  });
+  return out;
 }
 
 /**
@@ -458,7 +512,7 @@ function judgeRules(
     // asked of it verbatim — no kernel rewrite needed, unlike matchLint.ts's
     // canvas reads.
     const matched = mountedRuleMatches(mounted, rule.selector);
-    const key = `${rule.selector} ${(rule.conditions ?? []).join(" ")}`;
+    const key = `${rule.selector}\u0000${(rule.conditions ?? []).join("\u0000")}`;
     for (const [property, value] of Object.entries(rule.styles)) {
       if (!isChecked(core, property, value)) continue;
       const targets: RemovalTarget[] = [{ rule: index }];
@@ -594,7 +648,7 @@ function intersectRules(perViewport: RuleVerdict[][]): Finding[] {
   const merged = new Map<string, { dead: boolean; finding: Finding }>();
   for (const verdicts of perViewport) {
     for (const verdict of verdicts) {
-      const key = `${verdict.key} ${verdict.property}`;
+      const key = `${verdict.key}\u0000${verdict.property}`;
       const seen = merged.get(key);
       if (seen === undefined) {
         merged.set(key, { dead: verdict.dead, finding: verdict.finding });
@@ -620,8 +674,13 @@ function isChecked(core: CoreApi, property: string, value: string): boolean {
 /** Remove, read, restore — one write set, one read, one restore. `at` is
  * where the property is removed from: `undefined` for the base map, a
  * prelude for that layer's rule; several entries are the paired check
- * (rule 1), removed together and restored in reverse. The read is a single
- * sweep that stops at the first element whose observation left the
+ * (rule 1), removed together and restored in reverse. `ruleTargets`
+ * extends the same paired removal to a base declaration's matching,
+ * unconditional rules (decisions.md #71, plan phase 9) — always present
+ * in the mounted page by construction (an unconditional rule is never
+ * dropped for any width), so no throw is expected here, but a removal is
+ * still guarded the same defensive way `isDeadAt` is. The read is a
+ * single sweep that stops at the first element whose observation left the
  * baseline. */
 function isDead(
   probe: Probe,
@@ -629,12 +688,21 @@ function isDead(
   elementId: string,
   property: string,
   at: (string | undefined)[],
+  ruleTargets: readonly number[] = [],
 ): boolean {
   const restores: (() => void)[] = [];
   try {
     for (const layer of at) {
       restores.push(mounted.withoutDeclaration(elementId, property, layer));
     }
+    for (const rule of ruleTargets) {
+      restores.push(mounted.withoutDeclaration({ rule }, property));
+    }
+  } catch {
+    for (const restore of restores.reverse()) restore();
+    return false;
+  }
+  try {
     return unchanged(probe);
   } finally {
     for (const restore of restores.reverse()) restore();
