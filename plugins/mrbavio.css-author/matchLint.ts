@@ -1,28 +1,41 @@
 // The MATCH-DEPENDENT static findings (decisions.md #71, plan phase 9;
 // wayfinder/tickets/T07-what-the-lints-judge.md): two facts that are
 // "static" in spirit — no removal, no re-read, judged once — but that
-// need the browser to ask, since matching a selector against a document
-// is the browser's job, never a hand-rolled one (decisions.md #71,
-// "MATCHING IS THE BROWSER'S"). Both read `dd`'s match caches
-// (`dd.matchedRules`, `dd.ruleMatches`, `dd.geometry.node`), which answer
-// against the CANVAS's own rendered document — the simulated strategy's
-// DOM, kept in step with `dd.document()` — so these two findings see
-// exactly what an author (or an agent mid-draft) sees on the canvas.
-// staticLint.ts stays pure JSON-only; this file is the one seam of the
-// static gate that reaches into the browser, kept small on purpose.
+// need the browser to ask, since matching a selector against a document is
+// the browser's job, never a hand-rolled one (decisions.md #71, "MATCHING
+// IS THE BROWSER'S"). staticLint.ts stays pure JSON-only; this file is the
+// one seam of the static gate that reaches into the browser, kept small on
+// purpose.
+//
+// WHY THIS FILE MOUNTS, AND NEVER READS `dd.matchedRules` /
+// `dd.ruleMatches` / `dd.geometry`: a gate runs over an INCOMING document —
+// ingest, replace_viewport, a draft's finalize — that is not, and may
+// never have been, on the canvas (decisions.md #71). `dd.matchedRules`,
+// `dd.ruleMatches` and `dd.geometry.node` all answer about the CANVAS's
+// own rendered document (the simulated strategy's DOM, kept in step with
+// `dd.document()`); asked about a viewport that was never rendered there,
+// every one of them reports empty, which is exactly the eval bug this
+// file fixes — a document with a plainly-matching `.card`/`nav`/`li` rule
+// refused on landing because the gate was reading the wrong DOM entirely.
+// The fix judges the document it is actually handed by MOUNTING it, the
+// same way necessity.ts already must (a live-strategy iframe, `dd.mount-
+// Viewport`): matching is asked of THAT DOM, through native
+// `Element.matches` — the sanctioned way (decisions.md #71) — never a
+// hand-rolled selector engine and never the kernel's canvas-only rewrite
+// (necessity.ts's own header explains why: the mounted iframe is its own
+// unnamespaced document, so the stored selector is asked of it verbatim).
 //
 // REDUNDANCY: a per-element declaration a matched, unconditional rule
 // already sets with the identical verbatim value — the element's own
 // declaration does nothing a rule does not already do, so the finding
 // names the element's line as the one to remove.
 //
-// DEAD RULE: no rendered element matches the rule's selector — with
-// state pseudo-classes given a second chance, state-stripped, since
-// nobody hovers a lint run (statePseudo.ts). A rule whose OWN `@media`
-// condition is not active on the canvas right now is left alone: the
-// kernel's match cache reports `[]` for those exactly as it does for a
-// truly dead selector (src/canvas/ruleMatch.ts ruleIsActive), and this
-// lint has no width sweep of its own to tell the two apart — the
+// DEAD RULE: no element in the mounted document matches the rule's
+// selector — with state pseudo-classes given a second chance,
+// state-stripped, since nobody hovers a lint run (statePseudo.ts). A rule
+// whose OWN `@media` condition is not active on the viewport's own frame
+// is left alone: this lint has no width sweep of its own to tell a
+// currently-inactive responsive rule apart from a genuinely dead one — the
 // necessity lint's sweep is what judges a responsive rule's declarations
 // (necessity.ts); a container query's own dead-match question is judged
 // separately below, from the rule's matched elements' ancestors.
@@ -30,8 +43,21 @@
 // CONTAINER-QUERY-WITHOUT-CONTAINER ON RULES: the same fact staticLint.ts
 // asks of an element's `@container` layer (rule 1), asked of a rule's
 // `@container` condition instead — the ancestors in question are every
-// matched element's own (`dd.core.findPath`), since a rule has no single
-// element position of its own.
+// matched element's own (`dd.core.findPath`, over the DOCUMENT tree, which
+// needs no mount), since a rule has no single element position of its own.
+//
+// A selector member's trailing `::pseudo-element` has no element of its
+// own for `Element.matches` to test — asking it throws or silently
+// answers false — so every match this file makes strips a member's
+// trailing pseudo-element first (mirroring the kernel's own
+// `core/selectors.ts trailingPseudoElement`, reimplemented here since a
+// plugin has no import of core's internals, decisions.md #48's plugin
+// boundary) and keeps the pseudo-element name alongside for the two
+// questions that need it: a pseudo-element match still answers the
+// dead-rule question (a `.card::before` rule is not dead while `.card`
+// exists) but is skipped outright for redundancy (a pseudo-element's box
+// has no inline declarations on the element for a matched rule to
+// restate) — the same skip the old canvas read applied to `match.pseudo`.
 
 import type {
   CoreApi,
@@ -40,6 +66,8 @@ import type {
   DreamElement,
   DreamViewport,
   Finding,
+  MountedViewport,
+  StyleRule,
 } from "@daydream/plugin-api";
 
 import {
@@ -50,68 +78,267 @@ import {
 } from "./staticLint";
 import { hasStatePseudo, stripStatePseudo } from "./statePseudo";
 
-/** What the match-dependent findings need: the pure helpers and the
- * canvas's match facts. A gate hands in its `dd`; a test hands in a test
- * kernel's, over a rendered viewport (`renderViewport` from
- * `@daydream/plugin-testing`) — these two facts read `[]`/`undefined`
- * over anything not actually on the canvas. */
-export type MatchHost = Pick<
-  DaydreamApi,
-  "core" | "matchedRules" | "ruleMatches" | "geometry"
->;
+/** What the match-dependent findings need: the pure helpers and core's
+ * live mount. A gate hands in its `dd`; a test hands in a test kernel's —
+ * both mount the document handed to `matchLint`, never read a fact about
+ * whatever (if anything) is on the canvas. */
+export type MatchHost = Pick<DaydreamApi, "core" | "mountViewport">;
 
 /** Every match-dependent static finding for the document (decisions.md
  * #71, plan phase 9): redundancy, dead rules, and a rule's own
- * container-query-without-container. Empty when nothing on the canvas
+ * container-query-without-container. Each viewport is mounted once —
+ * `matched` answers every question this file asks — and disposed before
+ * moving to the next. Empty when nothing in the mounted document
  * disagrees with the sheet. */
-export function matchLint(dd: MatchHost, doc: DreamDocument): Finding[] {
+export async function matchLint(
+  dd: MatchHost,
+  doc: DreamDocument,
+): Promise<Finding[]> {
   const findings: Finding[] = [];
   for (const vp of dd.core.viewportItems(doc) as DreamViewport[]) {
-    lintRedundancy(dd, vp, findings);
-    lintDeadRules(dd, vp, findings);
-    lintContainerQueriesOnRules(dd, doc, vp, findings);
+    const mounted = await dd.mountViewport(vp);
+    try {
+      const byId = mountedNodesById(mounted);
+      lintRedundancy(dd.core, vp, byId, findings);
+      lintDeadRules(dd.core, vp, byId, findings);
+      lintContainerQueriesOnRules(dd.core, doc, vp, byId, findings);
+    } finally {
+      mounted.dispose();
+    }
   }
   return findings;
 }
 
 // ---------------------------------------------------------------------------
+// Selector matching against the mounted document — the one seam every
+// question below shares.
+
+/** Every `[data-dream-id]` node of the mounted page, keyed by the id the
+ * document stores — one query per viewport, shared by all three
+ * questions below (mirrors necessity.ts's own `baseline`/`elementsById`
+ * split: the mount's nodes read once, never per rule). */
+function mountedNodesById(mounted: MountedViewport): Map<string, Element> {
+  const map = new Map<string, Element>();
+  for (const node of Array.from(
+    mounted.document().querySelectorAll("[data-dream-id]"),
+  )) {
+    const id = (node as HTMLElement).dataset["dreamId"];
+    if (id !== undefined) map.set(id, node);
+  }
+  return map;
+}
+
+/** The selector list's members, split at top-level commas — outside
+ * parens, brackets and strings, the same grain `rule.selector` is already
+ * stored in (the CSSOM's `", "`). A private copy, the same one
+ * necessity.ts keeps beside it (see this file's header: two independent
+ * lints, neither imports the other's internals). */
+function splitTopLevelCommas(selector: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 0;
+  for (let i = 0; i < selector.length; i++) {
+    const ch = selector[i] as string;
+    if (quote !== null) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    else if (ch === "," && depth === 0) {
+      parts.push(selector.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(selector.slice(start));
+  return parts;
+}
+
+/** A trimmed selector member's trailing pseudo-element, split off — or
+ * null when it has none. See this file's header for why every match goes
+ * through this first. */
+function trailingPseudoElement(
+  member: string,
+): { base: string; pseudo: string } | null {
+  const trimmed = member.trim();
+  const match = /::([a-z-]+)\s*$/i.exec(trimmed);
+  if (match === null) return null;
+  return {
+    base: trimmed.slice(0, match.index),
+    pseudo: (match[1] as string).toLowerCase(),
+  };
+}
+
+/** `rule.selector`, every member's trailing pseudo-element stripped and
+ * rejoined as one selector list `Element.matches`/`querySelectorAll`
+ * accepts whole — what "does this rule match anything" (the dead-rule and
+ * container-query questions) asks against the mount. Redundancy asks a
+ * finer-grained version of the same thing, per member, since it also
+ * needs to know WHICH member matched and at what specificity
+ * (`matchedRulesFor` below). */
+function selectorForMatching(selector: string): string {
+  return splitTopLevelCommas(selector)
+    .map((member) => trailingPseudoElement(member)?.base ?? member.trim())
+    .join(", ");
+}
+
+function matchesAny(nodes: Iterable<Element>, selector: string): boolean {
+  for (const node of nodes) {
+    try {
+      if (node.matches(selector)) return true;
+    } catch {
+      // A selector the validator should have refused; never a match.
+    }
+  }
+  return false;
+}
+
+function matchingIds(
+  byId: ReadonlyMap<string, Element>,
+  selector: string,
+): string[] {
+  const out: string[] = [];
+  for (const [id, node] of byId) {
+    let ok: boolean;
+    try {
+      ok = node.matches(selector);
+    } catch {
+      ok = false;
+    }
+    if (ok) out.push(id);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Redundancy — an element's declaration a matched rule already makes.
 
+/** One rule matching a node, ranked the way the browser's own cascade
+ * would: `specificity` is the MATCHING member's own (a selector list's
+ * effective specificity is whichever member matched, never the list's
+ * maximum), `pseudo` present exactly when that member ended in one. */
+interface RuleMatch {
+  index: number;
+  pseudo?: string;
+  specificity: [number, number, number];
+}
+
+/** Every rule of `sheet` matching `node`, winner-first: by specificity
+ * descending, then by stored index descending (a later rule wins ties) —
+ * the same ordering `dd.matchedRules` used to give redundancy on the
+ * canvas, rebuilt here against the mount's own DOM (see this file's
+ * header for why the canvas read is wrong for a gate). A selector list is
+ * tried member by member, every member tried (not just the first that
+ * matches), the same reasoning `core/canvas/ruleMatch.ts`'s
+ * `selectorMatch` documents: a rule may match through more than one
+ * member and the more specific one is what ranks it. Unlike the canvas
+ * read, a state pseudo-class is never made optional here — the mount is a
+ * real, unhovered page, so a `.card:hover` rule genuinely does not match
+ * `.card` right now, exactly as a browser loading the page cold would
+ * say; there is no "glass" (decisions.md #52) shielding a mounted
+ * document from its own literal state. */
+function matchedRulesFor(
+  core: CoreApi,
+  sheet: readonly StyleRule[],
+  node: Element,
+): RuleMatch[] {
+  const out: RuleMatch[] = [];
+  sheet.forEach((rule, index) => {
+    let best: { specificity: [number, number, number]; pseudo?: string } | null =
+      null;
+    for (const member of splitTopLevelCommas(rule.selector)) {
+      const trimmed = member.trim();
+      const trailing = trailingPseudoElement(trimmed);
+      const base = trailing?.base ?? trimmed;
+      let ok: boolean;
+      try {
+        ok = node.matches(base);
+      } catch {
+        ok = false;
+      }
+      if (!ok) continue;
+      const rank = core.specificity(trimmed);
+      if (best === null || isMoreSpecific(rank, best.specificity)) {
+        best =
+          trailing === null
+            ? { specificity: rank }
+            : { specificity: rank, pseudo: trailing.pseudo };
+      }
+    }
+    if (best !== null) {
+      out.push({ index, specificity: best.specificity, ...(best.pseudo === undefined ? {} : { pseudo: best.pseudo }) });
+    }
+  });
+  out.sort((a, b) => {
+    const bySpecificity = compareSpecificityDescending(a.specificity, b.specificity);
+    return bySpecificity !== 0 ? bySpecificity : b.index - a.index;
+  });
+  return out;
+}
+
+function isMoreSpecific(
+  a: readonly [number, number, number],
+  b: readonly [number, number, number],
+): boolean {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return (a[i] as number) > (b[i] as number);
+  }
+  return false;
+}
+
+/** Descending: the greater triple first. */
+function compareSpecificityDescending(
+  a: readonly [number, number, number],
+  b: readonly [number, number, number],
+): number {
+  for (let i = 0; i < 3; i++) {
+    if (a[i] !== b[i]) return (b[i] as number) - (a[i] as number);
+  }
+  return 0;
+}
+
 function lintRedundancy(
-  dd: MatchHost,
+  core: CoreApi,
   vp: DreamViewport,
+  byId: ReadonlyMap<string, Element>,
   findings: Finding[],
 ): void {
   const sheet = vp.payload.sheet ?? [];
   const visit = (el: DreamElement): void => {
-    for (const [property, value] of Object.entries(el.styles)) {
-      // Winner first (dd.matchedRules's own cascade order): the first
-      // matching rule that restates the declaration is the one worth
-      // naming — a rule further down the cascade the element already
-      // beats is not why the element's own line is redundant.
-      for (const match of dd.matchedRules(el.id)) {
-        // A pseudo-element match (`.a::before`) styles a box the element
-        // itself has no inline declarations for; it is never what an
-        // element's own base map restates.
-        if (match.pseudo !== undefined) continue;
-        const rule = sheet[match.index];
-        if (rule === undefined) continue;
-        // A conditional rule may not apply everywhere the element does
-        // (decisions.md #71): only an unconditional one is guaranteed
-        // redundant with a base declaration.
-        if (rule.conditions !== undefined && rule.conditions.length > 0) {
-          continue;
+    const node = byId.get(el.id);
+    if (node !== undefined) {
+      const matches = matchedRulesFor(core, sheet, node);
+      for (const [property, value] of Object.entries(el.styles)) {
+        // Winner first: the first matching rule that restates the
+        // declaration is the one worth naming — a rule further down the
+        // cascade the element already beats is not why the element's own
+        // line is redundant.
+        for (const match of matches) {
+          // A pseudo-element match (`.a::before`) styles a box the
+          // element itself has no inline declarations for; it is never
+          // what an element's own base map restates.
+          if (match.pseudo !== undefined) continue;
+          const rule = sheet[match.index];
+          if (rule === undefined) continue;
+          // A conditional rule may not apply everywhere the element does
+          // (decisions.md #71): only an unconditional one is guaranteed
+          // redundant with a base declaration.
+          if (rule.conditions !== undefined && rule.conditions.length > 0) {
+            continue;
+          }
+          if (rule.styles[property] !== value) continue;
+          findings.push({
+            tier: "static",
+            severity: "blocking",
+            elementId: el.id,
+            property,
+            rule: match.index,
+            message: `${property}: ${value} on ${nameOf(el)} restates rule ${rule.selector} (sheet[${match.index}]); remove the element's`,
+          });
+          break;
         }
-        if (rule.styles[property] !== value) continue;
-        findings.push({
-          tier: "static",
-          severity: "blocking",
-          elementId: el.id,
-          property,
-          rule: match.index,
-          message: `${property}: ${value} on ${nameOf(el)} restates rule ${rule.selector} (sheet[${match.index}]); remove the element's`,
-        });
-        break;
       }
     }
     el.children.forEach(visit);
@@ -120,36 +347,35 @@ function lintRedundancy(
 }
 
 // ---------------------------------------------------------------------------
-// Dead rule — no element in the viewport matches the selector.
+// Dead rule — no element in the mounted document matches the selector.
 
 function lintDeadRules(
-  dd: MatchHost,
+  core: CoreApi,
   vp: DreamViewport,
+  byId: ReadonlyMap<string, Element>,
   findings: Finding[],
 ): void {
   const sheet = vp.payload.sheet ?? [];
+  // Materialized, never the live iterator: a rule's second, state-stripped
+  // look (below) re-walks every node, and `Map.values()`'s iterator is
+  // spent after one walk.
+  const nodes = Array.from(byId.values());
   sheet.forEach((rule, index) => {
-    // An inactive @media condition is indistinguishable, in the match
-    // cache alone, from a selector that matches nothing — and the
-    // necessity lint's width sweep, not this one, is what tells a
-    // currently-inactive responsive rule apart from a genuinely dead one
-    // (see the file header). Never call one dead on this evidence alone.
-    if (hasInactiveMediaCondition(dd.core, vp, rule)) return;
-    let dead = dd.ruleMatches(vp.id, index).length === 0;
+    // An inactive @media condition is indistinguishable, from the mount
+    // alone, from a selector that matches nothing — and the necessity
+    // lint's width sweep, not this one, is what tells a currently-inactive
+    // responsive rule apart from a genuinely dead one (see the file
+    // header). Never call one dead on this evidence alone.
+    if (hasInactiveMediaCondition(core, vp, rule)) return;
+    let dead = !matchesAny(nodes, selectorForMatching(rule.selector));
     if (dead && hasStatePseudo(rule.selector)) {
       // Give the selector a second chance state-stripped: a `.card:hover`
       // that matches SOME element once hovered is not a rule that
       // matches nothing, and nobody hovers a lint run.
-      const rewritten = stripStatePseudo(rule.selector);
-      dead = !elementIds(vp.payload.root).some((id) => {
-        const node = dd.geometry.node(id);
-        if (node === undefined) return false;
-        try {
-          return node.matches(rewritten);
-        } catch {
-          return false;
-        }
-      });
+      dead = !matchesAny(
+        nodes,
+        selectorForMatching(stripStatePseudo(rule.selector)),
+      );
     }
     if (!dead) return;
     findings.push({
@@ -177,44 +403,35 @@ function hasInactiveMediaCondition(
   });
 }
 
-function elementIds(root: DreamElement): string[] {
-  const out: string[] = [];
-  const visit = (el: DreamElement): void => {
-    out.push(el.id);
-    el.children.forEach(visit);
-  };
-  visit(root);
-  return out;
-}
-
 // ---------------------------------------------------------------------------
 // Container-query-without-container, asked of a rule's matched elements.
 
 function lintContainerQueriesOnRules(
-  dd: MatchHost,
+  core: CoreApi,
   doc: DreamDocument,
   vp: DreamViewport,
+  byId: ReadonlyMap<string, Element>,
   findings: Finding[],
 ): void {
   const sheet = vp.payload.sheet ?? [];
   sheet.forEach((rule, index) => {
     for (const condition of rule.conditions ?? []) {
-      if (dd.core.conditionKind(condition) !== "container") continue;
+      if (core.conditionKind(condition) !== "container") continue;
       const prelude = condition.trim();
       const { name, condition: inner } = splitContainerPrelude(prelude);
       const needs = queryNeeds(inner);
       if (!needs.size && !needs.scrollState) continue; // style()-only
-      const matched = dd.ruleMatches(vp.id, index);
+      const matched = matchingIds(byId, selectorForMatching(rule.selector));
       // A rule matching no element is the dead-rule finding's to report;
       // there is no matched element here to read ancestors from, and a
       // second finding on the same rule would only repeat it.
       if (matched.length === 0) continue;
       const satisfied = matched.some((elementId) => {
-        const path = dd.core.findPath(doc, elementId);
+        const path = core.findPath(doc, elementId);
         if (path === undefined) return false;
         const ancestors = path.slice(0, -1);
         return ancestors.some((ancestor) => {
-          const decl = containerDeclaration(dd.core, ancestor as DreamElement);
+          const decl = containerDeclaration(core, ancestor as DreamElement);
           const typed =
             (!needs.size || decl.size) &&
             (!needs.scrollState || decl.scrollState);

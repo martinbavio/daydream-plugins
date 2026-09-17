@@ -4,10 +4,12 @@
 // The browser part registers the two lints as gates on every landing path
 // — the static lint (staticLint.ts's JSON-only facts, plus matchLint.ts's
 // match-dependent ones: redundancy, dead rules, a rule's own
-// container-query-without-container, decisions.md #71 plan phase 9) and
-// the necessity lint (necessity.ts, each declaration — an element's or a
-// rule's — removed in the rendered page and restored) — both declaring
-// every finding BLOCKING, as decisions.md #43 had them;
+// container-query-without-container, decisions.md #71 plan phase 9 —
+// judged by MOUNTING the incoming document, never by reading canvas match
+// facts, since a gate's document is not on the canvas; see matchLint.ts's
+// header) and the necessity lint (necessity.ts, each declaration — an
+// element's or a rule's — removed in the rendered page and restored) —
+// both declaring every finding BLOCKING, as decisions.md #43 had them;
 // `.daydream/plugins.json` `gates["mrbavio.css-author"]` may soften
 // either. Neither gate knows of the other: the runner (src/ai/gates.ts
 // dropCovered) is what keeps a declaration the parser dropped (static)
@@ -32,9 +34,11 @@ export default function activate(dd: DaydreamApi): void {
   dd.registerGate({
     id: STATIC_GATE,
     title: "Static lint",
-    run: (doc) => [
+    // matchLint mounts the document (necessity.ts's own live-strategy
+    // seam), so the static gate's run is async here too.
+    run: async (doc) => [
       ...staticLint(dd.core, doc as DreamDocument),
-      ...matchLint(dd, doc as DreamDocument),
+      ...(await matchLint(dd, doc as DreamDocument)),
     ],
   });
   dd.registerGate({
