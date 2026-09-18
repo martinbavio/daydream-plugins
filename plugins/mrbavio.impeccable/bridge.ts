@@ -82,7 +82,7 @@ const TARGET_ARGS = {
  * appear): a checksum compared once a second — POSIX, no fswatch, and
  * immune to a filesystem's one-second mtime. Prints the file on exit so
  * the wake-up already shows the pick. `file` is ABSOLUTE (the host names
- * it, decisions.md #69), so the agent's working directory never matters. */
+ * it, decision #69), so the agent's working directory never matters. */
 export function watchCommand(file: string): string {
   return `f='${file}'; s=$(cksum < "$f" 2>/dev/null); while [ "$(cksum < "$f" 2>/dev/null)" = "$s" ]; do sleep 1; done; cat "$f"`;
 }
@@ -192,7 +192,7 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
     run: () => ({ text: sessionText(host.plugin.dataFile) }),
   });
 
-  // The detector as one call (decisions.md #72): the tab renders, the
+  // The detector as one call (decision #72): the tab renders, the
   // host writes and runs, the agent reads findings — no page in between.
   host.registerTool({
     name: DETECT_TOOL,

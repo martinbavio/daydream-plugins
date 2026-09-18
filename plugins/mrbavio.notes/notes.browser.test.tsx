@@ -1,4 +1,4 @@
-// The plugin through the loader seam (decisions.md #48, testing
+// The plugin through the loader seam (decision #48, testing
 // decisions): the real shell, the plugin enabled by config, assertions
 // from the DOM. The P5 acceptance: the pane follows the selection's
 // viewport exactly as it did as a strip inside the CSS editor — the same
@@ -193,7 +193,7 @@ describe("mrbavio.notes in the shell", () => {
     expect(panel).not.toBeNull();
     expect(notes()).toBeNull();
     // The root holds nothing (its CSS is the kernel's <style> in the
-    // panel section, from `styles` — decisions.md #71) — and takes no
+    // panel section, from `styles` — decision #71) — and takes no
     // height: the padding is the body's, so an empty pane is a zero-height
     // row under the dock's caption, not a blank inset.
     const styles = panel.querySelectorAll("style");

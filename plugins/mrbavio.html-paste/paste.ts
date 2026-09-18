@@ -1,4 +1,4 @@
-// The paste hook (decisions.md #56): priority 5 — after Media (10), which
+// The paste hook (decision #56): priority 5 — after Media (10), which
 // claims media-only HTML, before Text (0), the plain-text fallback. Claims
 // a transfer with no files whose `text/plain` is markup (an editor's copy:
 // VS Code puts a syntax-highlighted rendering in `text/html` and the
@@ -66,7 +66,7 @@ export function htmlSource(transfer: DataTransfer | null): Document | null {
 }
 
 export function registerHtmlPaste(dd: DaydreamApi): void {
-  // The Text plugin's cascade, copied on purpose (decisions.md #56):
+  // The Text plugin's cascade, copied on purpose (decision #56):
   // consecutive pastes step 16px so they never stack exactly; anything
   // the user does in between starts over. Each plugin counts its own
   // pastes, so a text paste between two HTML pastes starts this one over.

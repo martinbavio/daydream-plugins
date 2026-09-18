@@ -1,7 +1,7 @@
 // mrbavio.css-author's HOST PART: the layout procedures as an MCP
 // resource, read from the plugin's own file at request time. The
 // `dream-author` prompt — the authoring workflow — is Daydream's own
-// (its MCP server registers it; decisions.md #65); this plugin's word
+// (its MCP server registers it; decision #65); this plugin's word
 // reaches an agent through its manifest `instructions` section and the
 // knowledge tools, which serve the whole corpus while it is enabled.
 

@@ -1,7 +1,7 @@
 # knowledge/
 
 The css-author plugin's corpus (docs/agent-css-knowledge-prd.md, "Corpus";
-decisions.md #43, #48): what a GOOD .dream document looks like, served by
+decision #43, #48): what a GOOD .dream document looks like, served by
 the core knowledge tools (`knowledge_bundle` / `knowledge_index` /
 `knowledge_read` / `knowledge_search`) while the plugin is enabled, under
 paths prefixed with the plugin id (`mrbavio.css-author/procedures.md`).
@@ -38,7 +38,7 @@ intent: … # example tier only — what the document answers
 Only these YAML forms are parsed (tools/knowledge/load.ts): `key: scalar`,
 `key: [a, b]` (the bracket list may wrap over lines, as prettier formats a
 long one), and `key:` followed by `- item` lines; a trailing `# comment` is
-dropped, so quote a value that contains ` #` (`"decisions.md #38"`). A file without a
+dropped, so quote a value that contains ` #` (`"decision #38"`). A file without a
 frontmatter block is ignored. `INDEX.md` is generated — run
 `pnpm --filter @mrbavio/plugin-css-author knowledge:index` (or the root
 `pnpm knowledge:index`, which indexes every plugin's declared folder) after

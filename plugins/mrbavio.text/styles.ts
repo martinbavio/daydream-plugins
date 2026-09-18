@@ -1,6 +1,6 @@
 /** One shared sheet for mounted text, inline editors, and DOM measurement —
  * handed to the item kind and the draft overlay as `styles` (index.tsx),
- * mounted by the kernel in the dream-plugin layer (decisions.md #71). */
+ * mounted by the kernel in the dream-plugin layer (decision #71). */
 export const textStyles = `
 .daydream-text-item {
   position: absolute;

@@ -1,4 +1,4 @@
-// Prose stays text (decisions.md #56, amended the same day): a browser
+// Prose stays text (decision #56, amended the same day): a browser
 // copies every selection as HTML — a paragraph, or a few words, arrives
 // as a `p` or a `span` with the page's computed styles inlined — and the
 // user who copies a sentence wants a text item, not a page. So the hook

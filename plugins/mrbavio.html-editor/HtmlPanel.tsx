@@ -59,7 +59,7 @@ export const CHANGED_UNDERNEATH =
   "This element changed on the canvas while you were editing. Keep typing to overwrite it, or undo your edit to see the new structure.";
 
 /**
- * The HTML pane (decisions.md #58): the selected element's subtree as
+ * The HTML pane (decision #58): the selected element's subtree as
  * source, STRUCTURE ONLY, in CodeMirror, applied LIVE as the CSS editor
  * is — every edit, after a short debounce, parses the text with the
  * browser, refuses what the format would refuse (the sentence under the

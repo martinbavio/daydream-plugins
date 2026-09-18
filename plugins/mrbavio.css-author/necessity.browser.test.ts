@@ -56,7 +56,7 @@ interface Spec {
   styles?: Record<string, string>;
   layers?: ConditionalLayer[];
   children?: DreamElement[];
-  /** Real HTML attributes — a rule's selector hook (decisions.md #71),
+  /** Real HTML attributes — a rule's selector hook (decision #71),
    * never the kernel id `id` already addresses above. */
   attrs?: Record<string, string>;
 }
@@ -76,7 +76,7 @@ function build(spec: Spec): DreamElement {
 }
 
 /** html › body (margin 0) › children, in one viewport of the given frame,
- * with an optional `sheet` (decisions.md #71, plan phase 9). */
+ * with an optional `sheet` (decision #71, plan phase 9). */
 function makeDocument(
   frame: { width: number; height?: number },
   bodyChildren: DreamElement[],
@@ -302,7 +302,7 @@ describe("dead and live declarations", () => {
     expect(findings).toEqual([]);
   });
 
-  test("a state layer is never judged: nothing hovers a measured page (decisions.md #53)", async () => {
+  test("a state layer is never judged: nothing hovers a measured page (decision #53)", async () => {
     const box = build({
       id: "box",
       styles: { height: "20px" },
@@ -638,7 +638,7 @@ describe("cost", () => {
   });
 });
 
-describe("necessity on rules (decisions.md #71, plan phase 9)", () => {
+describe("necessity on rules (decision #71, plan phase 9)", () => {
   test("a rule's custom property nobody reads is dead, reported at sheet[i]", async () => {
     const box = build({ id: "box", attrs: { class: "a" }, text: "hi" });
     const doc = makeDocument(FRAME, [box], undefined, [

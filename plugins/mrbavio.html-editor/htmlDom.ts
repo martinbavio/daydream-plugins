@@ -1,4 +1,4 @@
-// The browser half of parsing (decisions.md #58): DOMParser builds the
+// The browser half of parsing (decision #58): DOMParser builds the
 // nodes — the page's own parser, so the pane accepts what a browser would
 // build, recovery included — and parse.ts walks them. Which nodes are the
 // pane's depends on WHAT is selected, because an HTML document parser

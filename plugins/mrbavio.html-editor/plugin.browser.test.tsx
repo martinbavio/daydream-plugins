@@ -1,4 +1,4 @@
-// The plugin through the loader seam (decisions.md #48, testing
+// The plugin through the loader seam (decision #48, testing
 // decisions; docs/plugin-authoring.md, "Testing a plugin"): the real
 // shell, the plugin enabled by config, assertions from the DOM and the
 // API — what a person sees. The pane shows structure; typing applies live
@@ -182,7 +182,7 @@ describe("mrbavio.html-editor", () => {
     );
     expect(text).not.toMatch(/style|class|id=|Headline|red/);
     // The panel's one <style> is the kernel's, from `styles`, in the
-    // plugin layer (decisions.md #71).
+    // plugin layer (decision #71).
     const styles = panel().querySelectorAll("style");
     expect(styles).toHaveLength(1);
     expect(styles[0]!.textContent).toMatch(/^@layer dream-plugin \{/);
@@ -306,7 +306,7 @@ describe("mrbavio.html-editor", () => {
 
     await type('<h1 onclick="x()">Hi</h1>');
     expect(message()).toContain('"onclick"');
-    // An author's class is an attribute (decisions.md #71): applied, no
+    // An author's class is an attribute (decision #71): applied, no
     // sentence.
     await type('<h1 class="big">Hi</h1>');
     expect(message()).toBeNull();

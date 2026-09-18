@@ -10,7 +10,7 @@ import { classPrefix } from "./styles";
  * 3` as a variant round lands — then nothing, once the round is complete.
  * Drawn in the screen slot from the target's rect — above an element,
  * inside the top-left corner of a whole page (the title bar sits above
- * that). Subscribe in compute, read layout in apply (decisions.md #33). */
+ * that). Subscribe in compute, read layout in apply (decision #33). */
 export default function createCaption(
   dd: DaydreamApi,
   session: Session,

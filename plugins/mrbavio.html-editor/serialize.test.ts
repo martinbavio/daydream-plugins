@@ -1,7 +1,7 @@
 // The pane's face: structure only, indented two spaces, void elements
 // without end tags, text escaped — and nothing of the styling or the
-// labels (decisions.md #58); an author's class and id are attributes like
-// any other (decisions.md #71).
+// labels (decision #58); an author's class and id are attributes like
+// any other (decision #71).
 import { describe, expect, test } from "vitest";
 
 import { createElement } from "@daydream/plugin-testing";

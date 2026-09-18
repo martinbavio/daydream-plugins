@@ -1,4 +1,4 @@
-// HTML text → the pane's tree (decisions.md #58). The BROWSER parses
+// HTML text → the pane's tree (decision #58). The BROWSER parses
 // (htmlDom.ts: DOMParser, the parser the page itself uses, so what the
 // pane accepts is what a browser would build); this module is the pure
 // half — it walks nodes that merely LOOK like DOM nodes (`NodeLike`, which

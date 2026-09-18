@@ -1,4 +1,4 @@
-// The downgrade table (decisions.md #56): what becomes of a tag the kernel
+// The downgrade table (decision #56): what becomes of a tag the kernel
 // does not create. The plugin owns this table — the kernel owns only the
 // allowlist, asked through `dd.core.tagProblem` — so widening what the
 // model holds is a kernel change and this file shrinks to match.
@@ -85,7 +85,7 @@ const DROPPED_TAGS: ReadonlySet<string> = new Set([
  * every paste would measure the clipboard, not the model. Comments are
  * dropped the same way. A `<style>` is here because it is CONSUMED, not
  * lost: convert.ts reads every one into the viewport's sheet before the
- * walk (decisions.md #71), and what its text loses is counted there. */
+ * walk (decision #71), and what its text loses is counted there. */
 const PACKAGING_TAGS: ReadonlySet<string> = new Set([
   "head",
   "meta",
@@ -158,7 +158,7 @@ export interface TagRow {
 /** The parser closes an open `p` at a `div` — anywhere below it until a
  * button-scope boundary (html.spec "has an element in button scope") —
  * and the kernel's validator refuses the structure the parser would not
- * keep (decisions.md #57). An element the parser DID leave inside a `p`
+ * keep (decision #57). An element the parser DID leave inside a `p`
  * (an svg icon in a sentence, an `option` in a `select`) must therefore
  * downgrade to a `span`, whatever its default box: the styles it carries
  * make the box, and a `span` carries `display: block` as well as a `div`. */
@@ -197,7 +197,7 @@ export function resolveTag(
 }
 
 /** The table containers the kernel holds to their parts and no text
- * (decisions.md #57) — at the depth cap, their words cannot stay. */
+ * (decision #57) — at the depth cap, their words cannot stay. */
 export const TABLE_CONTAINERS: ReadonlySet<string> = new Set([
   ...["table", "colgroup", "thead", "tbody", "tfoot", "tr"],
 ]);

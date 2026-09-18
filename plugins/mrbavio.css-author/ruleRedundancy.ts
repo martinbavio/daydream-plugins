@@ -1,4 +1,4 @@
-// RULE-AGAINST-RULE REDUNDANCY, the pure part (decisions.md #71; the CSS
+// RULE-AGAINST-RULE REDUNDANCY, the pure part (decision #71; the CSS
 // author's review after the selectors step landed): a rule's declaration
 // that restates, for EVERY element the rule reaches, exactly what the
 // next rule beneath it in that element's cascade already sets — the

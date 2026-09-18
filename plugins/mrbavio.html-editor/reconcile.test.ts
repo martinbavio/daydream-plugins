@@ -1,4 +1,4 @@
-// Identity across an edit (decisions.md #58): matched by tag and
+// Identity across an edit (decision #58): matched by tag and
 // position, depth first; a survivor keeps id, styles, layers and label;
 // a newcomer gets a fresh id and nothing else. Each case below is one
 // edit a person makes in the pane.

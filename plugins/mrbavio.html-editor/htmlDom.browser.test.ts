@@ -77,7 +77,7 @@ describe("parseHtml", () => {
     if (!scripted.ok) expect(scripted.problem).toContain('"script"');
   });
 
-  test("two fragments, a script, a handler: refused with a sentence; a class and an id are attributes (decisions.md #71)", () => {
+  test("two fragments, a script, a handler: refused with a sentence; a class and an id are attributes (decision #71)", () => {
     const two = parseHtml("<h1>a</h1><p>b</p>", "fragment", rules);
     expect(two.ok).toBe(false);
     const script = parseHtml(

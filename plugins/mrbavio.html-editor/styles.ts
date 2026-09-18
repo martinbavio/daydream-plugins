@@ -1,7 +1,7 @@
-// The panel's CSS as a string (decisions.md #48: plugins ship no CSS
+// The panel's CSS as a string (decision #48: plugins ship no CSS
 // files). Handed to `registerPanel` as `styles` (index.tsx): the kernel
 // mounts it once, first in the panel root, inside the dream-plugin layer
-// (decisions.md #71) — a <style> of the panel's own would be unlayered and
+// (decision #71) — a <style> of the panel's own would be unlayered and
 // is refused. Class names carry a prefix derived from `dd.plugin.id`
 // (`mrbavio.html-editor` → `mrbavio-html-editor-…`), so a copy of this
 // folder under another id styles its own nodes and never this one's. The

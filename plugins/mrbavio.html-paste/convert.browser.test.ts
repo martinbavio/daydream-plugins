@@ -1,7 +1,7 @@
-// The converter over real fragments (decisions.md #56): the tree AND the
+// The converter over real fragments (decision #56): the tree AND the
 // report, because the report is what every later model step is measured
 // by — the same fixtures pasted again after a step should show these
-// counts fall. The selectors step (decisions.md #71) did: the style block
+// counts fall. The selectors step (decision #71) did: the style block
 // and the class grid report nothing now, and the seven fixtures it added
 // pin the sheet a paste lands. Browser project: the converter parses
 // with DOMParser and the browser's own CSS parser.
@@ -326,7 +326,7 @@ describe("whitespace the page would render", () => {
 });
 
 describe("the downgrade table", () => {
-  test("a table lands as a table (decisions.md #57), every part itself, every cell's inline style kept", () => {
+  test("a table lands as a table (decision #57), every part itself, every cell's inline style kept", () => {
     const conversion = convert(table);
     const grid = body(conversion).children[0]!;
     expect(shape(grid)).toEqual({
@@ -564,7 +564,7 @@ describe("the downgrade table", () => {
   });
 });
 
-describe("the sheet (decisions.md #71)", () => {
+describe("the sheet (decision #71)", () => {
   test("interleaved @media: rules in source order, the at-rule ancestry as conditions on each rule inside", () => {
     const conversion = convert(mediaInterleaved);
     expect(conversion.item.payload.sheet).toEqual([

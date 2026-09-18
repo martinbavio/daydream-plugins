@@ -1,4 +1,4 @@
-// A pasted `<style>` as the viewport's sheet (decisions.md #71). THE
+// A pasted `<style>` as the viewport's sheet (decision #71). THE
 // BROWSER PARSES, never a hand parser: the text goes through
 // `CSSStyleSheet.replaceSync` and the CSSOM it builds is walked into the
 // flat rule list the format stores — one rule per selector list in the
@@ -289,7 +289,7 @@ function storeRule(
  * grammar refuses — judged through `dd.core.ruleProblem` on a throwaway
  * rule carrying only this one condition, a universal selector (always
  * storable) and no declarations (an empty style map raises nothing of its
- * own), so the paste refuses exactly what a landing would (decisions.md
+ * own), so the paste refuses exactly what a landing would (decision
  * #71, plan phase 9: `ruleProblem` admits `@supports`, which the
  * element-layer face `conditionPreludeProblem` still reserves for #38 —
  * this retires the lexical `@supports` stand-in the kernel not yet
@@ -307,7 +307,7 @@ function conditionRefused(prelude: string, core: SheetRules): boolean {
 const URL_TOKEN = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s'")]*))\s*\)/gi;
 
 /**
- * A `@font-face` into `fonts` (decisions.md #47's grain): the descriptor
+ * A `@font-face` into `fonts` (decision #47's grain): the descriptor
  * map from its `cssText`, a descriptor outside the closed set stripped
  * and counted; the face dropped and counted under `@font-face` when it
  * would not load — no family, no `url()` or `local()`, or a `url()` the
@@ -345,7 +345,7 @@ function liftFontFace(cssText: string, walk: Walk): void {
 
 /**
  * A nested rule's selector under its parent's, desugared as css-nesting-1
- * §4 says (decisions.md #71): `&` is the parent list inside `:is()` —
+ * §4 says (decision #71): `&` is the parent list inside `:is()` —
  * which is what gives a list parent the specificity of its most specific
  * selector — except that a LEADING `&` under a single parent is the parent
  * written out (`.a .b` + `& .c` → `.a .b .c`), the same matches at the

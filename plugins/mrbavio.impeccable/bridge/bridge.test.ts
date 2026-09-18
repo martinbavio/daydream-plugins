@@ -138,7 +138,7 @@ describe("impeccable host part", () => {
     expect(text).toContain("`Impeccable bolder · variant n of 3 of vp_pricing`");
     expect(parseVariantMarker("Impeccable bolder · variant 2 of 3 of vp_pricing\n\nA denser card.")).toEqual({ verb: "bolder", n: 2, of: 3, sourceId: "vp_pricing" });
     expect(text).not.toContain("draft_open {from:");
-    // A variant is a copy plus one replace (decisions.md #68), fanned out
+    // A variant is a copy plus one replace (decision #68), fanned out
     // to sub-agents where the harness has them.
     expect(text).toContain('draft_open {copyOf: "vp_pricing"');
     expect(text).toContain("OPEN ALL 3 COPIES FIRST");
@@ -269,7 +269,7 @@ describe("impeccable host part", () => {
     await activate(host);
     const session = tools.find((t) => t.name === SESSION_TOOL)!;
     const { text } = await (session.run as () => Promise<{ text: string }>)();
-    // The watch names the host's absolute path (decisions.md #69): the
+    // The watch names the host's absolute path (decision #69): the
     // agent's working directory never matters.
     expect(text).toContain(watchCommand("/served/.daydream/plugin-data/mrbavio.impeccable.json"));
     expect(text).toContain("f='/served/.daydream/plugin-data/mrbavio.impeccable.json'");

@@ -1,4 +1,4 @@
-// The converter (decisions.md #56): a parsed HTML document in, one
+// The converter (decision #56): a parsed HTML document in, one
 // viewport item and a report out. PURE — no `dd`, no store, no clipboard:
 // it takes `dd.core` for the allowlist faces and fresh ids, and returns
 // what it could not do synchronously (data: images to vendor) as work for
@@ -11,7 +11,7 @@
 // attribute allowlist (`core.attrProblem`), `class`, `id` and `data-*`
 // among them since the selectors step; styles as a verbatim map on the
 // element, and the page's `<style>` blocks as the viewport's SHEET
-// (decisions.md #71, stylesheet.ts) — flat rules the browser parsed, a
+// (decision #71, stylesheet.ts) — flat rules the browser parsed, a
 // `@font-face` lifted into `fonts`. A linked stylesheet is still lost: a
 // fetch is a network call beyond the host.
 

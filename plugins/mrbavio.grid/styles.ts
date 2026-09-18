@@ -1,7 +1,7 @@
-// The overlay's CSS as a string (decisions.md #48: plugins ship no CSS
+// The overlay's CSS as a string (decision #48: plugins ship no CSS
 // files — runtime loading cannot serve them). Handed to `registerOverlay`
 // as `styles` (index.tsx): the kernel mounts it once, first in the overlay
-// root, inside the dream-plugin layer (decisions.md #71) — a <style> of the
+// root, inside the dream-plugin layer (decision #71) — a <style> of the
 // overlay's own would be unlayered and is refused. Class names and the hatch pattern
 // id carry a prefix DERIVED from `dd.plugin.id` (classPrefix —
 // `mrbavio.grid` → `mrbavio-grid-…`), so a copy of this plugin under

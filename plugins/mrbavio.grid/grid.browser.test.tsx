@@ -1,4 +1,4 @@
-// The plugin through the loader seam (decisions.md #48, testing
+// The plugin through the loader seam (decision #48, testing
 // decisions): mounted into the real shell by @daydream/plugin-testing and
 // asserted from the DOM. The precedence and alignment promises are pinned
 // in src/overlay/overlay.browser.test.tsx; this file is the plugin's own
@@ -47,7 +47,7 @@ describe("mrbavio.grid", () => {
         ?.getAttribute("data-plugin-overlay-slot"),
     ).toBe("overlay.screen");
     // One <style> — the kernel's, from `styles`, in the plugin layer
-    // (decisions.md #71); prefixed classes; nothing drawn without a
+    // (decision #71); prefixed classes; nothing drawn without a
     // selection.
     const styles = overlay!.querySelectorAll("style");
     expect(styles).toHaveLength(1);
