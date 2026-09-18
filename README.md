@@ -36,29 +36,38 @@ pnpm build plugins/mrbavio.grid
 Daydream page resolves them through its import map to the one Solid
 instance it runs. Everything else is bundled in.
 
-## Install into Daydream
+## Ship
 
-One line per plugin, from a built folder to an installed plugin
-(Daydream 0.1.10 or later):
+The daily loop, from this checkout to a running Daydream (0.1.10 or
+later):
 
 ```
+pnpm ship                                  # build every plugin, link and trust them all
+pnpm ship plugins/mrbavio.grid --enable    # only these folders; --enable turns a fresh install on
+```
+
+`ship` is `pnpm build` then `daydream plugin install` per folder. Install
+links the folder into `~/.daydream/plugins/<id>` and records the trust,
+printing what the plugin's manifest declares first. A fresh install
+starts OFF unless `--enable` is given; a plugin already on stays on, so
+after a rebuild `pnpm ship` re-trusts and nothing else moves. A running
+Daydream sees the change and every tab picks it up.
+`daydream plugin uninstall <id>` removes the link, the trust and the
+enabled entry.
+
+## Install by hand
+
+The same two steps, one plugin at a time:
+
+```
+pnpm build plugins/mrbavio.grid
 daydream plugin install plugins/mrbavio.grid
 ```
-
-It links the folder into `~/.daydream/plugins/<id>` and records the trust
-(printing what the plugin's manifest declares first). The plugin starts
-OFF: turn it on from the plugins page (⌥⌘P), or install with `--enable`.
-`pnpm ship` builds every plugin here and installs them all; a plugin
-already on stays on, so after a rebuild `pnpm ship` re-trusts and nothing
-else moves — a running Daydream sees the change and every tab picks it
-up. Name folders to ship only those, and pass install's flags through:
-`pnpm ship plugins/mrbavio.impeccable --enable`. `daydream plugin uninstall <id>` removes the link, the trust and the
-enabled entry.
 
 Under Daydream's dev host the same link serves the source with hot reload,
 no build needed. On an older Daydream, copy the folder into
 `~/.daydream/plugins/` instead, run `daydream trust <id>`, and turn the
-plugin on from the plugins page.
+plugin on from the plugins page (⌥⌘P).
 
 ## Tests
 
