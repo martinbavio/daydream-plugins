@@ -1,4 +1,4 @@
-// The match-dependent static findings against real layout (decisions.md
+// The match-dependent static findings against real layout (decision
 // #71, plan phase 9; docs/agent-css-knowledge-prd.md, "Testing
 // Decisions"): a document goes in, findings come out, and matching is
 // asked of a MOUNTED copy of that document — never the canvas — since a

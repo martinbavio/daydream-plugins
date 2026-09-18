@@ -1,4 +1,4 @@
-// The NECESSITY lint (docs/agent-css-knowledge-prd.md, "Lints"; decisions.md
+// The NECESSITY lint (docs/agent-css-knowledge-prd.md, "Lints"; decision
 // #43, #46, #48 P9): per declaration, remove it in-page, re-read, restore —
 // and call it DEAD when nothing observable moved. "Observable" is the
 // browser's own answer twice over: every measured element's border box and
@@ -168,7 +168,7 @@ interface Verdict {
 /** A declaration as the probe mounts re-judge it: where it is removed from
  * (`at`, the paired set of rule 1) and what its finding would say.
  * `ruleTargets` extends the pairing to a BASE declaration's matching,
- * UNCONDITIONAL rules that restate it verbatim (decisions.md #71, plan
+ * UNCONDITIONAL rules that restate it verbatim (decision #71, plan
  * phase 9's redundancy shape, mirrored the other way) — empty for a layer
  * declaration, which is never paired against a rule. */
 interface Candidate {
@@ -179,7 +179,7 @@ interface Candidate {
   ruleTargets: readonly number[];
 }
 
-/** A rule declaration's fate (decisions.md #71, plan phase 9): the
+/** A rule declaration's fate (decision #71, plan phase 9): the
  * correspondence key pairs it with the same declaration in another
  * viewport by selector and conditions text, never by index — an index is
  * only a position in ONE viewport's sheet. */
@@ -227,7 +227,7 @@ interface Probe {
   nodes: Element[];
   /** The computed-style property names the snapshot reads, fixed once. */
   properties: string[];
-  /** Pseudo-elements also snapshotted per node (decisions.md #71, plan
+  /** Pseudo-elements also snapshotted per node (decision #71, plan
    * phase 9) — empty unless the sheet names at least one pseudo-element
    * selector, so a page with none pays nothing for this. */
   pseudoElements: readonly string[];
@@ -242,7 +242,7 @@ async function lintViewport(
   vp: DreamViewport,
 ): Promise<ViewportVerdicts> {
   // Computed once per viewport: which pseudo-elements the baseline must
-  // also read (decisions.md #71, plan phase 9) — [] when the sheet names
+  // also read (decision #71, plan phase 9) — [] when the sheet names
   // none, the frame's own mount and every probe mount alike pay nothing.
   const pseudoElements = pseudoElementsInSheet(vp.payload.sheet ?? []);
   // The width the page was rendered at is the mount's to say (a viewport
@@ -384,7 +384,7 @@ function judgeAll(
   const probe = baseline(mounted, pseudoElements);
   const labels = labelCounts(vp.payload.root);
   // Rule 1, mirrored: a base declaration a matching, UNCONDITIONAL rule
-  // ALSO sets verbatim (decisions.md #71, plan phase 9) is paired with
+  // ALSO sets verbatim (decision #71, plan phase 9) is paired with
   // that rule too, so removing the element's own line alone never reads
   // dead just because the rule's identical value is still there —
   // exactly the shape the static REDUNDANCY finding names (matchLint.ts);
@@ -404,7 +404,7 @@ function judgeAll(
     const layers = (el.conditionals ?? []).filter(
       // A prelude the sheet refused emitted no block (core's html.ts), so
       // there is nothing to remove; the static tier owns that report. A
-      // STATE layer (`&:hover`, decisions.md #53) is never judged: on a
+      // STATE layer (`&:hover`, decision #53) is never judged: on a
       // page nobody hovers or focuses, every one of its declarations
       // changes nothing, and that is not a finding.
       (layer) =>
@@ -490,7 +490,7 @@ function redundantRuleIndices(
 
 /**
  * Every checked declaration of the viewport's `sheet`, rule 1's paired
- * check extended to rules (decisions.md #71, plan phase 9): a rule's
+ * check extended to rules (decision #71, plan phase 9): a rule's
  * declaration goes together with every element it matches that ALSO
  * carries its own inline (base-map) declaration of the same property,
  * removed in one combined set — so a rule reads dead only when nothing
@@ -500,7 +500,7 @@ function redundantRuleIndices(
  * rule `:hover` belongs to the selector, and nobody hovers a lint run
  * (statePseudo.ts) — as is one whose own `@media` condition is not active
  * at the viewport's frame: the generated sheet never emits an inactive
- * group's rule at all (decisions.md #71), so there is nothing here to
+ * group's rule at all (decision #71), so there is nothing here to
  * remove yet: `isDeadAt` skips a width it cannot reach anyway.
  */
 function judgeRules(
@@ -528,7 +528,7 @@ function judgeRules(
     occurrences.set(base, occurrence + 1);
     if (hasStatePseudo(rule.selector)) return;
     if (!ruleActiveAtOwnFrame(core, vp, rule)) return;
-    // The live strategy scopes nothing (decisions.md #71): the mounted
+    // The live strategy scopes nothing (decision #71): the mounted
     // iframe is its own unnamespaced document, so the stored selector is
     // asked of it verbatim — no kernel rewrite needed, unlike matchLint.ts's
     // canvas reads.
@@ -662,7 +662,7 @@ function intersect(perViewport: Verdict[][]): Finding[] {
 
 /** The same cross-viewport intersection as `intersect`, keyed on a rule's
  * selector and conditions text instead of an element's label/path
- * (decisions.md #71, plan phase 9): a rule's stored INDEX is only a
+ * (decision #71, plan phase 9): a rule's stored INDEX is only a
  * position in one viewport's own sheet, never a correspondence a second
  * viewport could share. */
 function intersectRules(perViewport: RuleVerdict[][]): Finding[] {
@@ -697,7 +697,7 @@ function isChecked(core: CoreApi, property: string, value: string): boolean {
  * prelude for that layer's rule; several entries are the paired check
  * (rule 1), removed together and restored in reverse. `ruleTargets`
  * extends the same paired removal to a base declaration's matching,
- * unconditional rules (decisions.md #71, plan phase 9) — always present
+ * unconditional rules (decision #71, plan phase 9) — always present
  * in the mounted page by construction (an unconditional rule is never
  * dropped for any width), so no throw is expected here, but a removal is
  * still guarded the same defensive way `isDeadAt` is. The read is a
@@ -743,7 +743,7 @@ function withoutAt(mounted: MountedViewport, target: RemovalTarget, property: st
  * spanning a rule address and any number of matched elements' inline
  * declarations, judgeRules's `at`). A removal that THROWS — the rule's own
  * `@media` condition inactive at THIS width, so the generated sheet never
- * marked it here at all (decisions.md #71) — is not evidence either way:
+ * marked it here at all (decision #71) — is not evidence either way:
  * the declaration is left ALIVE for this width rather than risk a false
  * dead verdict the sweep cannot actually support here. */
 function isDeadAt(
@@ -829,7 +829,7 @@ function nameOf(el: DreamElement): string {
  * The page as it stands, before any removal. The node list and the
  * property list are fixed here: removals never add or drop elements, and
  * the set of standard longhands the engine enumerates is the same for every
- * element, so both are read once. `pseudoElements` (decisions.md #71, plan
+ * element, so both are read once. `pseudoElements` (decision #71, plan
  * phase 9) is threaded straight through to `observe`: empty unless the
  * viewport's sheet names at least one, so a page with none pays nothing.
  */
@@ -865,7 +865,7 @@ function unchanged(probe: Probe): boolean {
 
 /**
  * Border box to 0.01px, every snapshotted computed value, then — per
- * pseudo-element the sheet names (decisions.md #71, plan phase 9) — the
+ * pseudo-element the sheet names (decision #71, plan phase 9) — the
  * SAME property set read from `getComputedStyle(node, pseudo)` instead,
  * no rect (a pseudo-element has none of its own to read): a
  * `::before`/`::after` rule's declaration is otherwise invisible to this
@@ -909,7 +909,7 @@ function snapshotProperties(style: CSSStyleDeclaration): string[] {
   return Array.from(style).filter((name) => !name.startsWith("--"));
 }
 
-/** The pseudo-elements a viewport's `sheet` needs baselined (decisions.md
+/** The pseudo-elements a viewport's `sheet` needs baselined (decision
  * #71, plan phase 9): every trailing `::pseudo` a rule's selector list
  * names, collected once — plus the two a page most commonly draws with,
  * `::before` and `::after`, so a rule that styles one of those without
@@ -960,7 +960,7 @@ function splitTopLevelCommas(selector: string): string[] {
 /** The iframe's own getComputedStyle: the node lives in the frame's realm,
  * and its window is the honest handle (the parent's answers too — same
  * origin — but this never depends on it). `pseudo` reads a pseudo-element's
- * own computed style instead of the node's (decisions.md #71, plan phase
+ * own computed style instead of the node's (decision #71, plan phase
  * 9) — valid whether or not the pseudo-element currently generates a box. */
 function computedStyleOf(node: Element, pseudo?: string): CSSStyleDeclaration {
   const view = node.ownerDocument.defaultView ?? window;

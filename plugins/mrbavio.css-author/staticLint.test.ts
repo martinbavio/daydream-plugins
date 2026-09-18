@@ -23,7 +23,7 @@ const staticLint = (document: DreamDocument): Finding[] =>
   lintWith(coreApi(), document);
 
 /** One-viewport v4 document around the given body children, with optional
- * html/body styles — the skeleton every rule walks (decisions.md #32). */
+ * html/body styles — the skeleton every rule walks (decision #32). */
 function doc(
   children: DreamElement[],
   skeleton: {
@@ -547,7 +547,7 @@ describe("staticLint: restated initial values (rule 3)", () => {
     ).toHaveLength(1);
   });
 
-  // The vocabulary widened (decisions.md #57) and the UA sheet was re-read
+  // The vocabulary widened (decision #57) and the UA sheet was re-read
   // for every new tag: none of the table's properties is set on any of
   // them, so every new tag is held to the whole table — no new exception.
   // Every pair below is a claim about Chromium's html.css; widening the
@@ -728,7 +728,7 @@ describe("rule 4 — a @font-face no element names", () => {
     ]);
   });
 
-  test("a face named only by a rule's font-family is fine (decisions.md #71, plan phase 9)", () => {
+  test("a face named only by a rule's font-family is fine (decision #71, plan phase 9)", () => {
     const document = withFonts([face("Montserrat")]);
     fixtureViewport(document).payload.sheet = [
       { selector: "h1", styles: { "font-family": "Montserrat, sans-serif" } },
@@ -737,7 +737,7 @@ describe("rule 4 — a @font-face no element names", () => {
   });
 });
 
-describe("rule-level static findings (decisions.md #71, plan phase 9)", () => {
+describe("rule-level static findings (decision #71, plan phase 9)", () => {
   test("a unit-less length in a rule is a finding at sheet[i]", () => {
     const document = doc([]);
     fixtureViewport(document).payload.sheet = [

@@ -1,6 +1,6 @@
-// The notes pane (decisions.md #48, P5): the learning companion for library
+// The notes pane (decision #48, P5): the learning companion for library
 // documents — a viewport's meta (title, notes, source) read beside the
-// canvas. Per-viewport since v3 (decisions.md #32): the pane shows the meta
+// canvas. Per-viewport since v3 (decision #32): the pane shows the meta
 // of the viewport owning the current selection, falling back to the
 // canvas-level meta, then — for one-viewport documents — to the sole
 // viewport's, when nothing is selected or the selection's viewport has

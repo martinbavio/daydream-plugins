@@ -1,4 +1,4 @@
-// The plugin's browser part through the API (decisions.md #48 P9): the
+// The plugin's browser part through the API (decision #48 P9): the
 // two gates it registers, each finding at the severity the plugin
 // declares — blocking — and each judging on its own: what the two say of
 // ONE declaration is the runner's to fold (src/ai/gates.ts dropCovered,

@@ -1,4 +1,4 @@
-// IDENTITY across an HTML edit (decisions.md #58). Element ids are the
+// IDENTITY across an HTML edit (decision #58). Element ids are the
 // stable handle for selection, the generated stylesheet and agent drafts,
 // and HTML text has no place for them — so the parsed tree is matched
 // against the stored subtree by CONTENT, TAG AND POSITION, depth first. A

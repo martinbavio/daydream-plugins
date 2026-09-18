@@ -1,4 +1,4 @@
-// The STATIC lint (docs/agent-css-knowledge-prd.md, "Lints"; decisions.md
+// The STATIC lint (docs/agent-css-knowledge-prd.md, "Lints"; decision
 // #43, #48 P9): what can be said about a document from its JSON alone, with
 // no render. Deliberately small — five rules, each a fact about CSS the
 // browser would enforce silently (a query that can never match, a
@@ -7,7 +7,7 @@
 // necessity lint's job (necessity.ts), never this file's. Runs on a
 // validated document; the format gate (core) comes first. The facts about
 // CSS it reads — container axes, family names, the condition grammar —
-// are core's, through `dd.core` (one implementation, decisions.md #48 P4);
+// are core's, through `dd.core` (one implementation, decision #48 P4);
 // the OPINION that these four are worth refusing a landing for is this
 // plugin's.
 
@@ -21,7 +21,7 @@ import type {
 
 /** Every static finding for the document, in tree order, one element's
  * findings together (container queries, then unit-less lengths, then
- * restated initials), then the viewport's rule-level findings (decisions.md
+ * restated initials), then the viewport's rule-level findings (decision
  * #71, plan phase 9: the same four facts extended to a viewport's `sheet` —
  * everything here is JSON-only, no browser). Empty when the document is
  * clean. */
@@ -417,7 +417,7 @@ function topLevelTokens(value: string): string[] {
   return tokens;
 }
 
-/** Rule 2, extended to a viewport's `sheet` (decisions.md #71, plan phase
+/** Rule 2, extended to a viewport's `sheet` (decision #71, plan phase
  * 9): a rule's declarations are the same grain as an element's base map,
  * so the same unit check applies verbatim — no layers to walk, a rule has
  * one flat style map. */
@@ -458,7 +458,7 @@ export function lintUnitlessLengthsOnRules(
 // focused form controls, so it is not guaranteed redundant.
 //
 // The premise was re-read against Chromium's html.css when the vocabulary
-// widened (decisions.md #57: tables, description lists, the phrasing
+// widened (decision #57: tables, description lists, the phrasing
 // elements, ruby, address/hgroup/menu/search): what the UA sets on the
 // new tags is display, vertical-align, text-align, border-spacing,
 // border-collapse, border-color, box-sizing and text-indent (table
@@ -518,7 +518,7 @@ function lintRestatedInitials(el: DreamElement, findings: Finding[]): void {
   }
 }
 
-/** Rule 3, extended to a viewport's `sheet` (decisions.md #71, plan phase
+/** Rule 3, extended to a viewport's `sheet` (decision #71, plan phase
  * 9): a rule has no concrete tag, so the `img`/`hr` overflow exception is
  * APPROXIMATED from the selector alone — excused when its rightmost
  * compound (in any list member) could reach one of them: no type selector
@@ -663,7 +663,7 @@ function lintUnusedFontFaces(
     for (const child of el.children) visit(child);
   };
   visit(vp.payload.root);
-  // A rule's font-family counts as a use too (decisions.md #71, plan
+  // A rule's font-family counts as a use too (decision #71, plan
   // phase 9): the sheet is the same page the elements render into, and a
   // face named only by a rule is exactly as used as one named by an
   // element's own map.
@@ -693,7 +693,7 @@ function lintUnusedFontFaces(
 }
 
 // ---------------------------------------------------------------------------
-// Rule 5 — a class no rule names (decisions.md #71's `class` hook; the CSS
+// Rule 5 — a class no rule names (decision #71's `class` hook; the CSS
 // author's review after the selectors step landed). The mirror of the
 // dead-rule finding (matchLint.ts): a class on an element that no selector
 // in the viewport's sheet mentions is a hook nothing hangs on — the

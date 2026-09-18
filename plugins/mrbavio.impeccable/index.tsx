@@ -1,5 +1,5 @@
 // mrbavio.impeccable — design verbs on the canvas. The BROWSER PART is the
-// session's canvas side: the picker (⌘P on a selection, decisions.md #67:
+// session's canvas side: the picker (⌘P on a selection, decision #67:
 // Impeccable's own list in the interactive overlay slot, beside the target),
 // the caption that says a pick is waiting or building, the impeccable_pick
 // tool an agent takes the pick with, `adopt` in a variant's title bar
@@ -122,7 +122,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   });
 
   // Each overlay's CSS rides its registration: the kernel mounts it in the
-  // overlay root, inside the dream-plugin layer (decisions.md #71) — a
+  // overlay root, inside the dream-plugin layer (decision #71) — a
   // <style> the plugin appended to the head itself would be unlayered.
   dd.registerOverlay({
     id: "caption",

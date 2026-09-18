@@ -1,4 +1,4 @@
-// The detector, run by the host part (decisions.md #72): the page from
+// The detector, run by the host part (decision #72): the page from
 // the tab's own impeccable_html, written to a file, Impeccable's launcher
 // over it, the findings back — one call an agent makes, no page through
 // the model. Pure over its two seams (the tab call, the process), so a

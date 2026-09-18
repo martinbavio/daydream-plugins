@@ -1,4 +1,4 @@
-// A rule's STATE pseudo-classes (decisions.md #71, plan phase 9): in a
+// A rule's STATE pseudo-classes (decision #71, plan phase 9): in a
 // rule, `:hover` and its kin belong to the selector, never a condition
 // (that is what tells a rule's `:hover` apart from an element's `&:hover`
 // layer). Both the dead-rule finding (matchLint.ts) and the necessity
@@ -7,7 +7,7 @@
 // that matches only WITH a state active would read as matching nothing —
 // the dead-rule check re-asks the state-stripped selector before calling
 // it dead, and necessity skips a state selector's declarations outright
-// (their liveliness is a browsing-mode question, decisions.md #53, not
+// (their liveliness is a browsing-mode question, decision #53, not
 // this lint's). One table, so the two lints can never drift on what
 // counts as a state pseudo-class.
 const STATE_PSEUDO_NAMES = [
@@ -39,7 +39,7 @@ export function hasStatePseudo(selector: string): boolean {
  * dead-rule finding re-asks the browser to match once the plain
  * `dd.ruleMatches` reads empty, since a `.card:hover` that would match
  * SOME element once hovered is not a rule that matches nothing
- * (decisions.md #71, plan phase 9). A fresh regex literal per call, so
+ * (decision #71, plan phase 9). A fresh regex literal per call, so
  * this function is safe to call from a loop without lastIndex state. */
 export function stripStatePseudo(selector: string): string {
   return selector.replace(new RegExp(`:(?:${PATTERN})(?![\\w-])`, "gi"), "");

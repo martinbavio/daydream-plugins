@@ -1,7 +1,7 @@
-// mrbavio.grid — the grid introspection overlay as a plugin (decisions.md
+// mrbavio.grid — the grid introspection overlay as a plugin (decision
 // #48, P6): DevTools-style track lines, gap hatching and line-number badges
 // for the selected grid, or the parent's grid of a selected child
-// (decisions.md #11). Everything it reads arrives through `dd`: the
+// (decision #11). Everything it reads arrives through `dd`: the
 // selection, the document walk (`dd.core.findParent`), and the geometry
 // cache (`dd.geometry` — rects, the invalidation state, the camera, and
 // the rendered node for the one read the API does not wrap, the browser's
@@ -22,7 +22,7 @@ export default function activate(dd: DaydreamApi): void {
     id: "grid",
     slot: "overlay.screen",
     // The overlay's CSS, mounted by the kernel in the plugin layer
-    // (decisions.md #71) — never a <style> of the overlay's own.
+    // (decision #71) — never a <style> of the overlay's own.
     styles: css(classPrefix(dd.plugin.id)),
     render: () => createGridOverlay(dd),
   });

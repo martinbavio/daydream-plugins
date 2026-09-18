@@ -15,11 +15,11 @@ import { classPrefix } from "./styles";
  * DevTools-style read-only grid visuals, drawn into the `overlay.screen`
  * slot: dashed track boundary lines (extended a bit past the container
  * edges), hatched gap bands, and line-number badges (positive lines only,
- * 1..n+1 — decisions.md #11). Screen-space means every stroke, hatch and
+ * 1..n+1 — decision #11). Screen-space means every stroke, hatch and
  * badge stays constant-size at any zoom. The slot is pointer-events: none,
  * inherited by everything here.
  *
- * Which grid (decisions.md #11): the selected element's own grid wins; the
+ * Which grid (decision #11): the selected element's own grid wins; the
  * parent's grid shows only when the selection is a non-grid child; one grid
  * at a time. TODO(v1): nested grids.
  */
@@ -107,7 +107,7 @@ export default function createGridOverlay(dd: DaydreamApi): JSX.Element {
   // Compute subscribes to the selection + every geometry trigger
   // (dd.geometry.version); the layout and computed-style reads happen in
   // apply, after render effects hit the DOM — the same frame, no lag
-  // (decisions.md #8/#33; the rule is documented on GeometryApi).
+  // (decision #8/#33; the rule is documented on GeometryApi).
   createEffect(
     () => {
       dd.geometry.version();
@@ -221,7 +221,7 @@ export default function createGridOverlay(dd: DaydreamApi): JSX.Element {
                 )}
               </For>
               {/* Line-number badges: columns across the top, rows down
-                  the left. Positive lines only (decisions.md #11). */}
+                  the left. Positive lines only (decision #11). */}
               <For each={lineAnchors(geometry().cols)}>
                 {(x, i) => (
                   <Badge

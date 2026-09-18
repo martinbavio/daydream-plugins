@@ -1,6 +1,6 @@
-// mrbavio.html-editor — the HTML pane as a plugin (decisions.md #58): the
+// mrbavio.html-editor — the HTML pane as a plugin (decision #58): the
 // selected element's subtree as source, STRUCTURE ONLY — tag, attributes
-// (an author's class and id among them, decisions.md #71), text,
+// (an author's class and id among them, decision #71), text,
 // children; never a style, a label or the model id — in CodeMirror, applied
 // LIVE as you type through an item transaction that commits as one undo
 // step when the editor is left, identities kept by
@@ -15,7 +15,7 @@
 // API has no element double-click hook, and adding one is a kernel
 // decision for a later task — the pane is where text is edited today.
 // Nor a resizer: the dock's width and the split between this pane and the
-// CSS editor above it are the dock's own chrome (decisions.md #59).
+// CSS editor above it are the dock's own chrome (decision #59).
 //
 // Everything it knows about the app arrives through `dd`; the entry
 // registers its three commands and the panel.
@@ -128,7 +128,7 @@ export default function activate(dd: DaydreamApi): void {
     // editor's two thirds; the dock's divider moves the split.
     grow: 1,
     // The panel's CSS, mounted by the kernel in the plugin layer
-    // (decisions.md #71) — never a <style> of the panel's own.
+    // (decision #71) — never a <style> of the panel's own.
     styles: css(classPrefix(dd.plugin.id)),
     render: () => createHtmlPanel(state),
   });

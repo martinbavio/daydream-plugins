@@ -1,4 +1,4 @@
-// The paste hook through the loader seam (decisions.md #56): the real
+// The paste hook through the loader seam (decision #56): the real
 // shell with Media, Text and this plugin enabled, synthetic paste events,
 // and what a user observes — the items, the selection, one undo step,
 // one console line — never the registry.
@@ -416,7 +416,7 @@ describe("data: images", () => {
     ]);
   });
 
-  test("an svg icon inside a sentence lands: the downgrade is a span the structure gate keeps (decisions.md #57)", async () => {
+  test("an svg icon inside a sentence lands: the downgrade is a span the structure gate keeps (decision #57)", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const shell = await mount();

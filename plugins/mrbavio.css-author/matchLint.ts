@@ -1,8 +1,8 @@
-// The MATCH-DEPENDENT static findings (decisions.md #71, plan phase 9;
+// The MATCH-DEPENDENT static findings (decision #71, plan phase 9;
 // wayfinder/tickets/T07-what-the-lints-judge.md): two facts that are
 // "static" in spirit — no removal, no re-read, judged once — but that
 // need the browser to ask, since matching a selector against a document is
-// the browser's job, never a hand-rolled one (decisions.md #71, "MATCHING
+// the browser's job, never a hand-rolled one (decision #71, "MATCHING
 // IS THE BROWSER'S"). staticLint.ts stays pure JSON-only; this file is the
 // one seam of the static gate that reaches into the browser, kept small on
 // purpose.
@@ -10,7 +10,7 @@
 // WHY THIS FILE MOUNTS, AND NEVER READS `dd.matchedRules` /
 // `dd.ruleMatches` / `dd.geometry`: a gate runs over an INCOMING document —
 // ingest, replace_viewport, a draft's finalize — that is not, and may
-// never have been, on the canvas (decisions.md #71). `dd.matchedRules`,
+// never have been, on the canvas (decision #71). `dd.matchedRules`,
 // `dd.ruleMatches` and `dd.geometry.node` all answer about the CANVAS's
 // own rendered document (the simulated strategy's DOM, kept in step with
 // `dd.document()`); asked about a viewport that was never rendered there,
@@ -20,7 +20,7 @@
 // The fix judges the document it is actually handed by MOUNTING it, the
 // same way necessity.ts already must (a live-strategy iframe, `dd.mount-
 // Viewport`): matching is asked of THAT DOM, through native
-// `Element.matches` — the sanctioned way (decisions.md #71) — never a
+// `Element.matches` — the sanctioned way (decision #71) — never a
 // hand-rolled selector engine and never the kernel's canvas-only rewrite
 // (necessity.ts's own header explains why: the mounted iframe is its own
 // unnamespaced document, so the stored selector is asked of it verbatim).
@@ -58,7 +58,7 @@
 // answers false — so every match this file makes strips a member's
 // trailing pseudo-element first (mirroring the kernel's own
 // `core/selectors.ts trailingPseudoElement`, reimplemented here since a
-// plugin has no import of core's internals, decisions.md #48's plugin
+// plugin has no import of core's internals, decision #48's plugin
 // boundary) and keeps the pseudo-element name alongside for the two
 // questions that need it: a pseudo-element match still answers the
 // dead-rule question (a `.card::before` rule is not dead while `.card`
@@ -92,7 +92,7 @@ import { hasStatePseudo, stripStatePseudo } from "./statePseudo";
  * whatever (if anything) is on the canvas. */
 export type MatchHost = Pick<DaydreamApi, "core" | "mountViewport">;
 
-/** Every match-dependent static finding for the document (decisions.md
+/** Every match-dependent static finding for the document (decision
  * #71, plan phase 9): redundancy (an element's, and a rule's against the
  * rule beneath it), dead rules, and a rule's own
  * container-query-without-container. Each viewport is mounted once — the
@@ -106,7 +106,7 @@ export async function matchLint(
   const findings: Finding[] = [];
   for (const vp of dd.core.viewportItems(doc) as DreamViewport[]) {
     // Every question here is about a rule, so a viewport without a sheet
-    // has nothing to ask and pays for no mount (decisions.md #71).
+    // has nothing to ask and pays for no mount (decision #71).
     const sheet = vp.payload.sheet;
     if (sheet === undefined || sheet.length === 0) continue;
     const mounted = await dd.mountViewport(vp);
@@ -252,7 +252,7 @@ interface RuleMatch {
  * read, a state pseudo-class is never made optional here — the mount is a
  * real, unhovered page, so a `.card:hover` rule genuinely does not match
  * `.card` right now, exactly as a browser loading the page cold would
- * say; there is no "glass" (decisions.md #52) shielding a mounted
+ * say; there is no "glass" (decision #52) shielding a mounted
  * document from its own literal state. */
 function matchedRulesFor(
   core: CoreApi,
@@ -359,7 +359,7 @@ function lintRedundancy(
           const rule = sheet[match.index];
           if (rule === undefined) continue;
           // A conditional rule may not apply everywhere the element does
-          // (decisions.md #71): only an unconditional one is guaranteed
+          // (decision #71): only an unconditional one is guaranteed
           // redundant with a base declaration.
           if (rule.conditions !== undefined && rule.conditions.length > 0) {
             continue;

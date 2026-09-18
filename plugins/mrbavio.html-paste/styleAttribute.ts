@@ -8,7 +8,7 @@
 // (`isSafeValue`: nothing that escapes its declaration), so a broken
 // declaration is counted rather than stored as one nothing can emit; the
 // value is kept as written, less an `!important` the format cannot hold
-// (decisions.md #38), which is counted — and which still wins over a
+// (decision #38), which is counted — and which still wins over a
 // later plain declaration of the same property, as it does in CSS.
 
 export interface ParsedStyle {

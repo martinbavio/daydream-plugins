@@ -174,7 +174,7 @@ describe("treeFromNodes", () => {
     expect(refused(el("div", { onclick: "x()" }))).toBe(
       `<div onclick>: ${rules.attrProblem("onclick", "x()")}`,
     );
-    // An author's class and id are attributes (decisions.md #71).
+    // An author's class and id are attributes (decision #71).
     expect(parsed(el("div", { class: "hero", id: "top" })).attrs).toEqual({
       class: "hero",
       id: "top",

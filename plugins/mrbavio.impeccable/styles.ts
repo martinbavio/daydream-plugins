@@ -1,6 +1,6 @@
 // The plugin's CSS as strings, one per overlay, handed to each
 // `registerOverlay` as `styles` (index.tsx): the kernel mounts each once
-// in its overlay root, inside the dream-plugin layer (decisions.md #71) —
+// in its overlay root, inside the dream-plugin layer (decision #71) —
 // a <style> of the plugin's own would be unlayered and is refused. Quiet:
 // small, sentence case, the chrome's own colours; the caption reads as a
 // note on the target, the picker as a list beside it.

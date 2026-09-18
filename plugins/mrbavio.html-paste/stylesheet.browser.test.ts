@@ -1,4 +1,4 @@
-// The walker over the browser's own CSSOM (decisions.md #71): what
+// The walker over the browser's own CSSOM (decision #71): what
 // `CSSStyleSheet.replaceSync` normalises, what it drops without a word,
 // and the kernel's real faces judging the result. The pure walk over
 // hand-built rules is stylesheet.test.ts; this is the same walk over

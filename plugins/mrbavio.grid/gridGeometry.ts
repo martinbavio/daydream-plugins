@@ -1,7 +1,7 @@
 import type { DaydreamApi, ElementId } from "@daydream/plugin-api";
 
 /**
- * Grid introspection (plan M5; a plugin since decisions.md #48 P6). The
+ * Grid introspection (plan M5; a plugin since decision #48 P6). The
  * browser is the layout engine: everything here is READ from
  * `getComputedStyle`, never computed. Chrome resolves
  * `grid-template-columns/rows` to plain space-separated px lists of USED
@@ -122,12 +122,12 @@ export type GridTracker = (elementId: ElementId) => GridGeometry | null;
 /**
  * A tracker with its own per-invalidation-state cache, keyed on
  * `dd.geometry.version()` — the same discipline as the kernel's rect cache
- * (decisions.md #8): within one invalidation state, repeated calls per
+ * (decision #8): within one invalidation state, repeated calls per
  * element hit the cache and perform no getComputedStyle/layout reads; any
  * trigger (pan/zoom, resize, document mutation) starts a fresh state and
  * consumers re-read synchronously in the same flush. Reactive exactly like
  * `dd.geometry.rect`: subscribe from an effect's compute phase, READ from
- * its apply phase (decisions.md #33). One tracker per overlay instance, so
+ * its apply phase (decision #33). One tracker per overlay instance, so
  * two copies of the plugin never share a cache.
  */
 export function createGridTracker(dd: DaydreamApi): GridTracker {
