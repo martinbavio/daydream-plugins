@@ -517,7 +517,7 @@ describe("the downgrade table", () => {
         "  <title>Logo <b>bold</b></title>",
         '  <defs><linearGradient id="g" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="red"/></linearGradient></defs>',
         '  <g transform="translate(1 1)" fill="url(#g)" style="fill: blue">',
-        '    <use href="#x"/><image href="https://x.example/a.png"/><foreignObject><div>x</div></foreignObject>',
+        '    <image href="https://x.example/a.png"/><foreignObject><div>x</div></foreignObject>',
         '    <path d="M0 0" fill-rule="evenodd" xlink:href="#y"/>',
         "  </g>",
         '  <text x="1" y="2" font-size="12" letter-spacing="1"> ok <tspan dx="1">!</tspan> </text>',
@@ -557,9 +557,10 @@ describe("the downgrade table", () => {
               // it does in the cascade.
               styles: { fill: "blue" },
               children: [
+                // `xlink:href` is read as `href`, kept as any href is.
                 {
                   tag: "path",
-                  attrs: { d: "M0 0" },
+                  attrs: { d: "M0 0", href: "#y" },
                   styles: { "fill-rule": "evenodd" },
                 },
               ],
@@ -580,8 +581,96 @@ describe("the downgrade table", () => {
     });
     expect(conversion.report).toEqual({
       ...emptyReport(),
-      dropped: { b: 1, use: 1, image: 1, foreignObject: 1 },
-      stripped: { "xlink:href": 1 },
+      dropped: { b: 1, image: 1, foreignObject: 1 },
+    });
+  });
+
+  test("a sprite, a marker and a filter land (decision #75): xlink:href becomes href, a use keeps a #fragment href and loses an external one", () => {
+    const conversion = convert(
+      [
+        '<svg viewBox="0 0 48 48">',
+        '<defs><symbol id="s" viewBox="0 0 24 24"><path d="M0 0"/></symbol>',
+        '<marker id="m" refX="5" refY="5" markerWidth="10" markerHeight="10" orient="auto"><circle cx="5" cy="5" r="5"/></marker>',
+        '<filter id="f"><feFlood flood-color="black" flood-opacity="0.2"/><feGaussianBlur stdDeviation="2" result="b"/><feMerge><feMergeNode in="b"/></feMerge><feImage href="https://x.example/a.png"/></filter></defs>',
+        '<use xlink:href="#s" x="4" y="4" width="40" height="40"/>',
+        '<use href="https://x.example/sprite.svg#s"/>',
+        '<line x1="0" y1="46" x2="40" y2="46" marker-end="url(#m)"/>',
+        '<rect x="30" y="30" width="10" height="10" filter="url(#f)"/>',
+        "</svg>",
+      ].join(""),
+    );
+    expect(shape(body(conversion))).toEqual({
+      tag: "body",
+      children: [
+        {
+          tag: "svg",
+          attrs: { viewBox: "0 0 48 48" },
+          children: [
+            {
+              tag: "defs",
+              children: [
+                {
+                  tag: "symbol",
+                  attrs: { id: "s", viewBox: "0 0 24 24" },
+                  children: [{ tag: "path", attrs: { d: "M0 0" } }],
+                },
+                {
+                  tag: "marker",
+                  attrs: {
+                    id: "m",
+                    refX: "5",
+                    refY: "5",
+                    markerWidth: "10",
+                    markerHeight: "10",
+                    orient: "auto",
+                  },
+                  children: [
+                    { tag: "circle", attrs: { cx: "5", cy: "5", r: "5" } },
+                  ],
+                },
+                {
+                  tag: "filter",
+                  attrs: { id: "f" },
+                  children: [
+                    {
+                      tag: "feFlood",
+                      styles: { "flood-color": "black", "flood-opacity": "0.2" },
+                    },
+                    {
+                      tag: "feGaussianBlur",
+                      attrs: { stdDeviation: "2", result: "b" },
+                    },
+                    {
+                      tag: "feMerge",
+                      children: [{ tag: "feMergeNode", attrs: { in: "b" } }],
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              tag: "use",
+              attrs: { href: "#s", x: "4", y: "4", width: "40", height: "40" },
+            },
+            { tag: "use" },
+            {
+              tag: "line",
+              attrs: { x1: "0", y1: "46", x2: "40", y2: "46" },
+              styles: { "marker-end": "url(#m)" },
+            },
+            {
+              tag: "rect",
+              attrs: { x: "30", y: "30", width: "10", height: "10" },
+              styles: { filter: "url(#f)" },
+            },
+          ],
+        },
+      ],
+    });
+    expect(conversion.report).toEqual({
+      ...emptyReport(),
+      dropped: { feImage: 1 },
+      stripped: { href: 1 },
     });
   });
 

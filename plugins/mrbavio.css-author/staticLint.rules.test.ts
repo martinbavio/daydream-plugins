@@ -97,7 +97,9 @@ describe("lintRestatedInitialsOnRules", () => {
   });
 
   test("overflow: visible on a rule typed to svg or pattern is excused too: Chromium's svg.css gives both an overflow (decision #75)", () => {
-    for (const selector of ["svg.icon", "pattern", ".tile > svg", "SVG"]) {
+    for (const selector of [
+      ...["svg.icon", "pattern", ".tile > svg", "SVG", "symbol", "marker"],
+    ]) {
       const vp = viewport([{ selector, styles: { overflow: "visible" } }]);
       const out: Parameters<typeof lintRestatedInitialsOnRules>[1] = [];
       lintRestatedInitialsOnRules(vp, out);

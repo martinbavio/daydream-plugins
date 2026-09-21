@@ -378,7 +378,8 @@ function convertSvgElement(
 /**
  * An SVG element's attributes: what the kernel's rule accepts stays
  * (`viewBox`, `d`, the coordinates, `transform`, an `id` a `url(#…)`
- * reaches, `class` — decision #75); a PRESENTATION attribute (`fill`,
+ * reaches, a `use`'s `#fragment` `href`, `class` — decision #75); a
+ * PRESENTATION attribute (`fill`,
  * `stroke-width`, …) is a CSS property in disguise and is lifted into
  * styles, below an inline `style` declaration of the same property as it
  * sits in the cascade; a `width` or `height` the integer rule refuses
@@ -390,9 +391,20 @@ function takeSvgAttributes(
   element: DreamElement,
   ctx: Context,
 ): void {
-  for (const { name, value } of Array.from(source.attributes)) {
+  for (const attribute of Array.from(source.attributes)) {
+    const value = attribute.value;
+    // `xlink:href` is the SVG 1.1 spelling of `href`, still what Figma
+    // and older exports write; the browser reads both, `href` first
+    // when an element carries the two.
+    const name =
+      attribute.name === "xlink:href" && !source.hasAttribute("href")
+        ? "href"
+        : attribute.name;
     if (name === "style") continue;
-    if (ctx.core.attrProblem(name, value) === null) {
+    // With the tag: a `use`, `textPath`, gradient, `pattern` or `filter`
+    // takes only a `#fragment` href (decision #75); an external
+    // document's is counted as stripped, like any refused attribute.
+    if (ctx.core.attrProblem(name, value, source.localName) === null) {
       element.attrs = { ...element.attrs, [name]: value };
       continue;
     }

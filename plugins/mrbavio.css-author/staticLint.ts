@@ -468,11 +468,12 @@ export function lintUnitlessLengthsOnRules(
 // and none of those is in this table, so no new tag needs excusing.
 // And again against Chromium's svg.css for the SVG subset (decision
 // #75; html.css is namespaced to XHTML and touches no SVG element): the
-// UA sets `overflow: hidden` on `svg:not(:root)` and `pattern`,
-// `display: block` and `white-space: nowrap` on `text`, `white-space:
-// inherit` on `tspan`, and `transform-origin: 0 0` on every SVG
-// element — of which only `overflow` is in this table, so `svg` and
-// `pattern` join `img` and `hr` in its exception and nothing else does.
+// UA sets `overflow: hidden` on `svg:not(:root)`, `symbol`, `marker`
+// and `pattern`, `display: block` and `white-space: nowrap` on `text`,
+// `white-space: inherit` on `tspan` and `textPath`, and
+// `transform-origin: 0 0` on every SVG element — of which only
+// `overflow` is in this table, so those four join `img` and `hr` in its
+// exception and nothing else does.
 // Widening the vocabulary again means reading the sheet again
 // (staticLint.test.ts pins the audit).
 
@@ -483,11 +484,14 @@ interface InitialValue {
 }
 
 /** The tags Chromium's UA sheets give an `overflow`: html.css's `img`
- * and `hr`, svg.css's `svg:not(:root)` and `pattern` (decision #75). */
+ * and `hr`, svg.css's `svg:not(:root)`, `symbol`, `marker` and
+ * `pattern` (decision #75). */
 const REPLACED_OR_RULED: ReadonlySet<string> = new Set([
   "img",
   "hr",
   "svg",
+  "symbol",
+  "marker",
   "pattern",
 ]);
 

@@ -555,20 +555,29 @@ describe("staticLint: restated initial values (rule 3)", () => {
   // everywhere — is not in the table).
   const SVG_TAGS = [
     ...["svg", "g", "path", "circle", "ellipse", "rect", "line"],
-    ...["polyline", "polygon", "text", "tspan", "title", "desc", "defs"],
-    ...["linearGradient", "radialGradient", "stop", "clipPath", "mask"],
-    ...["pattern"],
+    ...["polyline", "polygon", "text", "tspan", "textPath", "title", "desc"],
+    ...["defs", "symbol", "use", "marker", "linearGradient"],
+    ...["radialGradient", "stop", "clipPath", "mask", "pattern", "filter"],
+    ...["feBlend", "feColorMatrix", "feComponentTransfer", "feComposite"],
+    ...["feConvolveMatrix", "feDisplacementMap", "feDropShadow", "feFlood"],
+    ...["feFuncA", "feFuncB", "feFuncG", "feFuncR", "feGaussianBlur"],
+    ...["feMerge", "feMergeNode", "feMorphology", "feOffset", "feTile"],
+    ...["feTurbulence"],
   ];
+  const OVERFLOWED = ["svg", "symbol", "marker", "pattern"];
   const svgWith = (child: DreamElement) =>
     el({}, { tag: "svg", children: [child] });
 
-  test("svg and pattern are excused overflow: visible; every other subset tag is held to it", () => {
-    expect(staticLint(doc([el({ overflow: "visible" }, { tag: "svg" })]))).toEqual([]);
-    expect(
-      staticLint(doc([svgWith(el({ overflow: "visible" }, { tag: "pattern" }))])),
-    ).toEqual([]);
+  test("svg, symbol, marker and pattern are excused overflow: visible; every other subset tag is held to it", () => {
+    for (const tag of OVERFLOWED) {
+      const element = el({ overflow: "visible" }, { tag });
+      expect(
+        staticLint(doc([tag === "svg" ? element : svgWith(element)])),
+        tag,
+      ).toEqual([]);
+    }
     for (const tag of SVG_TAGS) {
-      if (tag === "svg" || tag === "pattern") continue;
+      if (OVERFLOWED.includes(tag)) continue;
       const findings = staticLint(
         doc([svgWith(el({ overflow: "visible" }, { tag }))]),
       );
