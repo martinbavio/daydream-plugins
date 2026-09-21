@@ -416,7 +416,7 @@ describe("data: images", () => {
     ]);
   });
 
-  test("an svg icon inside a sentence lands: the downgrade is a span the structure gate keeps (decision #57)", async () => {
+  test("an svg icon inside a sentence lands as the svg it is, drawn in the SVG namespace at its own size (decision #75)", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const shell = await mount();
@@ -428,8 +428,16 @@ describe("data: images", () => {
     expect(shell.store.document.items).toHaveLength(1);
     const p = shell.host.querySelector("p")!;
     expect(p.querySelector("div")).toBeNull();
-    const spans = Array.from(p.querySelectorAll("span"));
-    expect(spans.map((span) => getComputedStyle(span).width)).toContain("10px");
+    const svg = p.querySelector("svg")!;
+    expect(svg.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(svg.querySelector("path")?.namespaceURI).toBe(
+      "http://www.w3.org/2000/svg",
+    );
+    expect(getComputedStyle(svg).width).toBe("10px");
+    // html, body, p, its two text runs, the svg and its path.
+    expect(info.mock.calls.map((call) => call[0])).toContain(
+      `[${PLUGIN}] landed 7 elements, nothing lost`,
+    );
     error.mockRestore();
   });
 

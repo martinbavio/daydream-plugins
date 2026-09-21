@@ -13,7 +13,10 @@
 // element, and the page's `<style>` blocks as the viewport's SHEET
 // (decision #71, stylesheet.ts) — flat rules the browser parsed, a
 // `@font-face` lifted into `fonts`. A linked stylesheet is still lost: a
-// fetch is a network call beyond the host.
+// fetch is a network call beyond the host. And, since decision #75, the
+// SVG SUBSET: an svg and what the kernel holds inside it is kept as the
+// drawing it is (convertSvgElement below) — its presentation attributes
+// lifted into styles, what the subset lacks dropped and counted by name.
 
 import type {
   CoreApi,
@@ -31,6 +34,7 @@ import {
 } from "./styleAttribute";
 import { sheetFromStyleText } from "./stylesheet";
 import {
+  displayOf,
   dropRule,
   insideDroppedTag,
   insideParagraph,
@@ -136,9 +140,10 @@ export function convertDocument(
   return { item, report: ctx.report, dataImages: ctx.dataImages };
 }
 
-/** The XHTML namespace: an SVG `<style>` styles the drawing, which goes
- * with its tag. */
-const HTML_NS = "http://www.w3.org/1999/xhtml";
+/** The SVG namespace: what the parser gives every element inside an
+ * `<svg>` (decision #75) — the converter's own SVG path starts here,
+ * whatever the tag. */
+const SVG_NS = "http://www.w3.org/2000/svg";
 
 /**
  * Every `<style>` in head or body (the parser hoists a fragment's leading
@@ -147,7 +152,9 @@ const HTML_NS = "http://www.w3.org/1999/xhtml";
  * (an unterminated block in one never swallows the next, exactly as the
  * page would have it) and the results laid end to end as ONE sheet. The
  * element itself is consumed here, not dropped: tags.ts treats it as
- * packaging on the tree walk. A `<style>` under a dropped element — a
+ * packaging on the tree walk, and an SVG `<style>` — a stylesheet of the
+ * page like any other, now that the drawing it styles is kept (decision
+ * #75) — the same way. A `<style>` under a dropped element — a
  * `<noscript>`'s, which the page never applies while scripts run — goes
  * with that element, counted once under its tag. A `media` attribute is
  * the sheet's own `@media` around everything in it — `<style
@@ -161,7 +168,7 @@ function sheetOf(
   const sheet: StyleRule[] = [];
   const fonts: FontFace[] = [];
   for (const element of Array.from(doc.querySelectorAll("style"))) {
-    if (element.namespaceURI !== HTML_NS || insideDroppedTag(element)) continue;
+    if (insideDroppedTag(element)) continue;
     const media = element.getAttribute("media")?.trim() ?? "";
     const walked = sheetFromStyleText(
       element.textContent ?? "",
@@ -236,6 +243,9 @@ function convertElement(
   preformatted: boolean,
   depth: number,
 ): Converted | null {
+  if (source.namespaceURI === SVG_NS) {
+    return convertSvgElement(source, ctx, depth);
+  }
   const tag = source.localName;
   const drop = dropRule(tag);
   if (drop !== null) {
@@ -254,7 +264,6 @@ function convertElement(
     children: [],
     label: tag,
   };
-  if (tag === "svg") return convertSvg(source, element, ctx, row.inline);
   takeAttributes(source, element, ctx, { kept: row.kind === "keep" });
   if (depth >= MAX_DEPTH) {
     // Past the cap: the words stay, the structure below is counted — except
@@ -281,28 +290,153 @@ function convertElement(
   return { element, inline: row.inline };
 }
 
-/** An svg is an icon: a sized box, inline like the svg it was, its
- * drawing gone with the tag. Its `width` and `height` become styles (a
- * bare number is user units, px on the page); every other attribute
- * belonged to the drawing and is counted. */
-function convertSvg(
+/** The SVG elements whose content is words: `title` and `desc` hold text
+ * alone (the kernel refuses a child there); `text` and `tspan` hold runs,
+ * as a paragraph does, with `tspan` as the run wrapper. Every other
+ * element of the subset holds shapes, and whitespace between shapes is
+ * nothing the page renders. */
+const SVG_TEXT_ONLY: ReadonlySet<string> = new Set(["title", "desc"]);
+const SVG_TEXT_RUNS: ReadonlySet<string> = new Set(["text", "tspan"]);
+
+/** A `<style>` inside an svg is consumed into the sheet (sheetOf), never
+ * dropped: the one SVG tag the walk passes over silently. */
+const SVG_PACKAGING: ReadonlySet<string> = new Set(["style"]);
+
+/**
+ * One element of an svg, as the drawing it is (decision #75) — or null
+ * when it is dropped. The kernel's subset decides what stays
+ * (`core.tagProblem(tag, true)`, judged inside an svg); an element it
+ * lacks — a `use`, an `image`, a `foreignObject`, a `script`, a filter —
+ * goes with its content and is counted BY NAME, since nothing inside an
+ * svg can stand in for it the way a `span` stands in for an unknown
+ * inline tag (the kernel refuses an HTML tag there). The whitespace rule
+ * is the drawing's: between shapes there is nothing to keep; a `text` run
+ * keeps its words with `tspan` as the run wrapper, a `title` its words
+ * alone. Past the depth cap the structure below is counted as it is for
+ * HTML, and only a text-bearing element keeps its words.
+ */
+function convertSvgElement(
+  source: Element,
+  ctx: Context,
+  depth: number,
+): Converted | null {
+  const tag = source.localName;
+  if (SVG_PACKAGING.has(tag)) return null;
+  if (ctx.core.tagProblem(tag, true) !== null) {
+    count(ctx.report.dropped, tag);
+    return null;
+  }
+  const styles = stylesOf(source, ctx);
+  const element: DreamElement = {
+    id: ctx.core.generateId(),
+    tag,
+    styles,
+    children: [],
+    label: tag,
+  };
+  takeSvgAttributes(source, element, ctx);
+  const words = SVG_TEXT_ONLY.has(tag) || SVG_TEXT_RUNS.has(tag);
+  if (depth >= MAX_DEPTH) {
+    if (words) {
+      const text = collapse(proseOf(source)).trim();
+      if (text !== "") element.text = text;
+    }
+    const below = source.querySelectorAll("*").length;
+    if (below > 0) count(ctx.report.dropped, `deeper than ${MAX_DEPTH}`, below);
+  } else if (SVG_TEXT_ONLY.has(tag)) {
+    // Words alone: the kernel holds a title or desc to text (the parser
+    // would read a child there as HTML). A child element is counted by
+    // name, its words kept with the rest.
+    for (const child of Array.from(source.children)) {
+      count(ctx.report.dropped, child.localName);
+    }
+    const text = collapse(source.textContent ?? "").trim();
+    if (text !== "") element.text = text;
+  } else if (SVG_TEXT_RUNS.has(tag)) {
+    const content = convertChildren(source, ctx, {
+      preformatted: preservesWhitespace(styles),
+      blockParent: tag === "text",
+      itemized: false,
+      depth: depth + 1,
+      runTag: "tspan",
+    });
+    if (content.text !== undefined) element.text = content.text;
+    element.children = content.children;
+  } else {
+    for (const child of Array.from(source.children)) {
+      const converted = convertElement(child, ctx, false, depth + 1);
+      if (converted !== null) element.children.push(converted.element);
+    }
+  }
+  // An `svg` in the flow takes the whitespace rule of its own box, inline
+  // by default like an img; inside the drawing the flag only matters to a
+  // text run, where every element flows in the line.
+  const inline = tag === "svg" ? displayOf(tag, styles).inline : true;
+  return { element, inline };
+}
+
+/**
+ * An SVG element's attributes: what the kernel's rule accepts stays
+ * (`viewBox`, `d`, the coordinates, `transform`, an `id` a `url(#…)`
+ * reaches, `class` — decision #75); a PRESENTATION attribute (`fill`,
+ * `stroke-width`, …) is a CSS property in disguise and is lifted into
+ * styles, below an inline `style` declaration of the same property as it
+ * sits in the cascade; a `width` or `height` the integer rule refuses
+ * (`100%`, `12.5`) becomes the CSS geometry property, a bare number in
+ * user units being px; everything else is counted by name.
+ */
+function takeSvgAttributes(
   source: Element,
   element: DreamElement,
   ctx: Context,
-  inline: boolean,
-): Converted {
+): void {
   for (const { name, value } of Array.from(source.attributes)) {
     if (name === "style") continue;
+    if (ctx.core.attrProblem(name, value) === null) {
+      element.attrs = { ...element.attrs, [name]: value };
+      continue;
+    }
+    if (ctx.core.isPresentationAttr(name)) {
+      lift(element, name, presentationValue(name, value), ctx);
+      continue;
+    }
     if (name === "width" || name === "height") {
-      const length = cssLength(value);
-      if (ctx.core.isSafeValue(length)) element.styles[name] = length;
-      else count(ctx.report.stripped, `style (${name})`);
+      lift(element, name, cssLength(value), ctx);
       continue;
     }
     count(ctx.report.stripped, name);
   }
-  element.styles["display"] ??= "inline-block";
-  return { element, inline };
+}
+
+/** One lifted declaration: kept unless the `style` attribute already set
+ * the property (inline wins over a presentation attribute on the page),
+ * counted as a refused style when the value cannot be stored. */
+function lift(
+  element: DreamElement,
+  property: string,
+  value: string,
+  ctx: Context,
+): void {
+  if (!ctx.core.isSafeValue(value)) {
+    count(ctx.report.stripped, `style (${property})`);
+    return;
+  }
+  element.styles[property] ??= value;
+}
+
+/** The properties whose attribute grammar takes a bare number where CSS
+ * wants a length: `font-size="12"` is 12 user units, `12px` in CSS. The
+ * stroke properties and `stroke-dasharray` take numbers in CSS too and
+ * go through as written. */
+const LENGTH_ONLY_PROPERTIES: ReadonlySet<string> = new Set([
+  "font-size",
+  "letter-spacing",
+  "word-spacing",
+  "baseline-shift",
+]);
+
+function presentationValue(name: string, value: string): string {
+  return LENGTH_ONLY_PROPERTIES.has(name) ? cssLength(value) : value.trim();
 }
 
 /** An `img`'s `src`: https stays; data: becomes a File for the caller to
@@ -389,9 +523,13 @@ function convertChildren(
     blockParent: boolean;
     itemized: boolean;
     depth: number;
+    /** The wrapper a text run beside elements becomes: a `span`, or a
+     * `tspan` inside an svg `text` (decision #75). */
+    runTag?: "span" | "tspan";
   },
 ): { text?: string; children: DreamElement[] } {
   const { preformatted, blockParent, itemized } = options;
+  const runTag = options.runTag ?? "span";
   const runs: Run[] = [];
   for (const node of Array.from(source.childNodes)) {
     if (node.nodeType === Node.TEXT_NODE) {
@@ -455,7 +593,7 @@ function convertChildren(
         ? run.element
         : {
             id: ctx.core.generateId(),
-            tag: "span",
+            tag: runTag,
             styles: {},
             text: run.value,
             children: [],

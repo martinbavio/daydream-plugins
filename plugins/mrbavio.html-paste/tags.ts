@@ -1,7 +1,8 @@
 // The downgrade table (decision #56): what becomes of a tag the kernel
 // does not create. The plugin owns this table — the kernel owns only the
 // allowlist, asked through `dd.core.tagProblem` — so widening what the
-// model holds is a kernel change and this file shrinks to match.
+// model holds is a kernel change and this file shrinks to match (the
+// `svg` row left with decision #75: an svg is kept as the drawing it is).
 //
 // ONE question decides both the downgrade target and the whitespace
 // rules: does the element flow inside a line? The answer is the
@@ -181,6 +182,11 @@ export function insideParagraph(source: Element): boolean {
   return false;
 }
 
+/** The row for an HTML-namespace element. An `svg` is kept as itself
+ * (decision #75) and its subtree is the converter's SVG path, never this
+ * table's; an SVG-only tag the parser met OUTSIDE an svg (`<path>` in a
+ * paragraph) is an unknown HTML element there, and `tagProblem` judged
+ * outside an svg says so, so it downgrades like any unknown tag. */
 export function resolveTag(
   tag: string,
   styles: Readonly<Record<string, string>>,
@@ -188,11 +194,10 @@ export function resolveTag(
   options: { insideParagraph: boolean } = { insideParagraph: false },
 ): TagRow {
   const { inline, box } = displayOf(tag, styles);
-  if (core.tagProblem(tag) === null) return { kind: "keep", tag, inline, box };
+  if (core.tagProblem(tag, false) === null) {
+    return { kind: "keep", tag, inline, box };
+  }
   const block = options.insideParagraph ? "span" : "div";
-  // An icon is a sized box, inline like the svg it was: a `div` the
-  // converter gives `display: inline-block` and the svg's own size.
-  if (tag === "svg") return { kind: "downgrade", tag: block, inline, box };
   return { kind: "downgrade", tag: inline ? "span" : block, inline, box };
 }
 

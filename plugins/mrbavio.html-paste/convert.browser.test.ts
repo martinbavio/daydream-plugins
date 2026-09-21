@@ -387,7 +387,8 @@ describe("the downgrade table", () => {
   });
 
   test("a downgraded block inside a paragraph is a span, since the parser left it there and a div would close the p", () => {
-    // An svg icon in a sentence; an option in a select in a sentence.
+    // An option in a select in a sentence; the svg icon beside it is
+    // kept as itself (decision #75), where it sits.
     const conversion = convert(
       '<p>Save <svg width="10" height="10"><path d="M0 0"/></svg> now <select><option>a</option></select></p>',
     );
@@ -396,20 +397,18 @@ describe("the downgrade table", () => {
     expect(all(p).map((el) => el.tag)).not.toContain("div");
     const icon = all(p).find((el) => el.label === "svg")!;
     expect(shape(icon)).toEqual({
-      tag: "span",
-      styles: { width: "10px", height: "10px", display: "inline-block" },
+      tag: "svg",
+      attrs: { width: "10", height: "10" },
+      children: [{ tag: "path", attrs: { d: "M0 0" } }],
     });
     const option = all(p).find((el) => el.label === "option")!;
     expect(option.tag).toBe("span");
     expect(conversion.report.downgraded).toEqual({
-      svg: 1,
       select: 1,
       option: 1,
     });
     // Past a button-scope boundary the p is closed: a div again.
-    const inCell = convert(
-      '<p><button><svg width="10" height="10"></svg></button></p>',
-    );
+    const inCell = convert("<p><button><center></center></button></p>");
     expect(body(inCell).children[0]!.children[0]!.children[0]!.tag).toBe("div");
   });
 
@@ -482,7 +481,7 @@ describe("the downgrade table", () => {
     });
   });
 
-  test("an inline svg becomes an inline-block div sized from its attributes, its drawing gone with the tag; a flex parent's items carry no edge whitespace", () => {
+  test("an inline svg is kept as the drawing it is: its paths, its geometry attributes, its presentation attributes as styles, nothing lost (decision #75); a flex parent's items carry no edge whitespace", () => {
     const conversion = convert(svgIcon);
     expect(shape(body(conversion).children[0]!)).toEqual({
       tag: "button",
@@ -494,18 +493,105 @@ describe("the downgrade table", () => {
       },
       children: [
         {
-          tag: "div",
-          styles: { width: "20px", height: "20px", display: "inline-block" },
+          tag: "svg",
+          attrs: {
+            xmlns: "http://www.w3.org/2000/svg",
+            width: "20",
+            height: "20",
+            viewBox: "0 0 24 24",
+          },
+          styles: { fill: "none", stroke: "currentColor", "stroke-width": "2" },
+          children: [{ tag: "path", attrs: { d: "M5 12l5 5L20 7" } }],
         },
         { tag: "span", text: "Save changes" },
       ],
     });
     expect(body(conversion).children[0]!.children[0]!.label).toBe("svg");
+    expect(conversion.report).toEqual(emptyReport());
+  });
+
+  test("inside an svg: what the subset lacks is dropped by name, a gradient keeps its id and stops, a text run keeps its words with tspan as the wrapper, whitespace between shapes goes", () => {
+    const conversion = convert(
+      [
+        '<svg viewBox="0 0 24 24" width="100%" height="1.5">',
+        "  <title>Logo <b>bold</b></title>",
+        '  <defs><linearGradient id="g" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="red"/></linearGradient></defs>',
+        '  <g transform="translate(1 1)" fill="url(#g)" style="fill: blue">',
+        '    <use href="#x"/><image href="https://x.example/a.png"/><foreignObject><div>x</div></foreignObject>',
+        '    <path d="M0 0" fill-rule="evenodd" xlink:href="#y"/>',
+        "  </g>",
+        '  <text x="1" y="2" font-size="12" letter-spacing="1"> ok <tspan dx="1">!</tspan> </text>',
+        "</svg>",
+      ].join("\n"),
+    );
+    expect(shape(body(conversion))).toEqual({
+      tag: "body",
+      children: [
+        {
+          tag: "svg",
+          attrs: { viewBox: "0 0 24 24" },
+          // A `100%` or a `1.5` is no integer: the CSS geometry property.
+          styles: { width: "100%", height: "1.5px" },
+          children: [
+            { tag: "title", text: "Logo bold" },
+            {
+              tag: "defs",
+              children: [
+                {
+                  tag: "linearGradient",
+                  attrs: { id: "g", gradientUnits: "userSpaceOnUse" },
+                  children: [
+                    {
+                      tag: "stop",
+                      attrs: { offset: "0" },
+                      styles: { "stop-color": "red" },
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              tag: "g",
+              attrs: { transform: "translate(1 1)" },
+              // The inline style wins over the presentation attribute, as
+              // it does in the cascade.
+              styles: { fill: "blue" },
+              children: [
+                {
+                  tag: "path",
+                  attrs: { d: "M0 0" },
+                  styles: { "fill-rule": "evenodd" },
+                },
+              ],
+            },
+            {
+              tag: "text",
+              attrs: { x: "1", y: "2" },
+              // A bare number is user units: px in CSS.
+              styles: { "font-size": "12px", "letter-spacing": "1px" },
+              children: [
+                { tag: "tspan", text: "ok " },
+                { tag: "tspan", attrs: { dx: "1" }, text: "!" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
     expect(conversion.report).toEqual({
       ...emptyReport(),
-      downgraded: { svg: 1 },
-      stripped: { xmlns: 1, viewBox: 1, fill: 1, stroke: 1, "stroke-width": 1 },
+      dropped: { b: 1, use: 1, image: 1, foreignObject: 1 },
+      stripped: { "xlink:href": 1 },
     });
+  });
+
+  test("an svg-only tag the parser met outside an svg is an unknown HTML element there, and downgrades like one", () => {
+    const conversion = convert('<p>a <path d="M0 0">b</path> c</p>');
+    const p = body(conversion).children[0]!;
+    expect(all(p).map((el) => el.tag)).not.toContain("path");
+    expect(all(p).find((el) => el.label === "path")?.tag).toBe("span");
+    expect(conversion.report.downgraded).toEqual({ path: 1 });
+    expect(conversion.report.stripped).toEqual({ d: 1 });
   });
 
   test("a style block lands as the sheet, even when the parser hoists it into the head; class stays; nothing is reported", () => {
@@ -778,24 +864,24 @@ describe("the sheet (decision #71)", () => {
     expect(hoisted.report).toEqual(emptyReport());
   });
 
-  test("an svg's style block styles the drawing and goes with it, under the svg's own downgrade count and nothing more", () => {
+  test("an svg's style block is a stylesheet of the page: it lands in the sheet, and the drawing it styles is kept (decision #75)", () => {
     const conversion = convert(
       '<svg width="10" height="10"><style>rect { fill: red }</style><rect width="10" height="10"/></svg>',
     );
-    expect(conversion.item.payload.sheet).toBeUndefined();
+    expect(conversion.item.payload.sheet).toEqual([
+      { selector: "rect", styles: { fill: "red" } },
+    ]);
     expect(shape(body(conversion))).toEqual({
       tag: "body",
       children: [
         {
-          tag: "div",
-          styles: { width: "10px", height: "10px", display: "inline-block" },
+          tag: "svg",
+          attrs: { width: "10", height: "10" },
+          children: [{ tag: "rect", attrs: { width: "10", height: "10" } }],
         },
       ],
     });
-    expect(conversion.report).toEqual({
-      ...emptyReport(),
-      downgraded: { svg: 1 },
-    });
+    expect(conversion.report).toEqual(emptyReport());
   });
 });
 
@@ -964,7 +1050,12 @@ describe("the pieces that need a parser", () => {
           attrs: { srcset: "https://evil.example/2x.png 2x", alt: "pixel" },
         },
         space,
-        { tag: "div", styles: { width: "10px", display: "inline-block" } },
+        // The svg stays (decision #75); its foreignObject — the door back
+        // into HTML, and the script inside it — goes with its content.
+        {
+          tag: "svg",
+          attrs: { xmlns: "http://www.w3.org/2000/svg", width: "10" },
+        },
         { tag: "p", styles: { color: "red" }, text: "styled" },
       ],
     });
@@ -976,7 +1067,7 @@ describe("the pieces that need a parser", () => {
     // A template's script and an iframe's onload go with their element;
     // the three javascript: hrefs are stripped by name.
     expect(conversion.report).toEqual({
-      downgraded: { svg: 1 },
+      downgraded: {},
       dropped: {
         script: 1,
         "@import": 1,
@@ -985,6 +1076,7 @@ describe("the pieces that need a parser", () => {
         embed: 1,
         template: 1,
         link: 1,
+        foreignObject: 1,
       },
       stripped: {
         href: 3,
@@ -992,7 +1084,6 @@ describe("the pieces that need a parser", () => {
         onerror: 1,
         target: 1,
         "style (background)": 1,
-        xmlns: 1,
       },
       important: 0,
       images: { "javascript:": 1 },

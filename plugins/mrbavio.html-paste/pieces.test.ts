@@ -107,9 +107,15 @@ describe("the display table", () => {
     expect(dropRule("meta")).toBe("silent");
     expect(dropRule("head")).toBe("silent");
     expect(dropRule("div")).toBeNull();
+    // The kernel's answer, judged outside an svg (decision #75): an svg
+    // is kept, a `path` there is an unknown HTML element.
     const core = {
-      tagProblem: (tag: string) =>
-        ["div", "span", "p"].includes(tag) ? null : "no",
+      tagProblem: (tag: string, insideSvg?: boolean) =>
+        ["div", "span", "p"].includes(tag) ||
+        (tag === "svg" && insideSvg !== true) ||
+        (tag === "path" && insideSvg === true)
+          ? null
+          : "no",
     } as Parameters<typeof resolveTag>[2];
     expect(resolveTag("p", {}, core)).toEqual({
       kind: "keep",
@@ -129,9 +135,17 @@ describe("the display table", () => {
       inline: false,
       box: false,
     });
+    // An svg is kept (decision #75); an SVG-only tag outside one is an
+    // unknown HTML element and downgrades as one.
     expect(resolveTag("svg", {}, core)).toEqual({
+      kind: "keep",
+      tag: "svg",
+      inline: true,
+      box: false,
+    });
+    expect(resolveTag("path", {}, core)).toEqual({
       kind: "downgrade",
-      tag: "div",
+      tag: "span",
       inline: true,
       box: false,
     });
