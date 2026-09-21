@@ -138,6 +138,38 @@ describe("matchLint", () => {
     expect(await matchLint(doc)).toEqual([]);
   });
 
+  test("a rule into an svg (`.icon path`, decision #75) matching a path inside it is not dead; one naming a shape the icon lacks is", async () => {
+    const icon = () =>
+      createElement({
+        tag: "svg",
+        label: "Icon",
+        attrs: { viewBox: "0 0 24 24", class: "icon" },
+        children: [
+          createElement({ tag: "path", attrs: { d: "M5 12l5 5L20 7" } }),
+        ],
+      });
+    const page = () =>
+      createElement({
+        tag: "html",
+        children: [
+          createElement({ tag: "body", label: "body", children: [icon()] }),
+        ],
+      });
+    expect(
+      await matchLint(
+        build(
+          [{ selector: ".icon path", styles: { fill: "currentColor" } }],
+          page(),
+        ),
+      ),
+    ).toEqual([]);
+    const dead = await matchLint(
+      build([{ selector: ".icon circle", styles: { fill: "red" } }], page()),
+    );
+    expect(dead).toHaveLength(1);
+    expect(dead[0]!.message).toMatch(/\.icon circle/);
+  });
+
   test("a state-pseudo rule matching its base selector, state stripped, is not dead", async () => {
     const doc = build(
       [{ selector: ".a:hover", styles: { color: "red" } }],

@@ -96,6 +96,22 @@ describe("lintRestatedInitialsOnRules", () => {
     }
   });
 
+  test("overflow: visible on a rule typed to svg or pattern is excused too: Chromium's svg.css gives both an overflow (decision #75)", () => {
+    for (const selector of ["svg.icon", "pattern", ".tile > svg", "SVG"]) {
+      const vp = viewport([{ selector, styles: { overflow: "visible" } }]);
+      const out: Parameters<typeof lintRestatedInitialsOnRules>[1] = [];
+      lintRestatedInitialsOnRules(vp, out);
+      expect(out, selector).toEqual([]);
+    }
+    // A rule typed to another subset tag is held to the table.
+    for (const selector of ["path", "g.layer", "svg > rect"]) {
+      const vp = viewport([{ selector, styles: { overflow: "visible" } }]);
+      const out: Parameters<typeof lintRestatedInitialsOnRules>[1] = [];
+      lintRestatedInitialsOnRules(vp, out);
+      expect(out.map((f) => f.property), selector).toEqual(["overflow"]);
+    }
+  });
+
   test("overflow: visible on a rule typed to a different tag is a finding: it can never reach img or hr", () => {
     const vp = viewport([{ selector: "div.card", styles: { overflow: "visible" } }]);
     const out: Parameters<typeof lintRestatedInitialsOnRules>[1] = [];

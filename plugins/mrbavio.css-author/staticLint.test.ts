@@ -547,6 +547,51 @@ describe("staticLint: restated initial values (rule 3)", () => {
     ).toHaveLength(1);
   });
 
+  // The SVG subset (decision #75), read against Chromium's svg.css: the
+  // UA gives `svg:not(:root)` and `pattern` an overflow, so restating
+  // `overflow: visible` there is a reset; the rest of the table it
+  // leaves alone on every subset tag (what it does set — display and
+  // white-space on `text`, white-space on `tspan`, transform-origin
+  // everywhere — is not in the table).
+  const SVG_TAGS = [
+    ...["svg", "g", "path", "circle", "ellipse", "rect", "line"],
+    ...["polyline", "polygon", "text", "tspan", "title", "desc", "defs"],
+    ...["linearGradient", "radialGradient", "stop", "clipPath", "mask"],
+    ...["pattern"],
+  ];
+  const svgWith = (child: DreamElement) =>
+    el({}, { tag: "svg", children: [child] });
+
+  test("svg and pattern are excused overflow: visible; every other subset tag is held to it", () => {
+    expect(staticLint(doc([el({ overflow: "visible" }, { tag: "svg" })]))).toEqual([]);
+    expect(
+      staticLint(doc([svgWith(el({ overflow: "visible" }, { tag: "pattern" }))])),
+    ).toEqual([]);
+    for (const tag of SVG_TAGS) {
+      if (tag === "svg" || tag === "pattern") continue;
+      const findings = staticLint(
+        doc([svgWith(el({ overflow: "visible" }, { tag }))]),
+      );
+      expect(findings.map((f) => f.property), tag).toEqual(["overflow"]);
+    }
+  });
+
+  test("the UA sheet leaves every other table property alone on every subset tag: restating one there is still redundant", () => {
+    for (const tag of SVG_TAGS) {
+      for (const [property, value] of TABLE) {
+        if (property === "overflow") continue;
+        const element = el({ [property]: value }, { tag });
+        const findings = staticLint(
+          doc([tag === "svg" ? element : svgWith(element)]),
+        );
+        expect(
+          findings.map((f) => f.property),
+          `${tag} ${property}`,
+        ).toEqual([property]);
+      }
+    }
+  });
+
   // The vocabulary widened (decision #57) and the UA sheet was re-read
   // for every new tag: none of the table's properties is set on any of
   // them, so every new tag is held to the whole table — no new exception.

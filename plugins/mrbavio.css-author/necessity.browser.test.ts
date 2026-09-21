@@ -783,3 +783,97 @@ describe("necessity on rules (decision #71, plan phase 9)", () => {
     expect(findings.map((f) => f.property)).toEqual(["--unused"]);
   });
 });
+
+// The SVG subset (decision #75): remove → read → restore on SVG elements,
+// whose boxes and computed styles behave differently from block boxes.
+// The observation is the border box plus the full computed-style
+// enumeration, and the paint properties are enumerated on every element,
+// so a paint declaration reads live when its computed value changes and
+// dead only when it restates what was inherited or initial.
+describe("the SVG subset (decision #75)", () => {
+  function icon(styles: {
+    svg?: Record<string, string>;
+    path?: Record<string, string>;
+    stop?: Record<string, string>;
+    rect?: Record<string, string>;
+  }): DreamElement {
+    return build({
+      id: "icon",
+      label: "Icon",
+      tag: "svg",
+      attrs: { viewBox: "0 0 24 24", width: "48", height: "48" },
+      styles: styles.svg ?? {},
+      children: [
+        build({
+          tag: "defs",
+          children: [
+            build({
+              id: "gradient",
+              tag: "linearGradient",
+              attrs: { id: "g" },
+              children: [
+                build({
+                  id: "stop",
+                  label: "Stop",
+                  tag: "stop",
+                  attrs: { offset: "0" },
+                  styles: styles.stop ?? {},
+                }),
+              ],
+            }),
+          ],
+        }),
+        build({
+          id: "rect",
+          label: "Rect",
+          tag: "rect",
+          attrs: { x: "2", y: "2", width: "20", height: "20" },
+          styles: styles.rect ?? {},
+        }),
+        build({
+          id: "path",
+          label: "Path",
+          tag: "path",
+          attrs: { d: "M5 12l5 5L20 7" },
+          styles: styles.path ?? {},
+        }),
+      ],
+    });
+  }
+
+  test("a paint declaration that changes the drawing is live: fill and stroke on a path, stop-color in defs, currentColor from the parent", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        [
+          icon({
+            svg: { stroke: "currentColor", "stroke-width": "2" },
+            path: { fill: "rgb(255, 0, 0)" },
+            stop: { "stop-color": "rgb(0, 0, 255)" },
+            rect: { fill: "url(#g)" },
+          }),
+        ],
+        { margin: "0", color: "rgb(200, 0, 0)" },
+      ),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  test("a paint declaration that restates the initial or the inherited value is dead, honestly: fill: black on a path, stroke: none on an svg", async () => {
+    const findings = await necessityLint(
+      makeDocument(FRAME, [
+        icon({ svg: { stroke: "none" }, path: { fill: "black" } }),
+      ]),
+    );
+    expect(properties(findings).sort()).toEqual(["fill", "stroke"]);
+  });
+
+  test("a geometry declaration on the svg box is live, like an img's", async () => {
+    const findings = await necessityLint(
+      makeDocument(FRAME, [
+        icon({ svg: { width: "64px", display: "block", margin: "8px" } }),
+      ]),
+    );
+    expect(findings).toEqual([]);
+  });
+});

@@ -466,6 +466,13 @@ export function lintUnitlessLengthsOnRules(
 // font-style, font-family, font-size, font-weight, text-decoration,
 // unicode-bidi, colour and line-height (the phrasing set, sub/sup, rt) —
 // and none of those is in this table, so no new tag needs excusing.
+// And again against Chromium's svg.css for the SVG subset (decision
+// #75; html.css is namespaced to XHTML and touches no SVG element): the
+// UA sets `overflow: hidden` on `svg:not(:root)` and `pattern`,
+// `display: block` and `white-space: nowrap` on `text`, `white-space:
+// inherit` on `tspan`, and `transform-origin: 0 0` on every SVG
+// element — of which only `overflow` is in this table, so `svg` and
+// `pattern` join `img` and `hr` in its exception and nothing else does.
 // Widening the vocabulary again means reading the sheet again
 // (staticLint.test.ts pins the audit).
 
@@ -475,7 +482,14 @@ interface InitialValue {
   except?: ReadonlySet<string>;
 }
 
-const REPLACED_OR_RULED: ReadonlySet<string> = new Set(["img", "hr"]);
+/** The tags Chromium's UA sheets give an `overflow`: html.css's `img`
+ * and `hr`, svg.css's `svg:not(:root)` and `pattern` (decision #75). */
+const REPLACED_OR_RULED: ReadonlySet<string> = new Set([
+  "img",
+  "hr",
+  "svg",
+  "pattern",
+]);
 
 const INITIAL_VALUES: ReadonlyMap<string, InitialValue> = new Map([
   ["position", { value: "static" }],
@@ -519,13 +533,14 @@ function lintRestatedInitials(el: DreamElement, findings: Finding[]): void {
 }
 
 /** Rule 3, extended to a viewport's `sheet` (decision #71, plan phase
- * 9): a rule has no concrete tag, so the `img`/`hr` overflow exception is
+ * 9): a rule has no concrete tag, so the overflow exception (`img`, `hr`,
+ * `svg`, `pattern`) is
  * APPROXIMATED from the selector alone — excused when its rightmost
  * compound (in any list member) could reach one of them: no type selector
  * at all (a bare `.card`, `#x`, `[attr]` or pseudo-class matches any tag),
- * an explicit universal `*`, or the literal `img`/`hr` type. A rule typed
- * to a different tag (`div`, `p`, …) can never match either replaced
- * element, so it is held to the table like an element is. */
+ * an explicit universal `*`, or the literal type. A rule typed
+ * to a different tag (`div`, `p`, …) can never match any of them, so it
+ * is held to the table like an element is. */
 export function lintRestatedInitialsOnRules(
   vp: DreamViewport,
   findings: Finding[],
@@ -553,8 +568,8 @@ export function lintRestatedInitialsOnRules(
 }
 
 /** Whether some member of the selector list could, by its rightmost
- * compound alone, match an `img` or `hr` — the same excuse
- * `lintRestatedInitials` gives those two tags, approximated from the
+ * compound alone, match a tag the UA gives an `overflow` — the same
+ * excuse `lintRestatedInitials` gives those tags, approximated from the
  * selector text since a rule carries no element to ask. */
 function selectorCanReachReplacedOrRuled(selector: string): boolean {
   return splitSelectorList(selector).some((member) => {
