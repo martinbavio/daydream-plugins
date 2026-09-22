@@ -283,6 +283,20 @@ describe("dead and live declarations", () => {
     );
     expect(findings.map((f) => [f.rule, f.property])).toEqual([[0, "position"]]);
   });
+
+  test("an element is named by its selector in the stored markup, which still holds an element the safety walk removed", async () => {
+    // The mount drops the `<script>`, so `#box` is unique there; in the
+    // markup an agent reads and addresses, it is not.
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<script id="box"></script><div id="box" style="position: static; height: 40px"></div>',
+      ),
+    );
+    expect(findings.map((f) => [f.elementId, f.message])).toEqual([
+      ["div", `position: static on \`div\` changes nothing at ${sweptAt(400)}`],
+    ]);
+  });
 });
 
 /** A container-typed holder (full width, or the given one) around a

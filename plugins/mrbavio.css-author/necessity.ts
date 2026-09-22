@@ -108,9 +108,13 @@ import {
   type CssDeclaration,
   type PageRule,
 } from "./pageCss";
-import { lintElements, mountedStyle, parsePage } from "./pageDom";
+import {
+  lintElements,
+  mountedStyle,
+  parsePage,
+  storedNames,
+} from "./pageDom";
 import { hasStatePseudo } from "./statePseudo";
-import { uniqueSelector } from "./uniqueSelector";
 
 /** What the lint needs from the API object: the pure helpers and the
  * live mount. A gate hands in its `dd`; a test hands in a test kernel's. */
@@ -225,11 +229,14 @@ async function lintViewport(
 ): Promise<Candidate[]> {
   // The page as stored (its markup's `<style>` blocks folded in, as the
   // mount folds them), for naming: the mounted copy's css has the asset
-  // route in its urls, and a finding should quote what the author wrote.
-  const { css } = parsePage(page.payload);
+  // route in its urls, and a finding should quote what the author wrote;
+  // an element is named by its selector in the stored markup.
+  const stored = parsePage(page.payload);
+  const { css } = stored;
   const authored = pageRules(css);
   const { own, naming, candidates } = await withMount(dd, page, undefined, async (m) => {
     const prepared = await prepare(m);
+    const nameOf = storedNames(stored.doc, prepared.doc);
     const width = prepared.doc.defaultView?.innerWidth ?? page.frame?.width ?? 0;
     // The two scans line up rule for rule unless the mounted copy is not
     // this text (it always is, cleaned as a landing cleans it); if they
@@ -245,7 +252,7 @@ async function lintViewport(
     return {
       own: width,
       naming,
-      candidates: judgeAll(page, prepared, naming, width),
+      candidates: judgeAll(page, prepared, naming, width, nameOf),
     };
   });
   let pending = candidates.filter((c) => c.dead);
@@ -359,10 +366,11 @@ function judgeAll(
   prepared: Prepared,
   authored: readonly PageRule[],
   own: number,
+  nameOf: (node: Element) => string,
 ): Candidate[] {
   const probe = baseline(prepared);
   const { rules, nodes } = prepared;
-  const names = nodes.map((node) => uniqueSelector(node, prepared.doc));
+  const nameAt = (node: number): string => nameOf(nodes[node]!);
   // Which elements each rule reaches through a member that styles the
   // element itself (never only its pseudo-element), read once.
   const reached = rules.map((rule) => {
@@ -387,7 +395,7 @@ function judgeAll(
       dead: isDead(prepared, probe, removal),
       finding: { tier: "necessity", severity: "blocking", message: "" },
     };
-    candidate.finding = findingFor(page, candidate, [own], authored, names);
+    candidate.finding = findingFor(page, candidate, [own], authored, nameAt);
     candidates.push(candidate);
   };
 
@@ -411,7 +419,7 @@ function judgeAll(
         }
       });
       record(
-        `${names[node]}\u0000${declaration.property}`,
+        `${nameAt(node)}\u0000${declaration.property}`,
         true,
         declaration,
         removal,
@@ -611,11 +619,11 @@ function findingFor(
   c: Candidate,
   widths: number[],
   authored: readonly PageRule[],
-  names?: readonly string[],
+  nameAt?: (node: number) => string,
 ): Finding {
   const first = c.removal[0] as At;
   if ("node" in first) {
-    const selector = names?.[first.node] ?? c.finding.elementId ?? "";
+    const selector = nameAt?.(first.node) ?? c.finding.elementId ?? "";
     return {
       tier: "necessity",
       severity: "blocking",

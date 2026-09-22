@@ -7,7 +7,9 @@
 // `id` when no other element carries it, else the shortest `>`-joined
 // path of tag-and-class steps, `:nth-of-type` only where a same-looking
 // sibling needs it, each candidate checked with `querySelectorAll`
-// against the same root rather than reasoned about.
+// against the same root rather than reasoned about. The root the lints
+// hand it is the page's STORED markup parsed in standards mode, as the
+// kernel's is (pageDom.ts parsePage, storedNames).
 
 interface Step {
   base: string;

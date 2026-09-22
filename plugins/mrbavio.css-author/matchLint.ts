@@ -21,7 +21,8 @@
 // same list and the same `rule` indices the static and necessity lints
 // use), a nested rule's selector resolved against its parents the way the
 // browser desugars nesting. An element's own declarations are its `style`
-// attribute, and it is named by its unique selector (uniqueSelector.ts).
+// attribute, and it is named by its unique selector in the page's stored
+// markup (pageDom.ts storedNames), not in the mounted copy.
 //
 // REDUNDANCY: an element's own declaration a matched, unconditional rule
 // already sets with the identical value — the element's line does nothing
@@ -84,10 +85,14 @@ import {
   type CssDeclaration,
   type PageRule,
 } from "./pageCss";
-import { lintElements, mountedStyle, parsePage } from "./pageDom";
+import {
+  lintElements,
+  mountedStyle,
+  parsePage,
+  storedNames,
+} from "./pageDom";
 import { ruleRestatements, type RedundancyRule } from "./ruleRedundancy";
 import { hasStatePseudo, stripStatePseudo } from "./statePseudo";
-import { uniqueSelector } from "./uniqueSelector";
 
 /** What the match-dependent findings need: the pure helpers and core's
  * live mount. A gate hands in its `dd`; a test hands in a test kernel's —
@@ -119,13 +124,13 @@ export async function matchLint(
   for (const page of dd.core.viewportItems(doc) as DreamPage[]) {
     // Every question here is about a rule, so a page without one has
     // nothing to ask and pays for no mount.
-    const authored = pageRules(parsePage(page.payload).css);
+    const stored = parsePage(page.payload);
+    const authored = pageRules(stored.css);
     if (authored.length === 0) continue;
     const mounted = await dd.mountViewport(page);
     try {
       const mdoc = mounted.document();
       const nodes = lintElements(mdoc);
-      const names = new Map<Element, string>();
       // The copy's own css, so a rule's values and an element's `style`
       // are compared as the copy holds both (pageDom.ts mountedStyle);
       // its rules are the stored text's, index for index.
@@ -140,14 +145,7 @@ export async function matchLint(
             scanDeclarations(node.getAttribute("style") ?? ""),
           ]),
         ),
-        nameOf: (node) => {
-          let name = names.get(node);
-          if (name === undefined) {
-            name = uniqueSelector(node, mdoc);
-            names.set(node, name);
-          }
-          return name;
-        },
+        nameOf: storedNames(stored.doc, mdoc),
       };
       const ranked = rankedMatches(dd.core, read);
       lintRedundancy(read, ranked, findings);

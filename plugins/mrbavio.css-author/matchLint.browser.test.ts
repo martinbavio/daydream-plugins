@@ -144,6 +144,18 @@ describe("matchLint", () => {
     ]);
   });
 
+  test("the element is named by its selector in the stored markup, which still holds an element the safety walk removed", async () => {
+    // The mount drops the `<script>`, so `#card` is unique there; in the
+    // markup an agent reads and addresses, it is not.
+    const findings = await matchLint(
+      page(
+        ".card { color: red; }",
+        '<script id="card"></script><div id="card" class="card" style="color: red"></div>',
+      ),
+    );
+    expect(findings.map((f) => f.elementId)).toEqual(["div.card"]);
+  });
+
   test("a differing value is an override, never redundancy", async () => {
     expect(
       await matchLint(
