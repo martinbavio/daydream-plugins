@@ -12,7 +12,7 @@ workspace, one build, one folder per plugin.
 | `mrbavio.text`        | plain canvas text as an item kind: type, edit, resize, paste a paragraph. Needs Daydream 0.1.21 or later (decision #71, the `styles` field) |
 | `mrbavio.grid`        | a DevTools-style grid overlay for the selected grid container. Needs Daydream 0.1.21 or later (decision #71, the `styles` field) |
 | `mrbavio.notes`       | a notes pane in the dock, saved with the document. Needs Daydream 0.1.21 or later (decision #71, the `styles` field) |
-| `mrbavio.html-editor` | the selected element's subtree as HTML source, structure only. Needs Daydream 0.1.21 or later (decision #71, the `styles` field) |
+| `mrbavio.html-editor` | the selected page's HTML as its own text, edited and saved as written, the selected element marked in it. Needs Daydream 0.1.38 or later (decision #76, the page payload) |
 | `mrbavio.html-paste`  | pasting HTML on the canvas lands it as a viewport                        |
 | `mrbavio.css-author`  | the opinion about CSS: two lints as gates, the layout procedures, a technique corpus the knowledge tools serve, and a `procedures` resource — the `dream-author` workflow itself is Daydream's own |
 | `mrbavio.impeccable`  | [Impeccable](https://impeccable.style)'s design verbs on the canvas — its playbooks over a viewport, read from the skill installed on the machine (`npx impeccable install`), never vendored. Select something, ⌘P, type a verb and, after it, a brief in your own words (bolder, quieter, typeset, layout, colorize, delight fan out three draft variants; distill, polish, clarify, animate, adapt rework in place; critique and audit answer a scored review over the rendered page with Impeccable's detector, landing nothing); an agent in a design session ("start a design session in Daydream" — not the `/impeccable` skill's live mode) wakes on the pick through the plugin's storage file; `adopt` in a variant's title bar folds it into its source as one undo step. Also `impeccable_verb` from a sentence, and a prompt per verb. Needs Daydream 0.1.21 or later (decision #67 and #71, the `styles` field) |
@@ -75,10 +75,9 @@ plugin on from the plugins page (⌥⌘P).
 (`*.browser.test.tsx`) mount Daydream's real shell through its test
 harness, which lives in the Daydream checkout and reaches into its source;
 they are kept beside the code as the specification and run from a Daydream
-checkout, not from here. The HTML editor's `edit`, `parse`, `reconcile` and
-`serialize` tests build a kernel through the same harness and are excluded
-for the same reason, as are the CSS author's `staticLint` and corpus
-tests. The CSS author's knowledge index (`knowledge/INDEX.md`) is
+checkout, not from here. The CSS author's `staticLint` and corpus tests
+build a kernel through the same harness and are excluded for the same
+reason. The CSS author's knowledge index (`knowledge/INDEX.md`) is
 regenerated with Daydream's `pnpm knowledge:index <folder>` from a
 Daydream checkout; the host renders the index live, so a stale file only
 misleads a reader.
