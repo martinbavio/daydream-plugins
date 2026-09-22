@@ -17,7 +17,7 @@ import {
   vi,
   onTestFinished,
 } from "vitest";
-import { DEV, flush } from "solid-js";
+import { flush } from "solid-js";
 
 import activate from "./index";
 import manifest from "./manifest.json";
@@ -25,13 +25,21 @@ import { measureNaturalTextItem } from "./measurement";
 
 let appStore: AppStore;
 beforeEach(() => {
+  // Solid's dev build reports an untracked reactive read as a console
+  // warning naming STRICT_READ_UNTRACKED (rc.9 took `DEV.diagnostics`
+  // away); the kernel's own readiness test listens the same way.
   const stacks: string[] = [];
-  const stop = DEV?.diagnostics.subscribe((event) => {
-    if (event.code === "STRICT_READ_UNTRACKED" && stacks.length === 0)
+  const warn = console.warn;
+  const spy = vi.spyOn(console, "warn").mockImplementation((...args) => {
+    if (
+      String(args[0]).includes("STRICT_READ_UNTRACKED") &&
+      stacks.length === 0
+    )
       stacks.push(new Error("diagnostic origin").stack ?? "no stack");
+    else warn(...args);
   });
   onTestFinished(() => {
-    stop?.();
+    spy.mockRestore();
     expect(stacks).toEqual([]);
   });
   const kernel = createTestKernel({ document: createEmptyDocument() });
