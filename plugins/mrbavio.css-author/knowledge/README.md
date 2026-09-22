@@ -10,12 +10,14 @@ Markdown files with YAML frontmatter, in three of the four tiers:
 - `procedure` — `procedures.md`, the short decision procedures the
   `procedures` MCP resource carries verbatim and the knowledge tools
   serve. Hard budget ~1,200 tokens.
-- `example` — `examples/`, intent → minimal document, each verified against
-  the format gate and the static lint by a test.
+- `example` — `examples/`, intent → minimal document: one page, its
+  markup and its css shown for reading and carried in the document's json
+  block, verified against the format gate and both of this plugin's gates
+  by a test.
 - `reference` — `reference/`, longer synthesis read on demand through
   `knowledge_search` / `knowledge_read`.
 
-The fourth tier, `format` — the .dream v6 rules — is CORE's
+The fourth tier, `format` — the .dream v7 rules — is CORE's
 (`knowledge/format.md` at the repo root): the MCP server's own instructions
 carry it, and the bundle returns it as `format.md`. Nothing here restates
 it (tools/knowledge/singleSource.test.ts).

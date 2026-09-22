@@ -77,8 +77,9 @@ harness, which lives in the Daydream checkout and reaches into its source;
 they are kept beside the code as the specification and run from a Daydream
 checkout, not from here. The HTML editor's `edit`, `parse`, `reconcile` and
 `serialize` tests build a kernel through the same harness and are excluded
-for the same reason, as are the CSS author's `staticLint` and corpus
-tests. The CSS author's knowledge index (`knowledge/INDEX.md`) is
+for the same reason. The CSS author's lints read a page through the
+browser, so their tests — the static lint's and the corpus's gate check
+among them — are browser tests too. The CSS author's knowledge index (`knowledge/INDEX.md`) is
 regenerated with Daydream's `pnpm knowledge:index <folder>` from a
 Daydream checkout; the host renders the index live, so a stale file only
 misleads a reader.
