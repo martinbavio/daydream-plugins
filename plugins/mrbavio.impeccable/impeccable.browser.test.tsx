@@ -474,7 +474,7 @@ describe("mrbavio.impeccable in the shell", () => {
     // this host's route, and the export makes that absolute.
     source.payload.html = source.payload.html.replace(
       '<div class="footer"></div>',
-      '<div class="footer"><img src="assets/logo.png" alt=""></div>',
+      '<div class="footer"><img src="assets/logo.png" srcset="assets/logo.png 1x, https://cdn.test/w_200,h_100/logo.png 2x" alt=""></div>',
     );
     source.payload.css += ".aside { background-image: url(assets/bg.png); }\n";
     const { host } = fakeHost();
@@ -488,6 +488,9 @@ describe("mrbavio.impeccable in the shell", () => {
     const origin = window.location.origin;
     expect(reply.html).toMatch(new RegExp(`src="${origin}/[^"]*logo\\.png"`));
     expect(reply.html).toMatch(new RegExp(`url\\(["']?${origin}/[^)]*bg\\.png`));
+    // Each srcset candidate; a url holding a comma is one url, kept whole.
+    const srcset = new DOMParser().parseFromString(reply.html, "text/html").querySelector("img")!.getAttribute("srcset")!;
+    expect(srcset).toMatch(new RegExp(`^${origin}/\\S*logo\\.png 1x, https://cdn\\.test/w_200,h_100/logo\\.png 2x$`));
     expect(reply.html).not.toMatch(/(src|href)="\/(?!\/)/);
     // The mount is gone once read: no live iframe left behind.
     await settle();
