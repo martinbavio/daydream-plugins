@@ -75,10 +75,9 @@ plugin on from the plugins page (⌥⌘P).
 (`*.browser.test.tsx`) mount Daydream's real shell through its test
 harness, which lives in the Daydream checkout and reaches into its source;
 they are kept beside the code as the specification and run from a Daydream
-checkout, not from here. The HTML editor's `edit`, `parse`, `reconcile` and
-`serialize` tests build a kernel through the same harness and are excluded
-for the same reason, as are the CSS author's `staticLint` and corpus
-tests. The CSS author's knowledge index (`knowledge/INDEX.md`) is
+checkout, not from here. The CSS author's `staticLint` and corpus tests
+build a kernel through the same harness and are excluded for the same
+reason. The CSS author's knowledge index (`knowledge/INDEX.md`) is
 regenerated with Daydream's `pnpm knowledge:index <folder>` from a
 Daydream checkout; the host renders the index live, so a stale file only
 misleads a reader.

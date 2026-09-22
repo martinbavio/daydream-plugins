@@ -12,7 +12,6 @@ export default defineConfig({
       "**/dist/**",
       "**/*.browser.test.*",
       // These build a test kernel through Daydream's harness too.
-      "plugins/mrbavio.html-editor/{edit,parse,reconcile,serialize}.test.ts",
       "plugins/mrbavio.css-author/staticLint.test.ts",
       "plugins/mrbavio.css-author/bridge/corpus.test.ts",
     ],

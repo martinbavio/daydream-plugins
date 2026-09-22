@@ -1,8 +1,9 @@
 /**
  * The HTML pane's CodeMirror 6 editor: HTML syntax colours and tag
- * completion from @codemirror/lang-html, bracket pairing, line wrapping.
- * Framework-free and imperative: HtmlPanel mounts it in a ref and owns
- * every policy decision (when to parse, when to write, what to select).
+ * completion from @codemirror/lang-html, bracket pairing, line wrapping,
+ * and the selected element's span marked in the text. Framework-free and
+ * imperative: HtmlPanel mounts it in a ref and owns every policy decision
+ * (when to save, what to mark).
  *
  * Two boundaries, the same two the CSS editor keeps:
  * - Store→editor writes go through setText, a minimal span change tagged
@@ -33,12 +34,14 @@ import {
   HighlightStyle,
   syntaxHighlighting,
 } from "@codemirror/language";
-import { Annotation } from "@codemirror/state";
+import { Annotation, StateEffect, StateField } from "@codemirror/state";
 import {
+  Decoration,
   drawSelection,
   EditorView,
   highlightActiveLine,
   keymap,
+  type DecorationSet,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 
@@ -58,6 +61,14 @@ export interface HtmlEditorHandle {
   /** Sync the document to `text` via a minimal span change (no-op when
    * equal). The selection maps through; onDocChanged stays silent. */
   setText: (text: string) => void;
+  /** Mark `range` of the text as the selected element's (null: none).
+   * `reveal` scrolls it into view and puts the caret at its start — for a
+   * selection made on the canvas, never under a caret being typed at. The
+   * mark maps through edits until the next call. */
+  setMark: (
+    range: { from: number; to: number } | null,
+    reveal: boolean,
+  ) => void;
   /** Whether the completion popup is showing — CodeMirror's own Escape
    * closes it, so the panel's blur-on-Escape command steps aside then. */
   completionOpen: () => boolean;
@@ -68,6 +79,26 @@ export interface HtmlEditorHandle {
 
 /** Tags transactions produced by setText — store syncs, not user edits. */
 const storeSync = Annotation.define<boolean>();
+
+/** The selected element's span: set by setMark, mapped through edits. */
+const setMarkEffect = StateEffect.define<{ from: number; to: number } | null>();
+const selectedMark = Decoration.mark({ class: "cm-dd-selected-element" });
+const markField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(marks, tr) {
+    let next = marks.map(tr.changes);
+    for (const effect of tr.effects) {
+      if (!effect.is(setMarkEffect)) continue;
+      const range = effect.value;
+      next =
+        range === null || range.from >= range.to
+          ? Decoration.none
+          : Decoration.set([selectedMark.range(range.from, range.to)]);
+    }
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
 
 /** defaultKeymap bindings the pane's model cannot honour: Escape is the
  * router's blur. */
@@ -123,6 +154,7 @@ const theme = EditorView.theme(
     ".cm-selectionBackground": { backgroundColor: "var(--panel-chrome)" },
     "&.cm-focused .cm-selectionBackground": { backgroundColor: "#2d3a49" },
     ".cm-activeLine": { backgroundColor: "#ffffff08" },
+    ".cm-dd-selected-element": { backgroundColor: "#8fb4dc1a" },
     "&.cm-focused .cm-matchingBracket, &.cm-focused .cm-nonmatchingBracket": {
       backgroundColor: "var(--panel-chrome)",
       outline: "none",
@@ -171,6 +203,7 @@ export function createHtmlEditor(options: HtmlEditorOptions): HtmlEditorHandle {
       drawSelection(),
       highlightActiveLine(),
       EditorView.lineWrapping,
+      markField,
       theme,
       EditorView.contentAttributes.of({
         "aria-label": "HTML source",
@@ -214,6 +247,27 @@ export function createHtmlEditor(options: HtmlEditorOptions): HtmlEditorHandle {
       const change = diffSpan(view.state.doc.toString(), text);
       if (change === null) return;
       view.dispatch({ changes: change, annotations: storeSync.of(true) });
+    },
+    setMark: (range, reveal) => {
+      if (destroyed) return;
+      const length = view.state.doc.length;
+      const mark =
+        range === null
+          ? null
+          : {
+              from: Math.min(range.from, length),
+              to: Math.min(range.to, length),
+            };
+      const revealed = reveal && mark !== null;
+      view.dispatch({
+        effects: revealed
+          ? [
+              setMarkEffect.of(mark),
+              EditorView.scrollIntoView(mark.from, { y: "center" }),
+            ]
+          : setMarkEffect.of(mark),
+        ...(revealed ? { selection: { anchor: mark.from } } : {}),
+      });
     },
     completionOpen: () =>
       !destroyed && completionStatus(view.state) === "active",
