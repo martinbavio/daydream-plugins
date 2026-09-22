@@ -6,10 +6,10 @@
 // `text/html` parses to at least one element and is more than a single
 // paragraph of prose (prose.ts) — a paragraph is text however a browser
 // wrapped it, and is left for Text. Lands ONE page (page.ts, decision
-// #76) as one undo step, the way the Text plugin does — `dd.mutateItems`
-// then `dd.select` — and reports what the page lost in one console line.
-// No gates: a paste is the user's own hand on the canvas, not an agent's
-// landing.
+// #76), cleaned by the kernel as every landing is, as one undo step, the
+// way the Text plugin does — `dd.mutateItems` then `dd.select` — and
+// reports what the cleaning said in one console line. No gates: a paste
+// is the user's own hand on the canvas, not an agent's landing.
 
 import type { DaydreamApi } from "@daydream/plugin-api";
 import { flush, untrack } from "solid-js";
@@ -18,11 +18,11 @@ import {
   dataImages,
   describePaste,
   hasElements,
-  pageAssetSrc,
   pageFromPaste,
   parseHtml,
   VIEWPORT_WIDTH,
-  type DataImage,
+  withStoredImages,
+  type PastedPage,
 } from "./page";
 import { hasContent, isSingleParagraph } from "./prose";
 
@@ -48,8 +48,9 @@ export function looksLikeMarkup(text: string): boolean {
 
 /** What a transfer carries as markup: the text, and its parse. */
 export interface HtmlSource {
-  /** The face that was parsed, as it arrived: what the page stores when
-   * the paste has nothing to gather out of it. */
+  /** The face that was parsed, as it arrived: what the paste hands to
+   * the cleaning, and what the page stores when the cleaning has nothing
+   * to take out of it. */
   text: string;
   doc: Document;
 }
@@ -110,18 +111,7 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
     camera = next;
   });
 
-  const land = (
-    source: HtmlSource,
-    position: { x: number; y: number },
-    edited: boolean,
-    lost: string[],
-  ): void => {
-    const pasted = pageFromPaste(source.text, source.doc, {
-      id: dd.core.generateId(),
-      position,
-      edited,
-      lost,
-    });
+  const land = (pasted: PastedPage): void => {
     const { item } = pasted;
     pasting = true;
     try {
@@ -145,48 +135,60 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
     if (!untrack(() => dd.items().some((landed) => landed.id === item.id)))
       return;
     console.info(
-      `[${dd.plugin.id}] ${describePaste(pasted.elements, pasted.lost)}`,
+      `[${dd.plugin.id}] ${describePaste(pasted.elements, pasted.said)}`,
     );
   };
 
   /** A page stores no `data:` url (decision #76): each image is stored
-   * through the host first and its `img` pointed at the copy. One that
-   * cannot be loses its `src`, said the way the kernel's landing says a
-   * removed attribute; the `img` stays, with its `alt`. */
-  const vendorThenLand = async (
+   * through the host first and the page's name for the copy written in
+   * place of its url. One that cannot be is left as written, for the
+   * cleaning to take its `src` off and say so; the `img` stays, with its
+   * `alt`. Then the text is cleaned as a landing cleans it, and lands —
+   * unless another document was loaded meanwhile. */
+  const cleanThenLand = async (
     source: HtmlSource,
     position: { x: number; y: number },
-    images: DataImage[],
+    load: number,
   ): Promise<void> => {
-    const load = untrack(() => dd.loadVersion());
-    const lost: string[] = [];
-    for (const { img, file } of images) {
-      let src: string | null = null;
-      if (file !== null) {
-        try {
-          src = pageAssetSrc((await dd.vendorFile(file)).src);
-        } catch {
-          // No storage, a refused upload, or unload: said below.
-        }
-      }
-      if (src !== null) {
-        img.setAttribute("src", src);
+    const said: string[] = [];
+    const stored = new Map<string, string>();
+    for (const { url, file } of dataImages(source.doc)) {
+      // Not an image: the cleaning's to remove and say.
+      if (file === null) continue;
+      if (!source.text.includes(url)) {
+        said.push(
+          "a data: image written with character references was not stored",
+        );
         continue;
       }
-      img.removeAttribute("src");
-      lost.push(
-        file === null
-          ? "removed the attribute img[src] (a data: url that is not an image)"
-          : "removed the attribute img[src] (a data: image the host could not store)",
-      );
+      try {
+        stored.set(url, (await dd.vendorFile(file)).pageSrc);
+      } catch (error) {
+        said.push(
+          `the host could not store a data: image (${error instanceof Error ? error.message : String(error)})`,
+        );
+      }
     }
-    if (untrack(() => dd.loadVersion()) !== load) {
-      console.info(
-        `[${dd.plugin.id}] paste abandoned: another document was loaded while its images were vendored`,
+    let pasted: PastedPage;
+    try {
+      pasted = await pageFromPaste(dd, withStoredImages(source.text, stored), {
+        id: dd.core.generateId(),
+        position,
+        said: counted(said),
+      });
+    } catch (error) {
+      console.error(
+        `[${dd.plugin.id}] paste refused: ${error instanceof Error ? error.message : String(error)}`,
       );
       return;
     }
-    land(source, position, true, counted(lost));
+    if (untrack(() => dd.loadVersion()) !== load) {
+      console.info(
+        `[${dd.plugin.id}] paste abandoned: another document was loaded before it landed`,
+      );
+      return;
+    }
+    land(pasted);
   };
 
   dd.canvas.onPaste(
@@ -222,9 +224,11 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
         x: center.x - VIEWPORT_WIDTH / 2 + cascade,
         y: center.y - VIEWPORT_WIDTH / 4 + cascade,
       };
-      const images = dataImages(source.doc);
-      if (images.length === 0) land(source, position, false, []);
-      else void vendorThenLand(source, position, images);
+      void cleanThenLand(
+        source,
+        position,
+        untrack(() => dd.loadVersion()),
+      );
     },
     { priority: PASTE_PRIORITY },
   );

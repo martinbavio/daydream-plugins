@@ -1,22 +1,15 @@
 // The page a paste lands (decision #76): a viewport's payload is the
 // page's markup and its stylesheet as text, `{ html, css }`, rendered in a
-// shadow root. So a paste no longer converts anything. It gathers the
-// pasted document's `<style>` text into `css`, in document order, and
-// keeps the rest as `html` — the pasted text itself when there was
-// nothing to gather, the parser's serialization when there was. The
-// browser is the vocabulary: every element, attribute, selector and
-// at-rule the paste carried lands as written.
-//
-// What the kernel's LANDING does beside that — its safety walk, which
-// cuts what could run out of the author's text and reports it
-// (src/ai/cleanPage.ts in the Daydream repository) — the plugin API does
-// not expose yet, and a plugin copy of a security rule is the second
-// authority the kernel exists to avoid. Until it does, a pasted page is
-// stored as gathered here, and the canvas's own walk (the renderer's, the
-// same function a landing uses) keeps it inert at every mount.
-// TODO(decision #76): clean through the kernel once the API offers it.
+// shadow root. So a paste converts nothing: it hands the pasted text to
+// the kernel's cleaning (`dd.cleanPage`, the function every landing runs)
+// and stores what comes back — the author's text with whatever could run
+// cut out where it was written, every `<style>` block and linked
+// stylesheet folded into the css in document order — with the cleaning's
+// own findings for the report. The browser is the vocabulary: every
+// element, attribute, selector and at-rule the cleaning keeps lands as
+// written.
 
-import type { DreamPage } from "@daydream/plugin-api";
+import type { DaydreamApi, DreamPage } from "@daydream/plugin-api";
 
 /** Every pasted viewport's frame width: the frame rule (knowledge/
  * format.md) wants a width and no height, and 960 is the desktop page a
@@ -40,23 +33,42 @@ export function hasElements(doc: Document): boolean {
   return doc.body.firstElementChild !== null;
 }
 
-/** An `img` whose `src` is a `data:` URL: a page stores no `data:` url,
- * so the paste vendors the bytes and points the `img` at the stored
- * copy. `file` is null when the URL is not an image. */
+/** A `data:` URL an `img` names as its `src`: a page stores no `data:`
+ * url, so the paste vendors the bytes and names the stored copy in its
+ * place. `url` is the `src` as the parser read it; `file` is null when
+ * the URL is not an image. */
 export interface DataImage {
-  img: Element;
+  url: string;
   file: File | null;
 }
 
-/** Every `img` in the document whose `src` is a `data:` URL, in document
- * order. */
+/** Each distinct `data:` URL an `img` names as its `src`, in document
+ * order: the same image twice is one file. */
 export function dataImages(doc: Document): DataImage[] {
-  return Array.from(doc.querySelectorAll("img[src]"))
-    .filter((img) => /^\s*data:/i.test(img.getAttribute("src") ?? ""))
-    .map((img) => ({
-      img,
-      file: fileFromDataUrl((img.getAttribute("src") ?? "").trim()),
-    }));
+  const urls = new Set(
+    Array.from(
+      doc.querySelectorAll("img[src]"),
+      (img) => img.getAttribute("src") ?? "",
+    ).filter((src) => /^\s*data:/i.test(src)),
+  );
+  return Array.from(urls, (url) => ({
+    url,
+    file: fileFromDataUrl(url.trim()),
+  }));
+}
+
+/** The pasted text with each stored image's `data:` URL replaced by the
+ * page's name for its copy, where the author wrote it: nothing else in
+ * the text moves. Only a URL written as the parser reads it — with no
+ * character reference in it — is in the text to replace, so the paste
+ * stores only those (`text.includes(url)`). */
+export function withStoredImages(
+  text: string,
+  stored: ReadonlyMap<string, string>,
+): string {
+  let out = text;
+  for (const [url, src] of stored) out = out.split(url).join(src);
+  return out;
 }
 
 /** A `data:` URL as a File named for its type, or null when it is not an
@@ -91,114 +103,66 @@ export function fileFromDataUrl(url: string): File | null {
   return new File([bytes], `pasted-image.${extension}`, { type: mime });
 }
 
-/** The `src` a page stores for a file `dd.vendorFile` answered with. The
- * host answers the shared store's host-neutral `/assets/<file>`, which a
- * page may not name (a root-absolute path leaves its bundle); the page's
- * own `assets/<file>` is gathered from that same store when the document
- * is saved, so the relative name is the one that renders and travels.
- * Null for an answer outside `/assets/`. */
-export function pageAssetSrc(vendored: string): string | null {
-  const match = /^\/assets\/([^?#]+)$/.exec(vendored);
-  return match === null ? null : `assets/${match[1]!}`;
-}
-
-/** What a paste lands, and what it could not keep. */
+/** What a paste lands, and what was said about it. */
 export interface PastedPage {
   item: DreamPage;
   /** Elements in the landed markup: the `html` and `body` and everything
    * in the body. */
   elements: number;
-  /** What the page lost, each in the kernel's landing vocabulary. */
-  lost: string[];
+  /** What the paste changed or could not keep, in order: the paste's own
+   * sentences, then the cleaning's findings in the kernel's words. */
+  said: string[];
 }
 
 /**
- * The viewport a pasted document lands as, at `position`. `source` is
- * the text that was parsed into `doc`; `edited` says the paste has
- * already changed `doc` (a vendored image's `src`), so the markup must
- * be written from the tree. `lost` carries what the paste lost before
- * this point.
+ * The viewport `html` lands as, at `position`: the text cleaned exactly
+ * as every landing cleans a page, and stored as the cleaning answers it.
+ * `said` carries what the paste said before this point (an image it
+ * could not store). A clipboard carries no address — no `<base>` or
+ * source-URL comment is read from it — so no `sourceUrl` is passed: a
+ * relative stylesheet `href` resolves against nothing, and the cleaning
+ * removes and reports it.
  */
-export function pageFromPaste(
-  source: string,
-  doc: Document,
+export async function pageFromPaste(
+  dd: Pick<DaydreamApi, "cleanPage">,
+  html: string,
   options: {
     id: string;
     position: { x: number; y: number };
-    edited: boolean;
-    lost: string[];
+    said: string[];
   },
-): PastedPage {
-  const lost = [...options.lost];
-  // Every stylesheet the markup carries, in document order — the order
-  // the cascade reads them in and the order the kernel's landing folds
-  // them. A `<style>` is the page's own css and moves there; a linked
-  // sheet is a fetch a paste cannot make (the landing fetches one on the
-  // host), so it is removed and said, as the landing says it.
-  const css: string[] = [];
-  const sheets = Array.from(doc.querySelectorAll("style, link")).filter(
-    (node) => node.localName === "style" || isStylesheetLink(node),
-  );
-  for (const node of sheets) {
-    if (node.localName === "style") css.push(node.textContent ?? "");
-    else {
-      const href = node.getAttribute("href") ?? "";
-      lost.push(
-        `the stylesheet <link href="${href}"> could not be fetched (a paste fetches nothing) — removed, and its rules are not in the css; put them there to keep them`,
-      );
-    }
-    node.remove();
-  }
-  const html = sheets.length === 0 && !options.edited ? source : serialize(doc);
-  const title = doc.title.trim();
+): Promise<PastedPage> {
+  const cleaned = await dd.cleanPage({ html, css: "" }, { where: "paste" });
+  const landed = parseHtml(cleaned.html);
+  const title = landed.title.trim();
   const item: DreamPage = {
     id: options.id,
     kind: VIEWPORT_KIND,
     position: options.position,
     frame: { width: VIEWPORT_WIDTH },
     payload: {
-      html,
-      // Joined as the kernel's landing joins them: an empty block adds
-      // nothing, not a blank line.
-      css: css.filter((text) => text !== "").join("\n"),
+      html: cleaned.html,
+      css: cleaned.css,
       ...(title === "" ? {} : { meta: { title } }),
     },
   };
   return {
     item,
-    elements: doc.body.getElementsByTagName("*").length + 2,
-    lost,
+    elements: landed.body.getElementsByTagName("*").length + 2,
+    said: [
+      ...options.said,
+      ...cleaned.findings.map((finding) => finding.message),
+    ],
   };
 }
 
-/** A `<link>` whose `rel` names a stylesheet: every other `rel` — icon,
- * preload, canonical — is inert markup and stays. */
-function isStylesheetLink(node: Element): boolean {
-  return (
-    node.localName === "link" &&
-    (node.getAttribute("rel") ?? "")
-      .toLowerCase()
-      .split(/\s+/)
-      .includes("stylesheet")
-  );
-}
-
-/** The tree as text, with the doctype it was written with: a page with
- * one renders in standards mode, and one without it did not have. */
-function serialize(doc: Document): string {
-  return (
-    (doc.doctype === null ? "" : "<!DOCTYPE html>") +
-    doc.documentElement.outerHTML
-  );
-}
-
-/** One line for the console: what landed and what was lost. */
+/** One line for the console: what landed, then what was said about it. */
 export function describePaste(
   elements: number,
-  lost: readonly string[],
+  said: readonly string[],
 ): string {
   const landed = `landed ${elements} element${elements === 1 ? "" : "s"}`;
-  return lost.length === 0
+  return said.length === 0
     ? `${landed}, nothing lost`
-    : `${landed}; ${lost.join("; ")}`;
+    : `${landed}; ${said.join("; ")}`;
 }
