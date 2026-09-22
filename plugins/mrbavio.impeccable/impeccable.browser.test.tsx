@@ -21,6 +21,7 @@ import {
   pageElementId,
   pageFixtureDocument,
   pageNode,
+  pageShadow,
   type Host,
   type MountedPlugin,
 } from "@daydream/plugin-testing";
@@ -28,7 +29,6 @@ import {
 import activate, { DONE_TOOL, HTML_TOOL, PICK_TOOL } from "./index";
 import rawManifest from "./manifest.json";
 import { SESSION_KEY } from "./session";
-import { pageSelector } from "./target";
 import { variantMarker } from "./variants";
 
 const manifest = rawManifest as PluginManifest;
@@ -245,7 +245,7 @@ describe("mrbavio.impeccable in the shell", () => {
     expect(caption()).toBeNull();
   });
 
-  test("the pick names an element by the same selector canvas_state answers for it", async () => {
+  test("the pick names an element by the same selector canvas_state answers for it, unique in the STORED markup", async () => {
     const tricky = createPageItem({
       html:
         '<!doctype html><html><head></head><body><main><section class="card"><p>a</p><p>b</p></section>' +
@@ -253,9 +253,20 @@ describe("mrbavio.impeccable in the shell", () => {
         '<aside id="side"><p class="note">f</p></aside></main></body></html>',
       css: "p { margin: 0; }\n",
     }, { frame: { width: 640 } });
-    mounted = await mountPlugin({ entry: activate, manifest, document: { version: 7, items: [tricky] }, host: fakeHost().host });
+    // An id shared with a <script>, which the mount leaves out and the
+    // stored markup keeps: unique on the mount, not in the text an agent
+    // resolves the selector against. (Stored as written: a landing would
+    // cut the script, so it is set here past the landing.)
+    const shared = createPageItem({
+      html:
+        '<!doctype html><html><head></head><body><script id="hero" type="text/plain">x</script>' +
+        '<section id="hero"><p>a</p></section></body></html>',
+      css: "",
+    }, { position: { x: 800, y: 0 }, frame: { width: 640 } });
+    mounted = await mountPlugin({ entry: activate, manifest, document: { version: 7, items: [tricky, shared] }, host: fakeHost().host });
     const handlers = await createTestRequestHandlers(mounted);
     await mountedId(tricky.id, "#side");
+    await mountedId(shared.id, "section");
     // Every element of the body, each found by a position-based path.
     const paths = [
       "main",
@@ -270,22 +281,32 @@ describe("mrbavio.impeccable in the shell", () => {
       "main > aside > p",
     ];
     expect(pageNode(tricky.id, "body")!.querySelectorAll("*").length).toBe(paths.length);
-    for (const path of paths) {
-      const node = pageNode(tricky.id, path)!;
-      select(pageElementId(tricky.id, path));
+    const cases = [
+      ...paths.map((path) => ({ page: tricky, path })),
+      { page: shared, path: "section" },
+    ];
+    for (const { page, path } of cases) {
+      select(pageElementId(page.id, path));
       // canvas_state, as the bridge asks the tab for it.
       const state = (await handlers.state(undefined)) as {
         selection: { selector?: string } | null;
       };
       const expected = state.selection?.selector;
       expect(expected).toBeDefined();
-      expect(pageSelector(node)).toBe(expected);
+      await pickVerb("bolder");
+      const taken = (await pickTool().run({})) as { pick: { element: string } };
+      expect(taken.pick.element).toBe(expected);
       // …and it names that element alone in the stored markup.
-      const stored = new DOMParser().parseFromString(tricky.payload.html, "text/html");
+      const stored = new DOMParser().parseFromString(page.payload.html, "text/html");
       expect(stored.querySelectorAll(expected!).length).toBe(1);
+      await tool(DONE_TOOL).run({});
     }
-    // Outside a page there is nothing to name.
-    expect(pageSelector(document.body)).toBeNull();
+    // The script's id is not the section's name, though the mount has one
+    // #hero.
+    expect(pageShadow(shared.id)!.querySelectorAll("#hero").length).toBe(1);
+    select(pageElementId(shared.id, "section"));
+    await pickVerb("bolder");
+    expect(((await pickTool().run({})) as { pick: { element: string } }).pick.element).not.toBe("#hero");
   });
 
   test("an in-place round stays building through unrelated edits and ends when the source's page changes; impeccable_done ends any round", async () => {
@@ -328,17 +349,18 @@ describe("mrbavio.impeccable in the shell", () => {
     expect(caption()).toBeNull();
   });
 
-  test("a caption whose element is remounted away moves to the page's corner; a css write keeps it on the element", async () => {
+  test("a caption finds its element again by selector after a remount; one the selector no longer names alone moves to the page's corner", async () => {
     const { doc, source } = sourceDocument();
     const { host } = fakeHost();
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
-    select(await mountedId(source.id, ".header"));
+    const before = await mountedId(source.id, ".header");
+    select(before);
     await pickVerb("typeset");
     // On the element: flush with its left edge, above it. In the corner:
     // 8px in from the page's own left edge, which the body's 24px padding
     // puts well left of the header.
-    const onElement = () => {
-      const header = pageNode(source.id, ".header")!.getBoundingClientRect();
+    const onElement = (selector = ".header") => {
+      const header = pageNode(source.id, selector)!.getBoundingClientRect();
       const box = caption()!.getBoundingClientRect();
       return Math.abs(box.left - header.left) < 1 && box.bottom <= header.top + 1;
     };
@@ -350,14 +372,24 @@ describe("mrbavio.impeccable in the shell", () => {
     await settle();
     expect(onElement()).toBe(true);
     // A markup write remounts: the element's id is gone, the pick keeps
-    // its selector, the caption goes inside the page's top-left corner.
+    // its selector, and the caption finds the element by it.
     mounted.store.setDocument((d) => {
       const p = d.items[0] as DreamPage;
-      p.payload.html = p.payload.html.replace("<body>", "<body><p>Intro</p>");
+      p.payload.html = p.payload.html.replace("<body>", '<body><p>Intro</p>');
+    });
+    await vi.waitFor(() => expect(pageElementId(source.id, ".header")).not.toBe(before));
+    await settle();
+    expect(caption()!.textContent).toBe("typeset · waiting for an agent");
+    expect(onElement()).toBe(true);
+    // A second div.header: the selector names neither alone, and the
+    // caption goes inside the page's top-left corner.
+    mounted.store.setDocument((d) => {
+      const p = d.items[0] as DreamPage;
+      p.payload.html = p.payload.html.replace("</body>", '<div class="header"></div></body>');
     });
     await settle();
     expect(caption()!.textContent).toBe("typeset · waiting for an agent");
-    expect(onElement()).toBe(false);
+    expect(onElement(".grid > .header")).toBe(false);
     expect((await pickTool().run({})) as unknown).toMatchObject({ pick: { verb: "typeset", element: "div.header" } });
   });
 
@@ -394,17 +426,22 @@ describe("mrbavio.impeccable in the shell", () => {
     expect(await stored(files, 4)).toMatchObject({ exit: false });
   });
 
-  test("a waiting pick survives a reload, captioned in its page's corner; exit does not", async () => {
+  test("a waiting pick survives a reload, captioned above its element, found by selector; exit does not", async () => {
     const { doc, source } = sourceDocument();
     const { host } = fakeHost({
       [manifest.id]: {
-        [SESSION_KEY]: { seq: 7, exit: true, pick: { verb: "typeset", viewportId: source.id, element: ".grid", at: 1 } },
+        [SESSION_KEY]: { seq: 7, exit: true, pick: { verb: "typeset", viewportId: source.id, element: ".header", at: 1 } },
       },
     });
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
+    await mountedId(source.id, ".header");
     await settle();
     expect(caption()!.textContent).toBe("typeset · waiting for an agent");
-    expect((await pickTool().run({})) as unknown).toMatchObject({ pick: { verb: "typeset", element: ".grid" }, exit: false });
+    const header = pageNode(source.id, ".header")!.getBoundingClientRect();
+    const box = caption()!.getBoundingClientRect();
+    expect(Math.abs(box.left - header.left)).toBeLessThan(1);
+    expect(box.bottom).toBeLessThanOrEqual(header.top + 1);
+    expect((await pickTool().run({})) as unknown).toMatchObject({ pick: { verb: "typeset", element: ".header" }, exit: false });
   });
 
   test("a variant is titled from its marker and the source's title, whatever the agent called it", async () => {

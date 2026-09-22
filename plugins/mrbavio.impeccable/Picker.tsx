@@ -40,7 +40,7 @@ export default function createPicker(dd: DaydreamApi, entries: readonly PickerEn
         setBox(null);
         return;
       }
-      setBox(untrack(() => targetBox(dd, target.viewportId, target.anchor)?.rect ?? null));
+      setBox(untrack(() => targetBox(dd, target)?.rect ?? null));
       if (previous === null || previous === undefined) {
         setQuery("");
         setIndex(0);

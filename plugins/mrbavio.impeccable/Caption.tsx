@@ -10,10 +10,11 @@ import { targetBox } from "./target";
  * agent`, then `bolder · building` once an agent took it — `bolder · 1 of
  * 3` as a variant round lands — then nothing, once the round is complete.
  * Drawn in the screen slot from the target's rect — above an element,
- * inside the top-left corner of a whole page (the title bar sits above
- * that), and there too for an element whose page has been remounted since
- * the pick (its render-time id is gone; target.ts). Subscribe in compute,
- * read layout in apply (decision #33). */
+ * found again by its selector once its page has been remounted or
+ * reloaded since the pick (target.ts), and inside the top-left corner of
+ * a whole page (the title bar sits above that), or of a page whose
+ * element the selector no longer names alone. Subscribe in compute, read
+ * layout in apply (decision #33). */
 export default function createCaption(
   dd: DaydreamApi,
   session: Session,
@@ -33,7 +34,8 @@ export default function createCaption(
         setBox(null);
         return;
       }
-      setBox(untrack(() => targetBox(dd, phase.pick.viewportId, phase.anchor)));
+      const { viewportId, element } = phase.pick;
+      setBox(untrack(() => targetBox(dd, { viewportId, element, anchor: phase.anchor })));
     },
   );
 

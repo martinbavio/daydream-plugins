@@ -22,7 +22,8 @@ export const SESSION_KEY = "session";
 /** Every phase past idle carries the pick and its `anchor`: the
  * render-time id of the picked element on the canvas, what the caption is
  * drawn beside — null for a whole page, and for a pick restored from
- * storage, whose page has been mounted anew since (target.ts). */
+ * storage, whose page has been mounted anew since; the caption finds that
+ * one by the pick's selector (target.ts). */
 export type Phase =
   | { kind: "idle" }
   /** Picked on the canvas, no agent has taken it. */
