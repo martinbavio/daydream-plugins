@@ -2,9 +2,10 @@
 // #48, P6): DevTools-style track lines, gap hatching and line-number badges
 // for the selected grid, or the parent's grid of a selected child
 // (decision #11). Everything it reads arrives through `dd`: the
-// selection, the document walk (`dd.core.findParent`), and the geometry
-// cache (`dd.geometry` — rects, the invalidation state, the camera, and
-// the rendered node for the one read the API does not wrap, the browser's
+// selection, the selected element's parent in its page (the first
+// ancestor of `dd.pageStack`, decision #76), and the geometry cache
+// (`dd.geometry` — rects, the invalidation state, the camera, and the
+// rendered node for the one read the API does not wrap, the browser's
 // resolved track lists).
 //
 // It registers on `overlay.screen`, not the world slot: every stroke, hatch
