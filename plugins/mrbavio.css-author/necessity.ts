@@ -38,6 +38,14 @@
 // height: 100dvh`), and where this browser takes both to the same value,
 // either alone would read dead.
 //
+// An IMAGE THE COPY COULD NOT LOAD (an `img` complete with natural width
+// 0) is not the page's image: Chrome lays a broken image out as its alt
+// text and ignores the width and height asked of it, so `width: 100%` on
+// it would read dead when the loaded image needs it. Its sizing and
+// `object-*` declarations — its own, and a rule's that reaches it — are
+// not judged (they count as live), and the lint says so once per
+// viewport, as an advisory finding naming the images.
+//
 // Motion is neutralised in the LINT copy only (`still: true` on the
 // mount): a `transition: all 200ms` would otherwise make every
 // remove→read→restore (synchronous, so the computed value is still the
@@ -108,9 +116,13 @@ import {
   type CssDeclaration,
   type PageRule,
 } from "./pageCss";
-import { lintElements, mountedStyle, parsePage } from "./pageDom";
+import {
+  lintElements,
+  mountedStyle,
+  parsePage,
+  storedNames,
+} from "./pageDom";
 import { hasStatePseudo } from "./statePseudo";
-import { uniqueSelector } from "./uniqueSelector";
 
 /** What the lint needs from the API object: the pure helpers and the
  * live mount. A gate hands in its `dd`; a test hands in a test kernel's. */
@@ -148,7 +160,9 @@ export function isExemptProperty(property: string): boolean {
  * every element's own declarations and every rule's are removed, read
  * against the baseline and restored, in that order; the survivors are then
  * re-judged at each probe width in a fresh mount. Every iframe is
- * disposed, a thrown read included. Browser only.
+ * disposed, a thrown read included. After the dead declarations, one
+ * advisory finding per viewport whose copy could not load an image.
+ * Browser only.
  */
 export async function necessityLint(
   dd: NecessityHost,
@@ -156,10 +170,13 @@ export async function necessityLint(
   options: NecessityOptions = {},
 ): Promise<Finding[]> {
   const perViewport: Candidate[][] = [];
+  const notes: Finding[] = [];
   for (const page of selectViewports(dd.core, doc, options.viewportIds)) {
-    perViewport.push(await lintViewport(dd, page));
+    const judged = await lintViewport(dd, page);
+    perViewport.push(judged.candidates);
+    notes.push(...judged.notes);
   }
-  return intersect(perViewport);
+  return [...intersect(perViewport), ...notes];
 }
 
 /** The document's viewports, or the named subset in document order. An
@@ -218,18 +235,22 @@ interface Prepared {
 
 /** The viewport at its frame, every declaration judged; then the sweep
  * (rule 2) over whatever read dead, each probe width a fresh mount of the
- * same window at that width. A finding that survives names every width. */
+ * same window at that width. A finding that survives names every width.
+ * `notes` is the advisory on the images the copy could not load. */
 async function lintViewport(
   dd: NecessityHost,
   page: DreamPage,
-): Promise<Candidate[]> {
+): Promise<{ candidates: Candidate[]; notes: Finding[] }> {
   // The page as stored (its markup's `<style>` blocks folded in, as the
   // mount folds them), for naming: the mounted copy's css has the asset
-  // route in its urls, and a finding should quote what the author wrote.
-  const { css } = parsePage(page.payload);
+  // route in its urls, and a finding should quote what the author wrote;
+  // an element is named by its selector in the stored markup.
+  const stored = parsePage(page.payload);
+  const { css } = stored;
   const authored = pageRules(css);
-  const { own, naming, candidates } = await withMount(dd, page, undefined, async (m) => {
+  const { own, naming, candidates, unloaded } = await withMount(dd, page, undefined, async (m) => {
     const prepared = await prepare(m);
+    const nameOf = storedNames(stored.doc, prepared.doc);
     const width = prepared.doc.defaultView?.innerWidth ?? page.frame?.width ?? 0;
     // The two scans line up rule for rule unless the mounted copy is not
     // this text (it always is, cleaned as a landing cleans it); if they
@@ -245,7 +266,8 @@ async function lintViewport(
     return {
       own: width,
       naming,
-      candidates: judgeAll(page, prepared, naming, width),
+      candidates: judgeAll(page, prepared, naming, width, nameOf),
+      unloaded: prepared.nodes.filter(isUnloadedImage).map(nameOf),
     };
   });
   let pending = candidates.filter((c) => c.dead);
@@ -261,7 +283,10 @@ async function lintViewport(
     pending = pending.filter((c) => c.dead);
   }
   for (const c of pending) c.finding = findingFor(page, c, swept, naming);
-  return candidates;
+  return {
+    candidates,
+    notes: unloaded.length === 0 ? [] : [unloadedNote(page, unloaded)],
+  };
 }
 
 /** Mount (motion pinned off), run, dispose — the one lifecycle every mount
@@ -353,16 +378,19 @@ export function probeWidths(core: CoreApi, css: string, own: number): number[] {
  * width: the elements' own in tree order, then the rules' in source
  * order. The finding each carries is provisional — named for the frame
  * alone — and is rewritten with the swept widths for the ones that stay
- * dead. */
+ * dead. A declaration on an image the copy could not load that a loaded
+ * one would answer (`isImageSizing`) is recorded live, unjudged. */
 function judgeAll(
   page: DreamPage,
   prepared: Prepared,
   authored: readonly PageRule[],
   own: number,
+  nameOf: (node: Element) => string,
 ): Candidate[] {
   const probe = baseline(prepared);
   const { rules, nodes } = prepared;
-  const names = nodes.map((node) => uniqueSelector(node, prepared.doc));
+  const nameAt = (node: number): string => nameOf(nodes[node]!);
+  const unloaded = nodes.map(isUnloadedImage);
   // Which elements each rule reaches through a member that styles the
   // element itself (never only its pseudo-element), read once.
   const reached = rules.map((rule) => {
@@ -377,6 +405,7 @@ function judgeAll(
     element: boolean,
     declaration: CssDeclaration,
     removal: At[],
+    unjudged: boolean,
   ): void => {
     const candidate: Candidate = {
       key,
@@ -384,10 +413,10 @@ function judgeAll(
       property: declaration.property,
       value: shown(declaration),
       removal,
-      dead: isDead(prepared, probe, removal),
+      dead: !unjudged && isDead(prepared, probe, removal),
       finding: { tier: "necessity", severity: "blocking", message: "" },
     };
-    candidate.finding = findingFor(page, candidate, [own], authored, names);
+    candidate.finding = findingFor(page, candidate, [own], authored, nameAt);
     candidates.push(candidate);
   };
 
@@ -411,10 +440,11 @@ function judgeAll(
         }
       });
       record(
-        `${names[node]}\u0000${declaration.property}`,
+        `${nameAt(node)}\u0000${declaration.property}`,
         true,
         declaration,
         removal,
+        unloaded[node]! && isImageSizing(declaration.property),
       );
     });
   });
@@ -459,6 +489,8 @@ function judgeAll(
         false,
         declaration,
         removal,
+        isImageSizing(declaration.property) &&
+          reached[r]!.some((node) => unloaded[node]),
       );
     });
   });
@@ -493,6 +525,44 @@ function isChecked(
     return false;
   }
   return lastOf(list, property) === at;
+}
+
+/** An image the copy could not load: an `img` done loading with no
+ * natural width. Chrome lays it out as its alt text, so what sizes or
+ * fits the image is not what it would do to the loaded one. */
+function isUnloadedImage(node: Element): boolean {
+  if (node.localName !== "img") return false;
+  const img = node as HTMLImageElement;
+  return img.complete && img.naturalWidth === 0;
+}
+
+/** What a broken image ignores and a loaded one answers: its box's size
+ * and how its content fits the box (`object-*`). */
+const IMAGE_SIZING =
+  /^(?:(?:min-|max-)?(?:width|height|inline-size|block-size)|aspect-ratio|object-[a-z-]+)$/;
+
+function isImageSizing(property: string): boolean {
+  return IMAGE_SIZING.test(property.trim().toLowerCase());
+}
+
+/** How many of the unloaded images the advisory names; the rest it counts. */
+const UNLOADED_NAMED = 3;
+
+/** The one advisory for a viewport whose copy could not load images: what
+ * the lint left unjudged, and on which images. */
+function unloadedNote(page: DreamPage, names: readonly string[]): Finding {
+  const one = names.length === 1;
+  const rest = names.length - UNLOADED_NAMED;
+  const images =
+    names
+      .slice(0, UNLOADED_NAMED)
+      .map((name) => `\`${name}\``)
+      .join(", ") + (rest > 0 ? ` and ${rest} more` : "");
+  return {
+    tier: "necessity",
+    severity: "advisory",
+    message: `${one ? "An image" : `${names.length} images`} could not be loaded in the necessity lint's copy of viewport ${page.id} (${images}), so ${one ? "its" : "their"} sizing and object-* declarations were not judged`,
+  };
 }
 
 function lastOf(list: readonly CssDeclaration[], property: string): number {
@@ -611,11 +681,11 @@ function findingFor(
   c: Candidate,
   widths: number[],
   authored: readonly PageRule[],
-  names?: readonly string[],
+  nameAt?: (node: number) => string,
 ): Finding {
   const first = c.removal[0] as At;
   if ("node" in first) {
-    const selector = names?.[first.node] ?? c.finding.elementId ?? "";
+    const selector = nameAt?.(first.node) ?? c.finding.elementId ?? "";
     return {
       tier: "necessity",
       severity: "blocking",

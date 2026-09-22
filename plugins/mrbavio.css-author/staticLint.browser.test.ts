@@ -315,6 +315,24 @@ describe("staticLint: whole document", () => {
     ]);
   });
 
+  test("a page with no doctype is read in standards mode, as it renders: a class differing only in case is another class", () => {
+    // In quirks mode `div.a` would match both, and the name would need an
+    // index the canvas and an agent's selector do not.
+    const doc: DreamDocument = {
+      version: 7,
+      items: [
+        createPageItem(
+          {
+            html: '<html><head></head><body><div class="a" style="width: 10"></div><div class="A"></div></body></html>',
+            css: ".a {}\n.A {}",
+          },
+          { id: "v1", frame: { width: 960 } },
+        ),
+      ],
+    };
+    expect(staticLint(doc).map((f) => f.elementId)).toEqual(["div.a"]);
+  });
+
   test("a `<style>` block the markup still carries is read with the css, after it, as the renderer folds it", () => {
     const doc = page('<div class="late"></div><style>.late { width: 100 }</style>');
     expect(staticLint(doc).map((f) => [f.rule, f.property])).toEqual([[0, "width"]]);
