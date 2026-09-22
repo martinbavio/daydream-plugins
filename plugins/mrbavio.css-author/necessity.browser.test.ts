@@ -299,6 +299,51 @@ describe("dead and live declarations", () => {
   });
 });
 
+describe("an image the lint's copy could not load", () => {
+  // `assets/…` with no asset base is a url the test server answers 404:
+  // the image is complete with natural width 0, laid out as its alt text,
+  // whose box no width or height asked of it changes.
+  const broken = (style: string): string =>
+    `<img src="assets/missing.png" alt="missing" style="${style}">`;
+
+  test("its sizing and object-* declarations, its own or a rule's, are not judged, and one advisory says so", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        `<div id="frame">${broken("position: static; height: 50vh; object-fit: cover; object-position: 50% 40%")}</div>`,
+        "img { width: 100%; max-height: 80vh; }",
+      ),
+    );
+    expect(findings).toEqual([
+      {
+        tier: "necessity",
+        severity: "blocking",
+        elementId: "img",
+        property: "position",
+        message: `position: static on \`img\` changes nothing at ${sweptAt(400)}`,
+      },
+      {
+        tier: "necessity",
+        severity: "advisory",
+        message:
+          "An image could not be loaded in the necessity lint's copy of viewport v1 (`img`), so its sizing and object-* declarations were not judged",
+      },
+    ]);
+  });
+
+  test("one advisory per viewport, naming the first three images and counting the rest", async () => {
+    const findings = await necessityLint(
+      makeDocument(FRAME, Array.from({ length: 5 }, () => broken("height: 40px")).join("")),
+    );
+    expect(findings.map((f) => [f.severity, f.message])).toEqual([
+      [
+        "advisory",
+        "5 images could not be loaded in the necessity lint's copy of viewport v1 (`img:nth-of-type(1)`, `img:nth-of-type(2)`, `img:nth-of-type(3)` and 2 more), so their sizing and object-* declarations were not judged",
+      ],
+    ]);
+  });
+});
+
 /** A container-typed holder (full width, or the given one) around a
  * two-item grid whose base is one column and whose `@container` branch is
  * two. `justify-content: start` keeps the base observable: a stretching
