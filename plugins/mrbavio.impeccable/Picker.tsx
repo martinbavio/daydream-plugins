@@ -3,6 +3,7 @@ import { createEffect, createSignal, For, onCleanup, Show, untrack } from "solid
 import type { DaydreamApi, OverlayRect } from "@daydream/plugin-api";
 
 import { classPrefix } from "./styles";
+import { targetBox, type Target } from "./target";
 
 import { matchEntries, parseQuery, type PickerEntry } from "./pickerQuery";
 
@@ -10,7 +11,7 @@ export type { PickerEntry };
 
 export interface PickerState {
   /** The target the picker opened on, or null when closed. */
-  open: () => { viewportId: string; elementId: string | null } | null;
+  open: () => Target | null;
   close(): void;
   /** The chosen entry, with what was typed after the verb as the brief. */
   choose(id: string, brief: string): void;
@@ -39,10 +40,7 @@ export default function createPicker(dd: DaydreamApi, entries: readonly PickerEn
         setBox(null);
         return;
       }
-      const rect = untrack(() =>
-        target.elementId === null ? dd.geometry.itemRect(target.viewportId) : dd.geometry.rect(target.elementId),
-      );
-      setBox(rect);
+      setBox(untrack(() => targetBox(dd, target.viewportId, target.anchor)?.rect ?? null));
       if (previous === null || previous === undefined) {
         setQuery("");
         setIndex(0);

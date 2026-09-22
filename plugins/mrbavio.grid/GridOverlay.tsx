@@ -120,6 +120,24 @@ export default function createGridOverlay(dd: DaydreamApi): JSX.Element {
     },
   );
 
+  // The selected element's parent in its page (decision #76): the first
+  // ancestor `dd.pageStack` lists, by the render-time id the page's mount
+  // stamped on it. A render-time id never outlives its mount, and a node
+  // changes parent only through a markup write, which remounts and mints
+  // new ids — so one answer per id holds for that id's whole life, and the
+  // stack (which matches every ancestor's rules) is read once per
+  // selection, never per pan frame. Null for an item, for nothing mounted
+  // yet (not remembered, so the next state asks again), and for `html`.
+  let parentFor: { id: ElementId; parent: ElementId | null } | null = null;
+  const parentOf = (id: ElementId): ElementId | null => {
+    if (parentFor?.id === id) return parentFor.parent;
+    const stack = dd.pageStack(id);
+    if (stack === null) return null;
+    const parent = stack.ancestors[0]?.elementId;
+    parentFor = { id, parent: parent === undefined || parent === "" ? null : parent };
+    return parentFor.parent;
+  };
+
   const readVisual = (selectedId: ElementId): GridVisual | null => {
     const own = trackGridGeometry(selectedId);
     let gridId: ElementId;
@@ -128,11 +146,11 @@ export default function createGridOverlay(dd: DaydreamApi): JSX.Element {
       gridId = selectedId;
       geometry = own;
     } else {
-      const parent = dd.core.findParent(dd.document(), selectedId);
-      if (parent === undefined) return null;
-      const parentGrid = trackGridGeometry(parent.id);
+      const parent = parentOf(selectedId);
+      if (parent === null) return null;
+      const parentGrid = trackGridGeometry(parent);
       if (parentGrid === null) return null;
-      gridId = parent.id;
+      gridId = parent;
       geometry = parentGrid;
     }
     const rect = dd.geometry.rect(gridId);

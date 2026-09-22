@@ -66,7 +66,7 @@ const TARGET_ARGS = {
     .string()
     .optional()
     .describe(
-      "An element id inside the viewport, when one section is the target. Default: the selected element; the whole page when a viewport item is selected.",
+      "A CSS selector naming exactly one element of the viewport's page, when one section is the target (a pick's element, canvas_state's selection.selector). Default: the selected element; the whole page when a viewport item is selected.",
     ),
   brief: z
     .string()
@@ -201,7 +201,10 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
       "Impeccable's detector over a viewport as the canvas renders it: the page is exported by the tab (impeccable_html), written to a file by the host, scanned by the installed skill's own launcher, and the findings answered — {viewportId, file, target?, count, byRule, findings: [{antipattern, name, severity, category, snippet}]}. With element, the export is pruned to that element and its ancestors, so every finding is the target's. The evidence step of critique and audit, in one call; the file stays on disk for you to open.",
     inputSchema: {
       viewport: z.string().describe("A viewport id from canvas_state"),
-      element: z.string().optional().describe("An element id inside it: scan the target alone, in its cascade"),
+      element: z
+        .string()
+        .optional()
+        .describe("A CSS selector naming exactly one element of its page: scan the target alone, in its cascade"),
     },
     annotations: { readOnlyHint: true },
     run: async ({ viewport, element }) => {
@@ -215,7 +218,7 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
       });
       const rules = Object.entries(report.byRule).map(([rule, n]) => `${n} ${rule}`).join(", ");
       return {
-        text: `${report.count} finding${report.count === 1 ? "" : "s"}${rules === "" ? "" : ` — ${rules}`} over ${report.file}${report.target === undefined ? "" : ` (pruned to ${report.target.id}: ${report.target.kept} elements kept, ${report.target.pruned} removed)`}.\n${JSON.stringify(report.findings)}`,
+        text: `${report.count} finding${report.count === 1 ? "" : "s"}${rules === "" ? "" : ` — ${rules}`} over ${report.file}${report.target === undefined ? "" : ` (pruned to ${report.target.selector}: ${report.target.kept} elements kept, ${report.target.pruned} removed)`}.\n${JSON.stringify(report.findings)}`,
         structured: report as unknown as Record<string, unknown>,
       };
     },

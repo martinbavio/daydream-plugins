@@ -23,7 +23,7 @@ export interface DetectReport {
   /** The page the detector read, kept for the agent to open. */
   file: string;
   /** The export's scope: the target and what was pruned around it. */
-  target?: { id: string; kept: number; pruned: number };
+  target?: { selector: string; kept: number; pruned: number };
   count: number;
   /** Findings by antipattern id, most frequent first. */
   byRule: Record<string, number>;
@@ -50,6 +50,16 @@ export const runProcess: RunProcess = (file, args) =>
     });
   });
 
+/** A name as a file-name part: an element is a CSS selector (decision
+ * #76), which may hold `>`, spaces, `#`, `:` and `/` — each run of
+ * anything but letters, digits, `_` and `-` becomes one `_`, and the
+ * whole is kept short. Only the reader's eye depends on it: the file
+ * lives in its own fresh directory. */
+export function fileSafe(name: string): string {
+  const safe = name.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+  return (safe === "" ? "element" : safe).slice(0, 80);
+}
+
 export async function detect(input: {
   viewportId: string;
   element?: string;
@@ -67,7 +77,10 @@ export async function detect(input: {
     throw new Error("impeccable_html answered no page");
   }
   const dir = input.dir ?? (await mkdtemp(path.join(tmpdir(), "impeccable-")));
-  const file = path.join(dir, `${input.viewportId}${input.element === undefined ? "" : `-${input.element}`}.html`);
+  const file = path.join(
+    dir,
+    `${fileSafe(input.viewportId)}${input.element === undefined ? "" : `-${fileSafe(input.element)}`}.html`,
+  );
   await writeFile(file, answer.html, "utf8");
   const launcher = path.join(input.skillDir, "scripts", "impeccable");
   const { code, stdout, stderr } = await (input.run ?? runProcess)(launcher, ["detect", "--json", "--no-config", file]);

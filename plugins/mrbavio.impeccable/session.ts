@@ -5,8 +5,10 @@
 // channel: an agent's watch wakes on it (bridge.ts). Nothing here reads
 // layout; the caption overlay does.
 
-import type { DaydreamApi } from "@daydream/plugin-api";
+import type { DaydreamApi, ElementId } from "@daydream/plugin-api";
 import { createSignal, untrack } from "solid-js";
+
+import type { Target } from "./target";
 
 import {
   EMPTY_SESSION,
@@ -17,20 +19,30 @@ import {
 
 export const SESSION_KEY = "session";
 
+/** Every phase past idle carries the pick and its `anchor`: the
+ * render-time id of the picked element on the canvas, what the caption is
+ * drawn beside — null for a whole page, and for a pick restored from
+ * storage, whose page has been mounted anew since (target.ts). */
 export type Phase =
   | { kind: "idle" }
   /** Picked on the canvas, no agent has taken it. */
-  | { kind: "waiting"; pick: Pick }
+  | { kind: "waiting"; pick: Pick; anchor: ElementId | null }
   /** An agent took it and is working; ends when the round is complete —
    * every variant landed, the in-place rework landed, or the agent said
    * so (impeccable_done). `landed` counts a variant round's progress. */
-  | { kind: "building"; pick: Pick; landed: number; of: number | null };
+  | {
+      kind: "building";
+      pick: Pick;
+      anchor: ElementId | null;
+      landed: number;
+      of: number | null;
+    };
 
 export interface Session {
   phase: () => Phase;
-  /** The user picked a verb for the selection, with what they typed after
+  /** The user picked a verb for the target, with what they typed after
    * it as the brief (empty: none). */
-  pick(verb: string, viewportId: string, elementId: string | null, brief?: string): void;
+  pick(verb: string, target: Target, brief?: string): void;
   /** An agent takes what waits (impeccable_pick): the pick and the exit flag,
    * both cleared. */
   take(): { pick: Pick | null; exit: boolean };
@@ -59,22 +71,24 @@ export function createSession(dd: DaydreamApi): Session {
 
   return {
     phase,
-    pick(verb, viewportId, elementId, brief) {
+    pick(verb, target, brief) {
       const trimmed = brief?.trim() ?? "";
       const pick: Pick = {
         verb,
-        viewportId,
-        elementId,
+        viewportId: target.viewportId,
+        element: target.element,
         ...(trimmed === "" ? {} : { brief: trimmed }),
         at: Date.now(),
       };
-      setPhase({ kind: "waiting", pick });
+      setPhase({ kind: "waiting", pick, anchor: target.anchor });
       write({ pick, exit: false });
     },
     take() {
       const taken = { pick: state.pick, exit: state.exit };
       if (taken.pick !== null) {
-        setPhase({ kind: "building", pick: taken.pick, landed: 0, of: null });
+        const current = untrack(phase);
+        const anchor = current.kind === "idle" ? null : current.anchor;
+        setPhase({ kind: "building", pick: taken.pick, anchor, landed: 0, of: null });
       }
       write({ pick: null, exit: false });
       return taken;
@@ -101,7 +115,7 @@ export function createSession(dd: DaydreamApi): Session {
       const s = sessionState(saved);
       state = { ...s, exit: false };
       if (s.pick !== null && viewportExists(s.pick.viewportId)) {
-        setPhase({ kind: "waiting", pick: s.pick });
+        setPhase({ kind: "waiting", pick: s.pick, anchor: null });
       } else if (s.pick !== null) {
         write({ pick: null, exit: false });
       }

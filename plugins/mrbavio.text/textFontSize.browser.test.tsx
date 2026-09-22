@@ -42,7 +42,7 @@ test.each([undefined, { width: 240 }])(
   async (frame) => {
     const { host } = await mountShell({
       document: {
-        version: 5,
+        version: 7,
         items: [{ ...textItem(frame), payload: { text: "Hello" } }],
       },
     });
@@ -96,7 +96,7 @@ function textItem(frame?: { width: number; height?: number }): DreamItem {
 
 test("plus/minus adjust white text and proportional width, preserving lines, position and explicit height with undo", async () => {
   const { host } = await mountShell({
-    document: { version: 5, items: [textItem({ width: 300, height: 100 })] },
+    document: { version: 7, items: [textItem({ width: 300, height: 100 })] },
   });
   appStore.setItemSelection(["text"]);
   flush();
@@ -128,7 +128,7 @@ test("plus/minus adjust white text and proportional width, preserving lines, pos
 test("equals shortcut handles mixed selections but leaves other editors and non-text items alone", async () => {
   const { host } = await mountShell({
     document: {
-      version: 5,
+      version: 7,
       items: [
         textItem(),
         {
@@ -168,7 +168,7 @@ test("equals shortcut handles mixed selections but leaves other editors and non-
 test("font sizing during native editing keeps the caret, persists through typing, and commits as one session", async () => {
   const { host } = await mountShell({
     document: {
-      version: 5,
+      version: 7,
       items: [
         {
           ...textItem({ width: 240 }),
@@ -250,7 +250,7 @@ test("empty draft sizing takes effect before the first character, without creati
 });
 
 test("adjusted size survives duplication and document serialization, and never decreases below 2px", async () => {
-  await mountShell({ document: { version: 5, items: [textItem()] } });
+  await mountShell({ document: { version: 7, items: [textItem()] } });
   appStore.setItemSelection(["text"]);
   flush();
   chord("+");

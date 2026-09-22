@@ -58,8 +58,11 @@ export interface SessionState {
 export interface Pick {
   verb: string;
   viewportId: string;
-  /** The element inside it, or null for the whole page. */
-  elementId: string | null;
+  /** The element inside it as a CSS selector matching it alone in the
+   * page's stored markup — what get_viewport `element` and the draft
+   * tools take (decision #76) — or null for the whole page. Never the
+   * canvas's render-time id, which dies with the page's mount. */
+  element: string | null;
   /** What the user typed after the verb — the brief, which outranks the
    * playbook's defaults; absent when nothing was typed. */
   brief?: string;
@@ -86,7 +89,7 @@ function isPick(raw: unknown): raw is Pick {
   return (
     typeof r["verb"] === "string" &&
     typeof r["viewportId"] === "string" &&
-    (typeof r["elementId"] === "string" || r["elementId"] === null) &&
+    (typeof r["element"] === "string" || r["element"] === null) &&
     (r["brief"] === undefined || typeof r["brief"] === "string") &&
     typeof r["at"] === "number"
   );

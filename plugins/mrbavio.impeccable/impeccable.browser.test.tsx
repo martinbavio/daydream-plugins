@@ -3,19 +3,24 @@
 // the selection, watch the caption, cancel, end — and what an agent does
 // through the tab — take the pick — meet in the storage file the fake
 // host holds; and adopting a variant folds it into its source as one undo
-// step.
+// step. Every viewport is a page (decision #76): an element is selected by
+// the id its mount stamped, and a pick names it by selector.
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type {
   DreamDocument,
-  DreamViewport,
+  DreamPage,
   PluginManifest,
 } from "@daydream/plugin-api";
 import {
-  fixtureDocument,
-  fixtureRoot,
+  createPageItem,
+  createTestRequestHandlers,
+  fixturePage,
   flush,
   mountPlugin,
+  pageElementId,
+  pageFixtureDocument,
+  pageNode,
   type Host,
   type MountedPlugin,
 } from "@daydream/plugin-testing";
@@ -23,6 +28,7 @@ import {
 import activate, { DONE_TOOL, HTML_TOOL, PICK_TOOL } from "./index";
 import rawManifest from "./manifest.json";
 import { SESSION_KEY } from "./session";
+import { pageSelector } from "./target";
 import { variantMarker } from "./variants";
 
 const manifest = rawManifest as PluginManifest;
@@ -73,15 +79,41 @@ const tool = (name: string) =>
   mounted!.kernel.registry.tools.entries().find((e) => e.value.name === name)!.value;
 const pickTool = () => tool(PICK_TOOL);
 
+/** The render-time id of the element `selector` names in a page, once the
+ * page has mounted. */
+async function mountedId(itemId: string, selector: string): Promise<string> {
+  let id: string | null = null;
+  await vi.waitFor(() => {
+    id = pageElementId(itemId, selector);
+    expect(id).not.toBeNull();
+  });
+  return id!;
+}
+
+/** A page with a background of its own, for telling pages apart. */
+function page(background: string, meta?: DreamPage["payload"]["meta"]): DreamPage {
+  const item = fixturePage(pageFixtureDocument());
+  item.payload.css += `body { background: ${background}; }\n`;
+  if (meta === undefined) delete item.payload.meta;
+  else item.payload.meta = meta;
+  return item;
+}
+
+/** A one-page document whose page is titled `title`. */
+function sourceDocument(title = "Pricing"): { doc: DreamDocument; source: DreamPage } {
+  const doc = pageFixtureDocument();
+  const source = fixturePage(doc);
+  source.payload.meta = { title };
+  return { doc, source };
+}
+
 /** A variant of `source` for `verb`, `n` of `of`, as an agent lands it. */
-function variantOf(source: DreamViewport, verb: string, n: number, of: number): DreamViewport {
-  const v = fixtureDocument().items[0] as DreamViewport;
-  v.position = { x: 1000 * n, y: 0 };
-  v.payload.meta = {
+function variantOf(source: DreamPage, verb: string, n: number, of: number): DreamPage {
+  const v = page(`rgb(${n}, 0, 0)`, {
     title: `${source.payload.meta?.title ?? "Untitled"} · ${verb} ${n}/${of}`,
     notes: `${variantMarker({ verb, n, of, sourceId: source.id })}\n\nDirection ${n}.`,
-  };
-  v.payload.root.children[0]!.styles["background"] = `rgb(${n}, 0, 0)`;
+  });
+  v.position = { x: 1000 * n, y: 0 };
   return v;
 }
 
@@ -106,6 +138,14 @@ function key(target: EventTarget, init: KeyboardEventInit): void {
   flush();
 }
 
+/** Pick `verb` from the picker on the current selection. */
+async function pickVerb(verb: string): Promise<void> {
+  run("mrbavio.impeccable.pick");
+  await settle();
+  pickerEl()!.querySelector<HTMLElement>(`[data-verb="${verb}"]`)!.click();
+  await settle();
+}
+
 describe("mrbavio.impeccable in the shell", () => {
   test("the manifest declares what the entry registers", () => {
     expect(manifest.id).toBe("mrbavio.impeccable");
@@ -117,12 +157,11 @@ describe("mrbavio.impeccable in the shell", () => {
     expect(manifest.unstable).toBeUndefined();
   });
 
-  test("⌘P on a selection opens the picker beside it; a verb chosen writes the pick and captions the target; the agent takes it; a landing ends it", async () => {
-    const doc = fixtureDocument();
-    const viewport = doc.items[0] as DreamViewport;
-    const grid = fixtureRoot(doc).children[0]!.children[0]!.id;
+  test("⌘P on a page element opens the picker beside it; a verb chosen writes the pick by selector and captions the element; the agent takes it; a landing ends it", async () => {
+    const { doc, source } = sourceDocument();
     const { host, files } = fakeHost();
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
+    const grid = await mountedId(source.id, ".grid");
 
     // Nothing selected: the picker declines.
     expect(run("mrbavio.impeccable.pick")).toBe(false);
@@ -138,6 +177,11 @@ describe("mrbavio.impeccable in the shell", () => {
       "distill", "polish", "clarify", "animate", "adapt", "critique", "audit", "end session",
     ]);
     expect(document.activeElement).toBe(pickerEl()!.querySelector("input"));
+    // Beside the element, not the viewport: to the right of the grid's box.
+    const gridBox = pageNode(source.id, ".grid")!.getBoundingClientRect();
+    const pickerBox = pickerEl()!.getBoundingClientRect();
+    expect(pickerBox.left).toBeGreaterThanOrEqual(gridBox.right);
+    expect(Math.abs(pickerBox.top - gridBox.top)).toBeLessThan(2);
 
     type("bold");
     expect(verbs()).toEqual(["bolder"]);
@@ -162,19 +206,24 @@ describe("mrbavio.impeccable in the shell", () => {
     await settle();
     expect(pickerEl()).toBeNull();
 
+    // The pick names the element by its selector in the page — what
+    // get_viewport and the draft tools take — never by the mount's id.
     const waiting = await stored(files, 1);
     expect(waiting).toMatchObject({
       seq: 1,
       exit: false,
-      pick: { verb: "bolder", viewportId: viewport.id, elementId: grid, brief: "keep the photo, louder CTA" },
+      pick: { verb: "bolder", viewportId: source.id, element: "div.grid", brief: "keep the photo, louder CTA" },
     });
+    expect(JSON.stringify(waiting)).not.toContain(grid);
     await settle();
     expect(caption()!.textContent).toBe("bolder · waiting for an agent");
     expect(caption()!.dataset["phase"]).toBe("waiting");
+    // Above the element.
+    expect(caption()!.getBoundingClientRect().bottom).toBeLessThanOrEqual(gridBox.top + 1);
 
     // The agent takes it: the pick is answered once and cleared.
     const taken = (await pickTool().run({})) as { pick: unknown; exit: boolean };
-    expect(taken).toMatchObject({ pick: { verb: "bolder", elementId: grid, brief: "keep the photo, louder CTA" }, exit: false });
+    expect(taken).toMatchObject({ pick: { verb: "bolder", element: "div.grid", brief: "keep the photo, louder CTA" }, exit: false });
     expect(await stored(files, 2)).toMatchObject({ pick: null, exit: false });
     await settle();
     expect(caption()!.textContent).toBe("bolder · building");
@@ -182,57 +231,96 @@ describe("mrbavio.impeccable in the shell", () => {
 
     // A variants round: an unrelated landing changes nothing; each variant
     // that lands counts against the marker's `of`; the third ends it.
-    mounted.store.landItems([fixtureDocument().items[0]!]);
+    mounted.store.landItems([page("white")]);
     await settle();
     expect(caption()!.textContent).toBe("bolder · building");
-    mounted.store.landItems([variantOf(viewport, "bolder", 1, 3)]);
+    mounted.store.landItems([variantOf(source, "bolder", 1, 3)]);
     await settle();
     expect(caption()!.textContent).toBe("bolder · 1 of 3");
-    mounted.store.landItems([variantOf(viewport, "bolder", 2, 3)]);
+    mounted.store.landItems([variantOf(source, "bolder", 2, 3)]);
     await settle();
     expect(caption()!.textContent).toBe("bolder · 2 of 3");
-    mounted.store.landItems([variantOf(viewport, "bolder", 3, 3)]);
+    mounted.store.landItems([variantOf(source, "bolder", 3, 3)]);
     await settle();
     expect(caption()).toBeNull();
   });
 
+  test("the pick names an element by the same selector canvas_state answers for it", async () => {
+    const tricky = createPageItem({
+      html:
+        '<!doctype html><html><head></head><body><main><section class="card"><p>a</p><p>b</p></section>' +
+        '<section class="card"><p>c</p><p id="dup">d</p><p id="dup">e</p></section>' +
+        '<aside id="side"><p class="note">f</p></aside></main></body></html>',
+      css: "p { margin: 0; }\n",
+    }, { frame: { width: 640 } });
+    mounted = await mountPlugin({ entry: activate, manifest, document: { version: 7, items: [tricky] }, host: fakeHost().host });
+    const handlers = await createTestRequestHandlers(mounted);
+    await mountedId(tricky.id, "#side");
+    // Every element of the body, each found by a position-based path.
+    const paths = [
+      "main",
+      "main > section:nth-of-type(1)",
+      "main > section:nth-of-type(1) > p:nth-of-type(1)",
+      "main > section:nth-of-type(1) > p:nth-of-type(2)",
+      "main > section:nth-of-type(2)",
+      "main > section:nth-of-type(2) > p:nth-of-type(1)",
+      "main > section:nth-of-type(2) > p:nth-of-type(2)",
+      "main > section:nth-of-type(2) > p:nth-of-type(3)",
+      "main > aside",
+      "main > aside > p",
+    ];
+    expect(pageNode(tricky.id, "body")!.querySelectorAll("*").length).toBe(paths.length);
+    for (const path of paths) {
+      const node = pageNode(tricky.id, path)!;
+      select(pageElementId(tricky.id, path));
+      // canvas_state, as the bridge asks the tab for it.
+      const state = (await handlers.state(undefined)) as {
+        selection: { selector?: string } | null;
+      };
+      const expected = state.selection?.selector;
+      expect(expected).toBeDefined();
+      expect(pageSelector(node)).toBe(expected);
+      // …and it names that element alone in the stored markup.
+      const stored = new DOMParser().parseFromString(tricky.payload.html, "text/html");
+      expect(stored.querySelectorAll(expected!).length).toBe(1);
+    }
+    // Outside a page there is nothing to name.
+    expect(pageSelector(document.body)).toBeNull();
+  });
+
   test("an in-place round stays building through unrelated edits and ends when the source's page changes; impeccable_done ends any round", async () => {
-    const doc = fixtureDocument();
-    const viewport = doc.items[0] as DreamViewport;
+    const { doc, source } = sourceDocument();
     const { host } = fakeHost();
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
+    await mountedId(source.id, ".grid");
 
-    select(viewport.payload.root.id);
-    run("mrbavio.impeccable.pick");
-    await settle();
-    pickerEl()!.querySelector<HTMLElement>('[data-verb="polish"]')!.click();
-    await settle();
+    select(source.id);
+    await pickVerb("polish");
     await pickTool().run({});
     await settle();
     expect(caption()!.textContent).toBe("polish · building");
 
-    // A move of the source and a landing elsewhere are not the rework.
+    // A move of the source, a meta edit and a landing elsewhere are not
+    // the rework.
     mounted.store.setDocument((d) => {
       d.items[0]!.position = { x: 40, y: 40 };
+      (d.items[0] as DreamPage).payload.meta = { title: "Pricing, renamed" };
     });
-    mounted.store.landItems([fixtureDocument().items[0]!]);
+    mounted.store.landItems([page("white")]);
     await settle();
     expect(caption()!.textContent).toBe("polish · building");
-    // The source's page changing is.
+    // The source's page changing is — a css write here.
     mounted.store.setDocument((d) => {
-      (d.items[0] as DreamViewport).payload.root.children[0]!.styles["background"] = "papayawhip";
+      (d.items[0] as DreamPage).payload.css += "body { background: papayawhip; }\n";
     });
     await settle();
     expect(caption()).toBeNull();
 
     // impeccable_done: the agent's word ends a round the canvas cannot see the
     // end of (a round that stopped short).
-    run("mrbavio.impeccable.pick");
-    await settle();
-    pickerEl()!.querySelector<HTMLElement>('[data-verb="bolder"]')!.click();
-    await settle();
+    await pickVerb("bolder");
     await pickTool().run({});
-    mounted.store.landItems([variantOf(viewport, "bolder", 1, 3)]);
+    mounted.store.landItems([variantOf(source, "bolder", 1, 3)]);
     await settle();
     expect(caption()!.textContent).toBe("bolder · 1 of 3");
     expect(await tool(DONE_TOOL).run({})).toEqual({ done: true });
@@ -240,13 +328,46 @@ describe("mrbavio.impeccable in the shell", () => {
     expect(caption()).toBeNull();
   });
 
+  test("a caption whose element is remounted away moves to the page's corner; a css write keeps it on the element", async () => {
+    const { doc, source } = sourceDocument();
+    const { host } = fakeHost();
+    mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
+    select(await mountedId(source.id, ".header"));
+    await pickVerb("typeset");
+    // On the element: flush with its left edge, above it. In the corner:
+    // 8px in from the page's own left edge, which the body's 24px padding
+    // puts well left of the header.
+    const onElement = () => {
+      const header = pageNode(source.id, ".header")!.getBoundingClientRect();
+      const box = caption()!.getBoundingClientRect();
+      return Math.abs(box.left - header.left) < 1 && box.bottom <= header.top + 1;
+    };
+    expect(onElement()).toBe(true);
+    // A css write restyles in place: same nodes, same ids.
+    mounted.store.setDocument((d) => {
+      (d.items[0] as DreamPage).payload.css += ".header { min-height: 80px; }\n";
+    });
+    await settle();
+    expect(onElement()).toBe(true);
+    // A markup write remounts: the element's id is gone, the pick keeps
+    // its selector, the caption goes inside the page's top-left corner.
+    mounted.store.setDocument((d) => {
+      const p = d.items[0] as DreamPage;
+      p.payload.html = p.payload.html.replace("<body>", "<body><p>Intro</p>");
+    });
+    await settle();
+    expect(caption()!.textContent).toBe("typeset · waiting for an agent");
+    expect(onElement()).toBe(false);
+    expect((await pickTool().run({})) as unknown).toMatchObject({ pick: { verb: "typeset", element: "div.header" } });
+  });
+
   test("the whole page is the target when the viewport item is selected; Escape closes the picker, then cancels a waiting pick; end session from the picker writes exit", async () => {
-    const doc = fixtureDocument();
-    const viewport = doc.items[0] as DreamViewport;
+    const { doc, source } = sourceDocument();
     const { host, files } = fakeHost();
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
+    await mountedId(source.id, ".grid");
 
-    select(viewport.payload.root.id);
+    select(source.id);
     expect(run("mrbavio.impeccable.pick")).toBe(true);
     await settle();
     // Escape in the field closes the picker and picks nothing.
@@ -255,12 +376,9 @@ describe("mrbavio.impeccable in the shell", () => {
     expect(pickerEl()).toBeNull();
     expect(files[manifest.id]).toBeUndefined();
 
-    run("mrbavio.impeccable.pick");
-    await settle();
-    pickerEl()!.querySelector<HTMLElement>('[data-verb="polish"]')!.click();
-    await settle();
+    await pickVerb("polish");
     const polished = await stored(files, 1);
-    expect(polished).toMatchObject({ pick: { verb: "polish", viewportId: viewport.id, elementId: null } });
+    expect(polished).toMatchObject({ pick: { verb: "polish", viewportId: source.id, element: null } });
     expect((polished["pick"] as { brief?: string }).brief).toBeUndefined();
     expect(caption()!.textContent).toBe("polish · waiting for an agent");
 
@@ -270,97 +388,105 @@ describe("mrbavio.impeccable in the shell", () => {
     expect(caption()).toBeNull();
     expect(run("mrbavio.impeccable.cancel")).toBe(false); // nothing to cancel
 
-    run("mrbavio.impeccable.pick");
-    await settle();
-    pickerEl()!.querySelector<HTMLElement>('[data-verb="end session"]')!.click();
+    await pickVerb("end session");
     expect(await stored(files, 3)).toMatchObject({ pick: null, exit: true });
     expect((await pickTool().run({})) as unknown).toEqual({ pick: null, exit: true });
     expect(await stored(files, 4)).toMatchObject({ exit: false });
   });
 
-  test("a waiting pick survives a reload; exit does not", async () => {
-    const doc = fixtureDocument();
-    const viewport = doc.items[0] as DreamViewport;
-    const grid = fixtureRoot(doc).children[0]!.children[0]!.id;
+  test("a waiting pick survives a reload, captioned in its page's corner; exit does not", async () => {
+    const { doc, source } = sourceDocument();
     const { host } = fakeHost({
       [manifest.id]: {
-        [SESSION_KEY]: { seq: 7, exit: true, pick: { verb: "typeset", viewportId: viewport.id, elementId: grid, at: 1 } },
+        [SESSION_KEY]: { seq: 7, exit: true, pick: { verb: "typeset", viewportId: source.id, element: ".grid", at: 1 } },
       },
     });
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
     await settle();
     expect(caption()!.textContent).toBe("typeset · waiting for an agent");
-    expect((await pickTool().run({})) as unknown).toMatchObject({ pick: { verb: "typeset" }, exit: false });
+    expect((await pickTool().run({})) as unknown).toMatchObject({ pick: { verb: "typeset", element: ".grid" }, exit: false });
   });
 
-  test("a variant is titled from its marker and the source's shown name, whatever the agent called it", async () => {
-    const doc = fixtureDocument();
-    const source = doc.items[0] as DreamViewport;
-    source.payload.root.label = "Pricing";
+  test("a variant is titled from its marker and the source's title, whatever the agent called it", async () => {
+    const { doc, source } = sourceDocument("Pricing");
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
     await settle();
-    // The agent copied the root, label included, and gave a stale base title.
+    // The agent gave a stale base title.
     const v = variantOf(source, "bolder", 2, 3);
-    v.payload.root.label = "Pricing";
     v.payload.meta!.title = "Pricing · delight 1/3 · bolder 2/3";
     mounted.store.landItems([v]);
     await settle();
-    const landed = mounted.store.document.items.find((i) => i.id === v.id) as DreamViewport;
-    expect(landed.payload.root.label).toBe("Pricing · bolder 2/3");
+    const landed = mounted.store.document.items.find((i) => i.id === v.id) as DreamPage;
     expect(landed.payload.meta?.title).toBe("Pricing · bolder 2/3");
     expect(landed.payload.meta?.notes).toBe(v.payload.meta!.notes); // the marker stays
+    expect(landed.payload.html).toBe(v.payload.html); // the page is not touched
     const bars = Array.from(mounted.host.querySelectorAll("[class*='bar'] span")).map((s) => s.textContent);
     expect(bars).toContain("Pricing · bolder 2/3");
-    // A variant of a variant chains from its own source's shown name.
+    // A variant of a variant chains from its own source's title.
     const ok = variantOf(landed, "layout", 1, 1);
     mounted.store.landItems([ok]);
     await settle();
-    expect((mounted.store.document.items.find((i) => i.id === ok.id) as DreamViewport).payload.root.label).toBe("Pricing · bolder 2/3 · layout 1/1");
+    expect((mounted.store.document.items.find((i) => i.id === ok.id) as DreamPage).payload.meta?.title).toBe(
+      "Pricing · bolder 2/3 · layout 1/1",
+    );
   });
 
-  test("impeccable_html renders the viewport as one standalone page; a report verb captions as reviewing", async () => {
-    const doc = fixtureDocument();
-    const viewport = doc.items[0] as DreamViewport;
+  test("impeccable_html renders the page as one standalone file, pruned to a selector's element; a report verb captions as reviewing", async () => {
+    const { doc, source } = sourceDocument();
+    // A bundle-relative image and background: the mount points them at
+    // this host's route, and the export makes that absolute.
+    source.payload.html = source.payload.html.replace(
+      '<div class="footer"></div>',
+      '<div class="footer"><img src="assets/logo.png" alt=""></div>',
+    );
+    source.payload.css += ".aside { background-image: url(assets/bg.png); }\n";
     const { host } = fakeHost();
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
-    const reply = (await tool(HTML_TOOL).run({ viewport: viewport.id })) as { viewportId: string; html: string; bytes: number };
-    expect(reply.viewportId).toBe(viewport.id);
+    const reply = (await tool(HTML_TOOL).run({ viewport: source.id })) as { viewportId: string; html: string; bytes: number };
+    expect(reply.viewportId).toBe(source.id);
     expect(reply.html.startsWith("<!doctype html>")).toBe(true);
     expect(reply.html).toContain("<style>");
     expect(reply.html).toContain("</body></html>");
     expect(reply.bytes).toBe(reply.html.length);
+    const origin = window.location.origin;
+    expect(reply.html).toMatch(new RegExp(`src="${origin}/[^"]*logo\\.png"`));
+    expect(reply.html).toMatch(new RegExp(`url\\(["']?${origin}/[^)]*bg\\.png`));
+    expect(reply.html).not.toMatch(/(src|href)="\/(?!\/)/);
     // The mount is gone once read: no live iframe left behind.
     await settle();
     expect(document.querySelectorAll("iframe").length).toBe(0);
     await expect(tool(HTML_TOOL).run({ viewport: "nope" })).rejects.toThrow(/no viewport/);
     // With an element: the page is pruned to it — its subtree, its
     // ancestors, the style block — and the subtree is marked.
-    const body = fixtureRoot(doc).children[0]!;
-    const grid = body.children[0]!.children[0]!;
-    const pruned = (await tool(HTML_TOOL).run({ viewport: viewport.id, element: grid.id })) as {
+    const pruned = (await tool(HTML_TOOL).run({ viewport: source.id, element: ".grid" })) as {
       html: string;
-      target?: { id: string; kept: number; pruned: number };
+      target?: { selector: string; kept: number; pruned: number };
     };
-    expect(pruned.target).toMatchObject({ id: grid.id, kept: 1 + grid.children.length });
-    expect(pruned.target!.pruned).toBeGreaterThan(0);
+    expect(pruned.target).toMatchObject({ selector: ".grid", kept: 5 }); // the grid, three boxes, the image
     const page = new DOMParser().parseFromString(pruned.html, "text/html");
     expect(page.querySelector("style")).not.toBeNull();
-    expect(page.querySelectorAll("[data-impeccable-target]").length).toBe(1 + grid.children.length);
-    expect(page.querySelector(`[data-dream-id="${grid.id}"]`)).not.toBeNull();
+    expect(page.querySelectorAll("[data-impeccable-target]").length).toBe(5);
+    const gridNode = page.querySelector(".grid")!;
+    expect(gridNode.hasAttribute("data-impeccable-target")).toBe(true);
     // Every element left is an ancestor of the target or inside it.
-    const gridNode = page.querySelector(`[data-dream-id="${grid.id}"]`)!;
     for (const el of page.body.querySelectorAll("*")) {
       expect(el.contains(gridNode) || gridNode.contains(el)).toBe(true);
     }
     expect(page.body.hasAttribute("data-impeccable-target")).toBe(false);
-    expect(page.body.querySelectorAll("*").length).toBeLessThan(reply.html.split("<").length);
-    await expect(tool(HTML_TOOL).run({ viewport: viewport.id, element: "nope" })).rejects.toThrow(/no element/);
+    // A deeper target prunes its siblings: the header alone of the grid.
+    const header = (await tool(HTML_TOOL).run({ viewport: source.id, element: ".grid > .header" })) as {
+      html: string;
+      target: { kept: number; pruned: number };
+    };
+    expect(header.target).toMatchObject({ kept: 1, pruned: 2 });
+    expect(new DOMParser().parseFromString(header.html, "text/html").querySelector(".aside")).toBeNull();
+    // A selector matching none, several, or nothing the browser takes.
+    await expect(tool(HTML_TOOL).run({ viewport: source.id, element: ".nope" })).rejects.toThrow(/no element matches "\.nope"/);
+    await expect(tool(HTML_TOOL).run({ viewport: source.id, element: ".grid > div" })).rejects.toThrow(/matches 3 elements/);
+    await expect(tool(HTML_TOOL).run({ viewport: source.id, element: "!!" })).rejects.toThrow(/refused/);
 
-    select(viewport.payload.root.id);
-    run("mrbavio.impeccable.pick");
-    await settle();
-    pickerEl()!.querySelector<HTMLElement>('[data-verb="audit"]')!.click();
-    await settle();
+    select(source.id);
+    await pickVerb("audit");
     expect(caption()!.textContent).toBe("audit · waiting for an agent");
     await pickTool().run({});
     await settle();
@@ -370,10 +496,8 @@ describe("mrbavio.impeccable in the shell", () => {
     expect(caption()).toBeNull();
   });
 
-  test("adopt sits in a variant's title bar: its page replaces the source, the round is removed, one undo step", async () => {
-    const doc: DreamDocument = fixtureDocument();
-    const source = doc.items[0] as DreamViewport;
-    source.payload.meta = { title: "Pricing" };
+  test("adopt sits in a variant's title bar: its page replaces the source's, the source keeps its meta, the round is removed, one undo step", async () => {
+    const { doc, source } = sourceDocument("Pricing");
     const variants = [1, 2, 3].map((n) => variantOf(source, "bolder", n, 3));
     doc.items.push(...variants);
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
@@ -388,11 +512,18 @@ describe("mrbavio.impeccable in the shell", () => {
 
     const items = mounted.store.document.items;
     expect(items.map((i) => i.id)).toEqual([source.id]);
-    const adopted = items[0] as DreamViewport;
-    expect(adopted.payload.meta).toEqual({ title: "Pricing" });
-    expect(adopted.payload.root.children[0]!.styles["background"]).toBe("rgb(2, 0, 0)");
-    expect(adopted.payload.root.id).toBe(variants[1]!.payload.root.id);
-    expect(mounted.store.selectedId()).toBe(adopted.payload.root.id);
+    const adopted = items[0] as DreamPage;
+    expect(adopted.payload).toEqual({
+      html: variants[1]!.payload.html,
+      css: variants[1]!.payload.css,
+      meta: { title: "Pricing" },
+    });
+    expect(adopted.payload.css).toContain("rgb(2, 0, 0)");
+    // The source is selected whole; its page renders the variant's.
+    expect(mounted.store.selectedId()).toBe(source.id);
+    await vi.waitFor(() =>
+      expect(getComputedStyle(pageNode(source.id, "body")!).backgroundColor).toBe("rgb(2, 0, 0)"),
+    );
 
     // One undo step brings the fan back.
     mounted.kernel.commands.runCommand("core.undo");

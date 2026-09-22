@@ -38,7 +38,7 @@ test("ingest wraps long text at 60ch before relative placement, keeping short te
   const handlers = await createTestRequestHandlers(mounted);
   await handlers.ingest({
     dream: {
-      version: 5,
+      version: 7,
       items: [{ kind: "mrbavio.text", payload: { text: short } }],
     },
   });
@@ -57,7 +57,7 @@ test("ingest wraps long text at 60ch before relative placement, keeping short te
   const version = store.documentVersion();
   await handlers.ingest({
     dream: {
-      version: 5,
+      version: 7,
       items: [{ kind: "mrbavio.text", payload: { text: long } }],
     },
     placement: { relation: "above", target: { itemId: target.id } },
@@ -81,7 +81,7 @@ test("ingest preserves explicit text frames and counts Unicode characters, not U
     await createTestRequestHandlers(mounted)
   ).ingest({
     dream: {
-      version: 5,
+      version: 7,
       items: [
         { kind: "mrbavio.text", payload: { text: "🌎".repeat(60) } },
         {
@@ -101,7 +101,7 @@ test.each([undefined, { relation: "above", target: { itemId: "missing" } }])(
   async (placement) => {
     const mounted = await mountShell({
       document: {
-        version: 5,
+        version: 7,
         items: [
           {
             id: "long-label",
@@ -119,7 +119,7 @@ test.each([undefined, { relation: "above", target: { itemId: "missing" } }])(
       await createTestRequestHandlers(mounted)
     ).ingest({
       dream: {
-        version: 5,
+        version: 7,
         items: [{ kind: "mrbavio.text", payload: { text: "Next" } }],
       },
       ...(placement === undefined ? {} : { placement }),
@@ -134,7 +134,7 @@ test.each([undefined, { relation: "above", target: { itemId: "missing" } }])(
 test("auto-width text lands left-aligned above visible title chrome at the current zoom", async () => {
   const mounted = await mountShell({
     document: {
-      version: 5,
+      version: 7,
       items: [
         {
           id: "target",
@@ -154,7 +154,7 @@ test("auto-width text lands left-aligned above visible title chrome at the curre
   const handlers = await createTestRequestHandlers(mounted);
   await handlers.ingest({
     dream: {
-      version: 5,
+      version: 7,
       items: [{ kind: "mrbavio.text", payload: { text: "Hello\nworld" } }],
     },
     placement: { relation: "above", target: "selection" },
