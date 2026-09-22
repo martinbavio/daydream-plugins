@@ -5,24 +5,26 @@
 // markup itself in `text/plain`, so the plain face wins), or whose
 // `text/html` parses to at least one element and is more than a single
 // paragraph of prose (prose.ts) — a paragraph is text however a browser
-// wrapped it, and is left for Text. Lands ONE item as one undo step, the
-// way the Text plugin does — `dd.mutateItems` then `dd.select` — and
-// reports what the conversion lost in one console line. No gates: a
-// paste is the user's own hand on the canvas, not an agent's landing.
+// wrapped it, and is left for Text. Lands ONE page (page.ts, decision
+// #76) as one undo step, the way the Text plugin does — `dd.mutateItems`
+// then `dd.select` — and reports what the page lost in one console line.
+// No gates: a paste is the user's own hand on the canvas, not an agent's
+// landing.
 
 import type { DaydreamApi } from "@daydream/plugin-api";
 import { flush, untrack } from "solid-js";
 
 import {
-  convertDocument,
-  countElements,
+  dataImages,
+  describePaste,
   hasElements,
+  pageAssetSrc,
+  pageFromPaste,
   parseHtml,
   VIEWPORT_WIDTH,
-  type Conversion,
-} from "./convert";
+  type DataImage,
+} from "./page";
 import { hasContent, isSingleParagraph } from "./prose";
-import { count, describeReport } from "./report";
 
 export const PASTE_PRIORITY = 5;
 
@@ -44,16 +46,24 @@ export function looksLikeMarkup(text: string): boolean {
   return text.trimStart().startsWith("<") && /<\/[a-z][\w:-]*\s*>/i.test(text);
 }
 
-/** The document a transfer carries as markup, or null when this plugin
- * should not claim it: no markup at all, nothing a page could show, or
- * a single paragraph of prose that Text can hold as the plain text. */
-export function htmlSource(transfer: DataTransfer | null): Document | null {
+/** What a transfer carries as markup: the text, and its parse. */
+export interface HtmlSource {
+  /** The face that was parsed, as it arrived: what the page stores when
+   * the paste has nothing to gather out of it. */
+  text: string;
+  doc: Document;
+}
+
+/** The markup a transfer carries, or null when this plugin should not
+ * claim it: no markup at all, nothing a page could show, or a single
+ * paragraph of prose that Text can hold as the plain text. */
+export function htmlSource(transfer: DataTransfer | null): HtmlSource | null {
   if (transfer === null || transfer.files.length > 0) return null;
   const text = transfer.getData("text/plain");
   // Markup typed or copied as plain text is deliberate and always lands.
   if (looksLikeMarkup(text)) {
     const doc = parseHtml(text);
-    if (hasElements(doc) && hasContent(doc)) return doc;
+    if (hasElements(doc) && hasContent(doc)) return { text, doc };
   }
   const html = transfer.getData("text/html");
   if (html === "") return null;
@@ -62,7 +72,15 @@ export function htmlSource(transfer: DataTransfer | null): Document | null {
   // A browser copies prose as HTML: a paragraph is text however it was
   // wrapped. Text lands the plain face; with none, nothing lands.
   if (isSingleParagraph(doc)) return null;
-  return doc;
+  return { text: html, doc };
+}
+
+/** Each distinct entry once, with `×n` when it repeats, in first-seen
+ * order — the kernel landing's own counting. */
+function counted(items: readonly string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1);
+  return [...counts].map(([item, n]) => (n === 1 ? item : `${item} ×${n}`));
 }
 
 export function registerHtmlPaste(dd: DaydreamApi): void {
@@ -92,14 +110,26 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
     camera = next;
   });
 
-  const land = ({ item, report }: Conversion): void => {
+  const land = (
+    source: HtmlSource,
+    position: { x: number; y: number },
+    edited: boolean,
+    lost: string[],
+  ): void => {
+    const pasted = pageFromPaste(source.text, source.doc, {
+      id: dd.core.generateId(),
+      position,
+      edited,
+      lost,
+    });
+    const { item } = pasted;
     pasting = true;
     try {
       dd.mutateItems((items) => {
         items.push(item);
       });
-      // The viewport's root is its selection id, as core's chrome writes it.
-      dd.select(item.payload.root.id);
+      // A page is selected as an item is: by its envelope id.
+      dd.select(item.id);
       // Flush the paste's own notifications while suppression is explicit.
       flush();
     } catch (error) {
@@ -115,20 +145,40 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
     if (!untrack(() => dd.items().some((landed) => landed.id === item.id)))
       return;
     console.info(
-      `[${dd.plugin.id}] ${describeReport(report, countElements(item.payload.root))}`,
+      `[${dd.plugin.id}] ${describePaste(pasted.elements, pasted.lost)}`,
     );
   };
 
-  const vendorThenLand = async (conversion: Conversion): Promise<void> => {
+  /** A page stores no `data:` url (decision #76): each image is stored
+   * through the host first and its `img` pointed at the copy. One that
+   * cannot be loses its `src`, said the way the kernel's landing says a
+   * removed attribute; the `img` stays, with its `alt`. */
+  const vendorThenLand = async (
+    source: HtmlSource,
+    position: { x: number; y: number },
+    images: DataImage[],
+  ): Promise<void> => {
     const load = untrack(() => dd.loadVersion());
-    for (const { element, file } of conversion.dataImages) {
-      try {
-        const { src } = await dd.vendorFile(file);
-        element.attrs = { ...element.attrs, src };
-      } catch {
-        // No storage, a refused upload, or unload: the img keeps its alt.
-        count(conversion.report.images, "data:");
+    const lost: string[] = [];
+    for (const { img, file } of images) {
+      let src: string | null = null;
+      if (file !== null) {
+        try {
+          src = pageAssetSrc((await dd.vendorFile(file)).src);
+        } catch {
+          // No storage, a refused upload, or unload: said below.
+        }
       }
+      if (src !== null) {
+        img.setAttribute("src", src);
+        continue;
+      }
+      img.removeAttribute("src");
+      lost.push(
+        file === null
+          ? "removed the attribute img[src] (a data: url that is not an image)"
+          : "removed the attribute img[src] (a data: image the host could not store)",
+      );
     }
     if (untrack(() => dd.loadVersion()) !== load) {
       console.info(
@@ -136,7 +186,7 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
       );
       return;
     }
-    land(conversion);
+    land(source, position, true, counted(lost));
   };
 
   dd.canvas.onPaste(
@@ -157,7 +207,7 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
       const source = htmlSource(transfer);
       if (source === null) return;
       event.preventDefault();
-      const size = source.body.getElementsByTagName("*").length;
+      const size = source.doc.body.getElementsByTagName("*").length;
       if (size > MAX_ELEMENTS) {
         console.error(
           `[${dd.plugin.id}] paste refused: ${size} elements; a viewport holds at most ${MAX_ELEMENTS}`,
@@ -168,12 +218,13 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
       const center = dd.canvas.center();
       // Centered on the width; the height is the page's to decide once it
       // renders, so the top sits a quarter-width above the center.
-      const conversion = convertDocument(source, dd.core, {
+      const position = {
         x: center.x - VIEWPORT_WIDTH / 2 + cascade,
         y: center.y - VIEWPORT_WIDTH / 4 + cascade,
-      });
-      if (conversion.dataImages.length === 0) land(conversion);
-      else void vendorThenLand(conversion);
+      };
+      const images = dataImages(source.doc);
+      if (images.length === 0) land(source, position, false, []);
+      else void vendorThenLand(source, position, images);
     },
     { priority: PASTE_PRIORITY },
   );
