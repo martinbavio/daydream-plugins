@@ -54,8 +54,8 @@ const URL_ATTRIBUTES = ["src", "href", "poster", "xlink:href"];
 const rootRelative = (url: string): boolean => /^\/(?!\/)/.test(url.trim());
 
 /** Every root-relative url in the document made absolute to `origin`:
- * the url attributes, each `srcset` candidate, and `url()` in every
- * `<style>` and `style` attribute. The mount points a page's own
+ * the url attributes, each `srcset` candidate, and `url()` and an
+ * `image-set()` string in every `<style>` and `style` attribute. The mount points a page's own
  * `assets/<file>` at this host's route for its document, so the exported
  * file loads them from wherever it is opened. */
 export function absoluteUrls(doc: Document, origin: string): void {
@@ -67,18 +67,7 @@ export function absoluteUrls(doc: Document, origin: string): void {
       }
     }
     const srcset = el.getAttribute("srcset");
-    if (srcset !== null) {
-      el.setAttribute(
-        "srcset",
-        srcset
-          .split(",")
-          .map((candidate) => {
-            const trimmed = candidate.trim();
-            return rootRelative(trimmed) ? origin + trimmed : trimmed;
-          })
-          .join(", "),
-      );
-    }
+    if (srcset !== null) el.setAttribute("srcset", absoluteSrcset(srcset, origin));
     const style = el.getAttribute("style");
     if (style !== null) el.setAttribute("style", absoluteCssUrls(style, origin));
   }
@@ -87,7 +76,74 @@ export function absoluteUrls(doc: Document, origin: string): void {
   }
 }
 
-/** `url(/…)`, quoted or not, made `url(<origin>/…)`. */
+/** Each root-relative candidate url of a `srcset` made absolute to
+ * `origin`, every other character kept. A candidate is read as HTML's
+ * srcset parser reads it — separators (whitespace and commas), then the
+ * url up to whitespace (trailing commas end it, with no descriptor), then
+ * its descriptors up to a comma outside parentheses — so a url holding a
+ * comma stays one url. */
+export function absoluteSrcset(srcset: string, origin: string): string {
+  let out = "";
+  let from = 0;
+  let i = 0;
+  while (i < srcset.length) {
+    while (i < srcset.length && /[\s,]/.test(srcset[i]!)) i += 1;
+    if (i >= srcset.length) break;
+    const start = i;
+    while (i < srcset.length && !/\s/.test(srcset[i]!)) i += 1;
+    if (rootRelative(srcset.slice(start, i))) {
+      out += srcset.slice(from, start) + origin;
+      from = start;
+    }
+    if (srcset[i - 1] === ",") continue;
+    let depth = 0;
+    for (; i < srcset.length; i++) {
+      const c = srcset[i];
+      if (c === "(") depth += 1;
+      else if (c === ")") depth = Math.max(0, depth - 1);
+      else if (c === "," && depth === 0) break;
+    }
+  }
+  return out + srcset.slice(from);
+}
+
+/** `url(/…)`, quoted or not, made `url(<origin>/…)`, and a root-relative
+ * string inside `image-set()` (`image-set("/a.png" 1x)`, the
+ * `-webkit-` spelling too) made `"<origin>/…"`. */
 export function absoluteCssUrls(css: string, origin: string): string {
-  return css.replace(/url\(\s*(['"]?)\/(?!\/)/g, (_, quote: string) => `url(${quote}${origin}/`);
+  const urls = css.replace(/url\(\s*(['"]?)\/(?!\/)/g, (_, quote: string) => `url(${quote}${origin}/`);
+  return absoluteImageSets(urls, origin);
+}
+
+/** The strings of every `image-set(…)` in `css`, root-relative ones made
+ * absolute: each `image-set(` is read to its closing parenthesis, strings
+ * (escapes honoured) skipped whole so a parenthesis in one does not end
+ * it. */
+function absoluteImageSets(css: string, origin: string): string {
+  const opening = /image-set\(/gi;
+  let out = "";
+  let from = 0;
+  for (let open = opening.exec(css); open !== null; open = opening.exec(css)) {
+    let i = open.index + open[0].length;
+    let depth = 1;
+    while (i < css.length && depth > 0) {
+      const c = css[i]!;
+      if (c === '"' || c === "'") {
+        let end = i + 1;
+        while (end < css.length && css[end] !== c) end += css[end] === "\\" ? 2 : 1;
+        const body = css.slice(i + 1, end);
+        if (/^\/(?!\/)/.test(body)) {
+          out += css.slice(from, i + 1) + origin;
+          from = i + 1;
+        }
+        i = end + 1;
+        continue;
+      }
+      if (c === "(") depth += 1;
+      else if (c === ")") depth -= 1;
+      i += 1;
+    }
+    opening.lastIndex = i;
+  }
+  return out + css.slice(from);
 }

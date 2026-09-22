@@ -120,21 +120,20 @@ export default function createGridOverlay(dd: DaydreamApi): JSX.Element {
     },
   );
 
-  // The selected element's parent in its page (decision #76): the first
-  // ancestor `dd.pageStack` lists, by the render-time id the page's mount
-  // stamped on it. A render-time id never outlives its mount, and a node
-  // changes parent only through a markup write, which remounts and mints
-  // new ids — so one answer per id holds for that id's whole life, and the
-  // stack (which matches every ancestor's rules) is read once per
-  // selection, never per pan frame. Null for an item, for nothing mounted
-  // yet (not remembered, so the next state asks again), and for `html`.
+  // The selected element's parent in its page (decision #76), from
+  // `dd.pageElement` — the mount and the markup alone, no rule matching —
+  // by the render-time id the page's mount stamped on it. A render-time id
+  // never outlives its mount, and a node changes parent only through a
+  // markup write, which remounts and mints new ids — so one answer per id
+  // holds for that id's whole life, and it is read once per selection,
+  // never per pan frame. Null for an item, for nothing mounted yet (not
+  // remembered, so the next state asks again), and for `html`.
   let parentFor: { id: ElementId; parent: ElementId | null } | null = null;
   const parentOf = (id: ElementId): ElementId | null => {
     if (parentFor?.id === id) return parentFor.parent;
-    const stack = dd.pageStack(id);
-    if (stack === null) return null;
-    const parent = stack.ancestors[0]?.elementId;
-    parentFor = { id, parent: parent === undefined || parent === "" ? null : parent };
+    const element = dd.pageElement(id);
+    if (element === null) return null;
+    parentFor = { id, parent: element.parentId };
     return parentFor.parent;
   };
 
