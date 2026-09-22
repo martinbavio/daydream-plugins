@@ -6,9 +6,11 @@
 // Text's to test: here, leaving it is the event not being claimed.
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import type { DaydreamApi, PluginManifest } from "@daydream/plugin-api";
 import {
   createEmptyDocument,
   flush,
+  mountPlugin,
   mountShell,
   pageNode,
   pageShadow,
@@ -27,6 +29,8 @@ import mixedInline from "./fixtures/mixed-inline.html?raw";
 import ornaments from "./fixtures/ornaments.html?raw";
 import svgIcon from "./fixtures/svg-icon.html?raw";
 import table from "./fixtures/table.html?raw";
+import activate from "./index";
+import manifest from "./manifest.json";
 import { htmlSource, looksLikeMarkup, MAX_ELEMENTS, MAX_SOURCE } from "./paste";
 import { isSingleParagraph } from "./prose";
 
@@ -70,13 +74,42 @@ const mount = (host?: Host) =>
     ...(host === undefined ? {} : { host }),
   });
 
-/** The one page on the canvas, and its shadow root once it has mounted. */
+/** This plugin alone, activated with its `dd` in hand: for a test that
+ * asks the kernel what the plugin asks it. */
+async function mountWithApi(): Promise<{
+  shell: MountedShell;
+  dd: DaydreamApi;
+}> {
+  let dd: DaydreamApi | null = null;
+  const shell = await mountPlugin({
+    entry: (api) => {
+      dd = api;
+      activate(api);
+    },
+    manifest: manifest as PluginManifest,
+    document: createEmptyDocument(),
+  });
+  return { shell, dd: dd! };
+}
+
+/** The document's items once `count` have landed: a paste lands after
+ * the kernel has cleaned it, not in the event. */
+async function landed(shell: MountedShell, count: number) {
+  await vi.waitFor(() =>
+    expect(shell.store.document.items).toHaveLength(count),
+  );
+  return shell.store.document.items;
+}
+
+/** The one page on the canvas once it has landed, and its shadow root
+ * once it has mounted. */
 async function landedPage(shell: MountedShell): Promise<{
   id: string;
   html: string;
   css: string;
   shadow: ShadowRoot;
 }> {
+  await landed(shell, 1);
   const [page] = viewportItems(shell.store.document);
   expect(page).toBeDefined();
   let shadow: ShadowRoot | null = null;
@@ -237,9 +270,7 @@ describe("landing", () => {
       "text/plain": "Ship layouts, not mockups",
     });
     expect(event.defaultPrevented).toBe(true);
-    const items = shell.store.document.items;
-    expect(items).toHaveLength(1);
-    const item = items[0]!;
+    const item = (await landed(shell, 1))[0]!;
     expect(item.kind).toBe("daydream.viewport");
     expect(item.frame).toEqual({ width: 960 });
     // The page is the pasted text: nothing to gather, nothing rewritten.
@@ -272,17 +303,23 @@ describe("landing", () => {
   });
 
   test("consecutive pastes cascade by 16px; another action resets the cascade", async () => {
-    const shell = await mount();
+    const { shell, dd } = await mountWithApi();
     paste(document.body, { "text/html": "<h2>one</h2><p>first</p>" });
     paste(document.body, { "text/html": "<h2>two</h2><p>second</p>" });
-    const [first, second] = shell.store.document.items;
+    const [first, second] = await landed(shell, 2);
     expect(second!.position.x - first!.position.x).toBe(16);
     expect(second!.position.y - first!.position.y).toBe(16);
     shell.store.setSelectedId(null);
     flush();
+    // The shell may frame the canvas while the pastes are cleaned, so
+    // the start is read from the canvas as the paste reads it.
+    const center = dd.canvas.center();
     paste(document.body, { "text/html": "<h2>three</h2><p>third</p>" });
-    const third = shell.store.document.items[2]!;
-    expect(third.position).toEqual(first!.position);
+    const third = (await landed(shell, 3))[2]!;
+    expect(third.position).toEqual({
+      x: center.x - 960 / 2,
+      y: center.y - 960 / 4,
+    });
   });
 
   test("a paragraph copied from a website is left for Text; two paragraphs, a list or a paragraph with an image land as a page", async () => {
@@ -315,7 +352,7 @@ describe("landing", () => {
       }),
     ].map((event) => event.defaultPrevented);
     expect(claimed).toEqual([false, false, true, true, true]);
-    expect(shell.store.document.items.map((item) => item.kind)).toEqual([
+    expect((await landed(shell, 3)).map((item) => item.kind)).toEqual([
       "daydream.viewport",
       "daydream.viewport",
       "daydream.viewport",
@@ -336,8 +373,7 @@ describe("landing", () => {
       }),
     ].map((event) => event.defaultPrevented);
     expect(claimed).toEqual([false, false, true, false]);
-    expect(shell.store.document.items).toHaveLength(1);
-    expect(shell.store.document.items[0]!.payload).toEqual({
+    expect((await landed(shell, 1))[0]!.payload).toEqual({
       html: '<p style="color: red">red</p>',
       css: "",
     });
@@ -467,9 +503,15 @@ describe("the page renders what the tree could not hold", () => {
     expect(getComputedStyle(tag, "::before").content).toBe('"★ "');
   });
 
-  test("a hostile paste lands inert: nothing that runs reaches the canvas, and the unfetched link is said", async () => {
+  test("a hostile paste lands inert: nothing that runs is stored or reaches the canvas, and the unfetched link is said", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
-    const { shadow } = await land(hostile);
+    const { shadow, html } = await land(hostile);
+    // Outside the inert `<template>`, whose content the pinned kernel's
+    // walk does not enter yet (page.browser.test.ts says so too).
+    const stored = html.replace(/<template>[\s\S]*?<\/template>/, "");
+    for (const gone of ["<script", "<object", "<embed", "<base", "onclick"])
+      expect(stored, gone).not.toContain(gone);
+    expect(stored).not.toMatch(/javascript:/i);
     const everything = Array.from(shadow.querySelectorAll("*"));
     for (const tag of ["script", "object", "embed", "base", "style", "link"])
       expect(shadow.querySelector(tag), tag).toBeNull();
@@ -484,17 +526,60 @@ describe("the page renders what the tree could not hold", () => {
     expect(shadow.querySelector("iframe")?.getAttribute("sandbox")).not.toBe(
       null,
     );
-    expect(infoLines(info).at(-1)).toContain(
-      'the stylesheet <link href="https://evil.example/site.css"> could not be fetched (a paste fetches nothing)',
+    // Why it could not be fetched is the host's to say: the test's
+    // detected host asks a network that refuses.
+    expect(infoLines(info).at(-1)).toMatch(
+      /paste\.html: the stylesheet <link href="https:\/\/evil\.example\/site\.css"> could not be fetched \(.+\) — removed, and its rules are not in the css/,
     );
   });
 });
 
-describe("data: images", () => {
-  test("are vendored through the host before the page lands, once, as one undo step; the img names the page's assets/ copy", async () => {
+describe("what could run is cut from the stored text, and said", () => {
+  test("a script, a handler, a root-relative link and a javascript: url are not in the stored page; the rest is the author's text", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const shell = await mount();
+    const source =
+      '<nav>\n  <a href="/about">About</a>\n  <a href="javascript:alert(1)">Run</a>\n</nav>\n' +
+      '<script>steal()</script>\n<button onclick="steal()">Buy</button>\n<p>Kept</p>';
+    paste(document.body, { "text/plain": source });
+    const { html, shadow } = await landedPage(shell);
+    expect(html).toBe(
+      "<nav>\n  <a>About</a>\n  <a>Run</a>\n</nav>\n\n<button>Buy</button>\n<p>Kept</p>",
+    );
+    expect(shadow.querySelector("p")?.textContent).toBe("Kept");
+    expect(infoLines(info)).toEqual([
+      `[${PLUGIN}] landed 7 elements; paste.html: removed <script>, the attribute a[href] ×2 and the attribute button[onclick] — a page stores nothing that could run, no <base>, and no url that is not https, assets/… or a #fragment (a link may also go to http: or mailto:); the rest landed as written`,
+    ]);
+  });
+
+  test("the stored page is one an editor of its text can save: dd.writePage accepts an ordinary edit on it", async () => {
+    const { shell, dd } = await mountWithApi();
+    paste(document.body, {
+      "text/plain": `<style>.card { padding: 16px }</style>\n<div class="card" onclick="steal()">\n  <h3>Title</h3>\n  <a href="/about">About</a>\n</div>\n<script>steal()</script>`,
+    });
+    const { id, html } = await landedPage(shell);
+    const edited = html.replace("<h3>Title</h3>", "<h3>A new title</h3>");
+    expect(edited).not.toBe(html);
+    expect(
+      dd.writePage({
+        kind: "html",
+        viewportId: id,
+        expected: html,
+        html: edited,
+      }),
+    ).toBeNull();
+    expect(viewportItems(shell.store.document)[0]!.payload.html).toBe(edited);
+  });
+});
+
+describe("data: images", () => {
+  test("are vendored through the host before the page lands, once, as one undo step; the host's pageSrc is written where the data: url was", async () => {
+    info = vi.spyOn(console, "info").mockImplementation(() => {});
+    // The two names differ past their slash, so the page's is the host's
+    // pageSrc and not one the paste made from src.
     const vendorFile = vi.fn(async (file: File) => ({
-      src: `/assets/${file.name}`,
+      src: `/assets/media-${file.name}`,
+      pageSrc: `assets/page-${file.name}`,
     }));
     const shell = await mount({
       storage: { vendorFile } as unknown as HostStorage,
@@ -507,9 +592,10 @@ describe("data: images", () => {
     expect(vendorFile).toHaveBeenCalledTimes(1);
     expect(vendorFile.mock.calls[0]![0].type).toBe("image/png");
     const { id, html } = await landedPage(shell);
-    // A page stores no data: url and no root-absolute path.
-    expect(html).toContain('src="assets/pasted-image.png"');
-    expect(html).not.toContain("data:");
+    // A page stores no data: url and no root-absolute path; every other
+    // character is the author's.
+    const url = /src="(data:[^"]*)"/.exec(dataImage)![1]!;
+    expect(html).toBe(dataImage.replace(url, "assets/page-pasted-image.png"));
     expect(pageNode(id, "img")?.getAttribute("alt")).toBe("One dot");
     shell.store.undo();
     flush();
@@ -522,10 +608,11 @@ describe("data: images", () => {
 
   test("a document loaded while vendoring abandons the paste; without storage the img lands with its alt and the removed src is said", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
-    let release: (value: { src: string }) => void = () => {};
+    type Stored = { src: string; pageSrc: string };
+    let release: (value: Stored) => void = () => {};
     const vendorFile = vi.fn(
       () =>
-        new Promise<{ src: string }>((resolve) => {
+        new Promise<Stored>((resolve) => {
           release = resolve;
         }),
     );
@@ -536,10 +623,10 @@ describe("data: images", () => {
     await vi.waitFor(() => expect(vendorFile).toHaveBeenCalledTimes(1));
     shell.store.loadDocument(createEmptyDocument(), { slug: null });
     flush();
-    release({ src: "/assets/late.png" });
+    release({ src: "/assets/late.png", pageSrc: "assets/late.png" });
     await vi.waitFor(() =>
       expect(infoLines(info!)).toEqual([
-        `[${PLUGIN}] paste abandoned: another document was loaded while its images were vendored`,
+        `[${PLUGIN}] paste abandoned: another document was loaded before it landed`,
       ]),
     );
     expect(shell.store.document.items).toHaveLength(0);
@@ -553,8 +640,9 @@ describe("data: images", () => {
     const img = pageNode(id, "img");
     expect(img?.hasAttribute("src")).toBe(false);
     expect(img?.getAttribute("alt")).toBe("One dot");
+    // Why the paste could not store it, then the cleaning's removal.
     expect(infoLines(info).at(-1)).toBe(
-      `[${PLUGIN}] landed 5 elements; removed the attribute img[src] (a data: image the host could not store)`,
+      `[${PLUGIN}] landed 5 elements; the host could not store a data: image (File import requires local storage); paste.html: removed the attribute img[src] — a page stores nothing that could run, no <base>, and no url that is not https, assets/… or a #fragment (a link may also go to http: or mailto:); the rest landed as written`,
     );
   });
 });
