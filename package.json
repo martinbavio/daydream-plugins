@@ -10,7 +10,7 @@
     "ship": "node scripts/ship.mjs"
   },
   "devDependencies": {
-    "@daydream/plugin-api": "github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api",
+    "@daydream/plugin-api": "github:mbavio-phota/daydream#cbc1b10ed5b84f1852f3511e8712474dfc240f2d&path:packages/plugin-api",
     "@solidjs/vite-plugin": "3.0.0-next.29",
     "@solidjs/web": "2.0.0-rc.0",
     "@types/node": "^24.13.4",
@@ -22,7 +22,7 @@
   },
   "pnpm": {
     "overrides": {
-      "@daydream/plugin-api": "github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api"
+      "@daydream/plugin-api": "github:mbavio-phota/daydream#cbc1b10ed5b84f1852f3511e8712474dfc240f2d&path:packages/plugin-api"
     }
   }
 }

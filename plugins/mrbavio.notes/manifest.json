@@ -2,7 +2,7 @@
   "id": "mrbavio.notes",
   "name": "Notes",
   "version": "0.1.1",
-  "minCore": "0.1.21",
+  "minCore": "0.1.38",
   "contributes": {
     "panels": [
       "notes"

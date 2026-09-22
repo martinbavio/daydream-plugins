@@ -2,7 +2,7 @@
   "id": "mrbavio.css-author",
   "name": "CSS author",
   "version": "0.1.4",
-  "minCore": "0.1.21",
+  "minCore": "0.1.38",
   "contributes": {
     "gates": [
       "static",
