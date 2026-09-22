@@ -5,7 +5,7 @@
   "type": "module",
   "dependencies": {
     "@daydream/plugin-api": "github:mbavio-phota/daydream#06c0f9db4846ee5870c8447820a362db97d702cc&path:packages/plugin-api",
-    "zod": "^4.6.5"
+    "zod": "^4.5.4"
   },
   "peerDependencies": {
     "@solidjs/web": "2.0.0-rc.9",
