@@ -14,8 +14,8 @@
     "@lezer/highlight": "^1.2.3"
   },
   "peerDependencies": {
-    "@solidjs/web": "2.0.0-rc.0",
-    "solid-js": "2.0.0-rc.0"
+    "@solidjs/web": "2.0.0-rc.9",
+    "solid-js": "2.0.0-rc.9"
   },
   "devDependencies": {
     "@daydream/plugin-testing": "github:mbavio-phota/daydream#cbc1b10ed5b84f1852f3511e8712474dfc240f2d&path:packages/plugin-testing",

@@ -11,10 +11,10 @@
   },
   "devDependencies": {
     "@daydream/plugin-api": "github:mbavio-phota/daydream#cbc1b10ed5b84f1852f3511e8712474dfc240f2d&path:packages/plugin-api",
-    "@solidjs/vite-plugin": "3.0.0-next.29",
-    "@solidjs/web": "2.0.0-rc.0",
+    "@solidjs/vite-plugin": "3.0.0-next.44",
+    "@solidjs/web": "2.0.0-rc.9",
     "@types/node": "^24.13.4",
-    "solid-js": "2.0.0-rc.0",
+    "solid-js": "2.0.0-rc.9",
     "typescript": "^5.9.0",
     "vite": "^8.2.1",
     "vitest": "^4.1.11",
