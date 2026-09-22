@@ -2,8 +2,8 @@
 // two gates it registers, each finding at the severity the plugin
 // declares — blocking — and each judging on its own: what the two say of
 // ONE declaration is the runner's to fold (src/ai/gates.ts dropCovered,
-// tested in src/ai/gates.test.ts). Real Chromium: the necessity gate
-// mounts the page.
+// tested in src/ai/gates.test.ts). Real Chromium: both gates read the
+// page through the browser, and the necessity gate mounts it.
 import { afterAll, describe, expect, test } from "vitest";
 
 import type {
@@ -15,9 +15,9 @@ import type {
 import {
   createTestKernel,
   documentFrom,
-  fixtureDocument,
-  fixtureRoot,
   flush,
+  fixturePage,
+  pageFixtureDocument,
 } from "@daydream/plugin-testing";
 
 import activate, { NECESSITY_GATE, STATIC_GATE } from "./index";
@@ -60,46 +60,57 @@ describe("css-author gates", () => {
     ]);
   });
 
-  test("a clean document passes both", async () => {
-    const doc = fixtureDocument();
+  test("a clean page passes both", async () => {
+    const doc = pageFixtureDocument();
     expect(await judge(STATIC_GATE, doc)).toEqual([]);
     expect(await judge(NECESSITY_GATE, doc)).toEqual([]);
   });
 
   test("every finding is blocking, tier-named, addressed to an element; the necessity gate reports a dropped declaration too — the runner, not the gate, keeps it to one line", async () => {
-    const doc = fixtureDocument();
-    const grid = fixtureRoot(doc).children[0]!.children[0]!;
-    grid.styles["width"] = "100"; // static rule 2 — and dead in the page
-    grid.styles["position"] = "static"; // static rule 3 — and dead
-    grid.children[0]!.styles["float"] = "none"; // static rule 3
-    grid.children[1]!.styles["--unused"] = "1px"; // dead, nothing static
+    const doc = pageFixtureDocument();
+    const page = fixturePage(doc);
+    page.payload.html = page.payload.html
+      // static rule 1 — and dead in the page; static rule 2 — and dead
+      .replace('<div class="grid">', '<div class="grid" style="width: 100; position: static">')
+      // static rule 2
+      .replace('<div class="header">', '<div class="header" style="float: none">')
+      // dead, nothing static
+      .replace('<div class="aside">', '<div class="aside" style="--unused: 1px">');
 
     const statics = await judge(STATIC_GATE, doc);
-    expect(statics.map((f) => [f.tier, f.severity, f.property])).toEqual([
-      ["static", "blocking", "width"],
-      ["static", "blocking", "position"],
-      ["static", "blocking", "float"],
+    expect(statics.map((f) => [f.tier, f.severity, f.elementId, f.property])).toEqual([
+      ["static", "blocking", "div.grid", "width"],
+      ["static", "blocking", "div.grid", "position"],
+      ["static", "blocking", "div.header", "float"],
     ]);
-    for (const finding of statics) expect(finding.elementId).toBeDefined();
 
     const necessity = await judge(NECESSITY_GATE, doc);
     // A declaration the parser dropped (width) or that restates the
     // initial value (position, float) changes nothing without it, so the
     // necessity gate names it as well as the static gate does: the gate
     // knows nothing of the other, and the runner drops the symptom once it
-    // knows both findings' effective severity. The unread custom property
-    // is the necessity gate's alone.
-    expect(necessity.map((f) => [f.tier, f.severity, f.property])).toEqual([
-      ["necessity", "blocking", "width"],
-      ["necessity", "blocking", "position"],
-      ["necessity", "blocking", "float"],
-      ["necessity", "blocking", "--unused"],
+    // knows both findings' effective severity — the two address the same
+    // declaration (elementId and property). The unread custom property is
+    // the necessity gate's alone.
+    expect(necessity.map((f) => [f.tier, f.severity, f.elementId, f.property])).toEqual([
+      ["necessity", "blocking", "div.grid", "width"],
+      ["necessity", "blocking", "div.grid", "position"],
+      ["necessity", "blocking", "div.header", "float"],
+      ["necessity", "blocking", "div.aside", "--unused"],
     ]);
-    for (const finding of necessity) expect(finding.elementId).toBeDefined();
     expect(necessity.at(-1)!.message).toMatch(
-      /^--unused: 1px on Aside changes nothing \(in base\) at /,
+      /^--unused: 1px on `div\.aside` changes nothing at /,
     );
     expect(document.querySelectorAll("iframe")).toHaveLength(0);
+  });
+
+  test("a rule's declaration both gates judge is addressed the same way by both: the rule's index and the property", async () => {
+    const doc = pageFixtureDocument();
+    fixturePage(doc).payload.css += ".footer { position: static; }\n";
+    const statics = await judge(STATIC_GATE, doc);
+    const necessity = await judge(NECESSITY_GATE, doc);
+    expect(statics.map((f) => [f.rule, f.property])).toEqual([[5, "position"]]);
+    expect(necessity.map((f) => [f.rule, f.property])).toEqual([[5, "position"]]);
   });
 
   // The eval regression (2026-09-17 raw eval jsonl): the static gate,
@@ -107,27 +118,19 @@ describe("css-author gates", () => {
   // document straight from `documentFrom` — never loaded into the app
   // store, never rendered on the canvas, exactly how `src/ai/requests.ts`
   // hands a gate an incoming ingest/replace_viewport document. A `.card`
-  // rule whose element is plainly in the tree must not be refused as
+  // rule whose element is plainly in the page must not be refused as
   // dead just because nothing was ever on the canvas to read a match
   // fact from (matchLint.ts's header).
-  test("the static gate does not refuse a landing whose sheet rules match elements that were never on the canvas", async () => {
+  test("the static gate does not refuse a landing whose rules match elements that were never on the canvas", async () => {
     const result = documentFrom({
-      version: 6,
+      version: 7,
       items: [
         {
           kind: "daydream.viewport",
           frame: { width: 960, height: 600 },
           payload: {
-            root: {
-              tag: "html",
-              children: [
-                {
-                  tag: "body",
-                  children: [{ tag: "div", attrs: { class: "card" } }],
-                },
-              ],
-            },
-            sheet: [{ selector: ".card", styles: { color: "red" } }],
+            html: '<!doctype html><html><body><div class="card"></div></body></html>',
+            css: ".card { color: red; }",
           },
         },
       ],

@@ -16,11 +16,5 @@
     "skipLibCheck": true
   },
   "include": ["plugins", "scripts"],
-  "exclude": [
-    "**/node_modules",
-    "**/dist",
-    "**/*.browser.test.*",
-    "plugins/mrbavio.css-author/staticLint.test.ts",
-    "plugins/mrbavio.css-author/bridge/corpus.test.ts"
-  ]
+  "exclude": ["**/node_modules", "**/dist", "**/*.browser.test.*"]
 }

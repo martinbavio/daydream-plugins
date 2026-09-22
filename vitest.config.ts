@@ -7,13 +7,6 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["plugins/*/**/*.test.ts"],
-    exclude: [
-      "**/node_modules/**",
-      "**/dist/**",
-      "**/*.browser.test.*",
-      // These build a test kernel through Daydream's harness too.
-      "plugins/mrbavio.css-author/staticLint.test.ts",
-      "plugins/mrbavio.css-author/bridge/corpus.test.ts",
-    ],
+    exclude: ["**/node_modules/**", "**/dist/**", "**/*.browser.test.*"],
   },
 });
