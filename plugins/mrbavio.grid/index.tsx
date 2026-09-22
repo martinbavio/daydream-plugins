@@ -2,8 +2,8 @@
 // #48, P6): DevTools-style track lines, gap hatching and line-number badges
 // for the selected grid, or the parent's grid of a selected child
 // (decision #11). Everything it reads arrives through `dd`: the
-// selection, the selected element's parent in its page (the first
-// ancestor of `dd.pageStack`, decision #76), and the geometry cache
+// selection, the selected element's parent in its page
+// (`dd.pageElement`, decision #76), and the geometry cache
 // (`dd.geometry` — rects, the invalidation state, the camera, and the
 // rendered node for the one read the API does not wrap, the browser's
 // resolved track lists).
