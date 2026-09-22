@@ -1,181 +1,170 @@
-// The static lint's rule-level checks, in the node project, over plain
-// `StyleRule`/`DreamViewport` literals — no `dd.core` needed for either
-// (docs/agent-css-knowledge-prd.md, "Testing Decisions"): unit-less
-// lengths and restated initials read a rule's `styles` map exactly like
-// an element's, and the `img`/`hr` overflow exception is approximated
-// from the selector text alone (staticLint.ts). The full staticLint()
-// integration — including the font-face-on-rules extension, which does
-// need `dd.core.familyNames` — is staticLint.test.ts's, run from a
-// Daydream checkout like the rest of that file (README.md).
+// The static lint's rule-level checks, in the node project, over a page's
+// css text scanned into rules (pageCss.ts) — no DOM, no `dd.core`:
+// unit-less lengths and restated initials read a rule's declarations
+// exactly like an element's own, and the `img`/`hr` overflow exception is
+// approximated from the selector text alone (staticLint.ts). The full
+// staticLint() over a page — the markup parsed by the browser, the font
+// faces, the classes — is staticLint.browser.test.ts's, run from a
+// Daydream checkout (README.md).
 import { describe, expect, test } from "vitest";
 
-import type { DreamViewport, StyleRule } from "@daydream/plugin-api";
+import type { Finding } from "@daydream/plugin-api";
 
+import { pageRules } from "./pageCss";
 import {
+  classNamer,
   lintRestatedInitialsOnRules,
   lintUnitlessLengthsOnRules,
-  classNamer,
-  lintUnreferencedClasses,
   referencedClasses,
 } from "./staticLint";
 
-function viewport(sheet: StyleRule[]): DreamViewport {
-  return {
-    id: "v1",
-    kind: "daydream.viewport",
-    position: { x: 0, y: 0 },
-    payload: {
-      root: { id: "root", tag: "html", styles: {}, children: [] },
-      sheet,
-    },
-  } as unknown as DreamViewport;
+function unitless(css: string): Finding[] {
+  const out: Finding[] = [];
+  lintUnitlessLengthsOnRules(pageRules(css), "v1", out);
+  return out;
+}
+
+function restated(css: string): Finding[] {
+  const out: Finding[] = [];
+  lintRestatedInitialsOnRules(pageRules(css), "v1", out);
+  return out;
 }
 
 describe("lintUnitlessLengthsOnRules", () => {
-  test("a bare number on a rule's length property is a finding at sheet[i]", () => {
-    const vp = viewport([{ selector: ".card", styles: { width: "100" } }]);
-    const out: Parameters<typeof lintUnitlessLengthsOnRules>[1] = [];
-    lintUnitlessLengthsOnRules(vp, out);
-    expect(out).toEqual([
+  test("a bare number on a rule's length property is a finding addressed at the rule's index", () => {
+    expect(unitless(".card { width: 100; }")).toEqual([
       {
         tier: "static",
         severity: "blocking",
         rule: 0,
         property: "width",
         message:
-          "width: 100 in rule .card (sheet[0]) of viewport v1 has no unit; a length needs one (px, rem, %, …)",
+          "width: 100 in rule `.card` of viewport v1 has no unit; a length needs one (px, rem, %, …)",
       },
     ]);
   });
 
   test("a valued length on a rule passes", () => {
-    const vp = viewport([{ selector: ".card", styles: { width: "100%" } }]);
-    const out: Parameters<typeof lintUnitlessLengthsOnRules>[1] = [];
-    lintUnitlessLengthsOnRules(vp, out);
-    expect(out).toEqual([]);
+    expect(unitless(".card { width: 100%; }")).toEqual([]);
   });
 
-  test("no sheet is a clean pass", () => {
-    const vp = viewport([]);
-    const out: Parameters<typeof lintUnitlessLengthsOnRules>[1] = [];
-    lintUnitlessLengthsOnRules(vp, out);
-    expect(out).toEqual([]);
+  test("no rules is a clean pass", () => {
+    expect(unitless("")).toEqual([]);
+  });
+
+  test("every rule is judged, a nested one and one under a condition too, each at its own index and named as written", () => {
+    const out = unitless(
+      ".a { color: red; } .card { gap: 8px; & .title { margin: 4 } } @media (width < 600px) { .card { padding: 12 } }",
+    );
+    expect(out.map((f) => [f.rule, f.property, f.message])).toEqual([
+      [
+        2,
+        "margin",
+        "margin: 4 in rule `.card › & .title` of viewport v1 has no unit; a length needs one (px, rem, %, …)",
+      ],
+      [
+        3,
+        "padding",
+        "padding: 12 in rule `.card` in `@media (width < 600px)` of viewport v1 has no unit; a length needs one (px, rem, %, …)",
+      ],
+    ]);
+  });
+
+  test("a comment in the value is not part of it, and !important is not a unit", () => {
+    expect(unitless(".a { width: 100 /* px */ !important; }")).toHaveLength(1);
+    expect(unitless(".a { width: /* 100 */ 100px; }")).toEqual([]);
   });
 });
 
 describe("lintRestatedInitialsOnRules", () => {
   test("a restated initial on a rule with no type selector is a finding — the img/hr exception does not apply to properties outside the overflow table", () => {
-    const vp = viewport([{ selector: ".card", styles: { position: "static" } }]);
-    const out: Parameters<typeof lintRestatedInitialsOnRules>[1] = [];
-    lintRestatedInitialsOnRules(vp, out);
-    expect(out).toEqual([
+    expect(restated(".card { position: static; }")).toEqual([
       {
         tier: "static",
         severity: "blocking",
         rule: 0,
         property: "position",
         message:
-          "position: static in rule .card (sheet[0]) of viewport v1 restates the initial value",
+          "position: static in rule `.card` of viewport v1 restates the initial value",
       },
     ]);
   });
 
   test("overflow: visible on a rule with no type selector is excused — the compound could reach img or hr", () => {
-    const vp = viewport([{ selector: ".card", styles: { overflow: "visible" } }]);
-    const out: Parameters<typeof lintRestatedInitialsOnRules>[1] = [];
-    lintRestatedInitialsOnRules(vp, out);
-    expect(out).toEqual([]);
+    expect(restated(".card { overflow: visible; }")).toEqual([]);
   });
 
   test("overflow: visible on a rule typed to img or hr is excused, case-insensitively", () => {
     for (const selector of ["img", "IMG.thumb", "hr.rule", "* .x img"]) {
-      const vp = viewport([{ selector, styles: { overflow: "visible" } }]);
-      const out: Parameters<typeof lintRestatedInitialsOnRules>[1] = [];
-      lintRestatedInitialsOnRules(vp, out);
-      expect(out, selector).toEqual([]);
+      expect(restated(`${selector} { overflow: visible; }`), selector).toEqual([]);
     }
   });
 
   test("overflow: visible on a rule typed to a different tag is a finding: it can never reach img or hr", () => {
-    const vp = viewport([{ selector: "div.card", styles: { overflow: "visible" } }]);
-    const out: Parameters<typeof lintRestatedInitialsOnRules>[1] = [];
-    lintRestatedInitialsOnRules(vp, out);
-    expect(out).toHaveLength(1);
+    expect(restated("div.card { overflow: visible; }")).toHaveLength(1);
   });
 
   test("a selector list is excused if ANY member could reach img or hr", () => {
-    const vp = viewport([
-      { selector: "div.card, img.thumb", styles: { overflow: "visible" } },
-    ]);
-    const out: Parameters<typeof lintRestatedInitialsOnRules>[1] = [];
-    lintRestatedInitialsOnRules(vp, out);
-    expect(out).toEqual([]);
+    expect(restated("div.card, img.thumb { overflow: visible; }")).toEqual([]);
   });
 
   test("an explicit universal selector is excused, same as no type", () => {
-    const vp = viewport([{ selector: "*.card", styles: { overflow: "visible" } }]);
-    const out: Parameters<typeof lintRestatedInitialsOnRules>[1] = [];
-    lintRestatedInitialsOnRules(vp, out);
-    expect(out).toEqual([]);
+    expect(restated("*.card { overflow: visible; }")).toEqual([]);
   });
 
   test("a non-initial value is never a finding", () => {
-    const vp = viewport([{ selector: ".card", styles: { position: "relative" } }]);
-    const out: Parameters<typeof lintRestatedInitialsOnRules>[1] = [];
-    lintRestatedInitialsOnRules(vp, out);
-    expect(out).toEqual([]);
+    expect(restated(".card { position: relative; }")).toEqual([]);
   });
 
   test("a rule under a combinator is judged by its rightmost compound", () => {
     // `.list > img` can reach an img at its rightmost compound even though
     // the list itself is a div.
-    const vp = viewport([
-      { selector: ".list > img", styles: { overflow: "visible" } },
-    ]);
-    const out: Parameters<typeof lintRestatedInitialsOnRules>[1] = [];
-    lintRestatedInitialsOnRules(vp, out);
-    expect(out).toEqual([]);
+    expect(restated(".list > img { overflow: visible; }")).toEqual([]);
+  });
+
+  test("value comparison ignores case", () => {
+    expect(restated(".a { position: Static; float: NONE; }")).toHaveLength(2);
+  });
+
+  test("a rule under a condition, or nested in another, resets under that condition — the override a conditional layer was — and is never a finding", () => {
+    expect(
+      restated(
+        "@media (width >= 600px) { .card { position: static; max-width: none; } }",
+      ),
+    ).toEqual([]);
+    expect(
+      restated(".card { position: absolute; &.open { position: static; } }"),
+    ).toEqual([]);
+    expect(
+      restated(".card { position: absolute; @media (width >= 600px) { position: static; } }"),
+    ).toEqual([]);
+  });
+
+  test("an !important initial is there to win, and is not judged", () => {
+    expect(restated(".a { position: static !important; }")).toEqual([]);
   });
 });
 
-describe("lintUnreferencedClasses (rule 5)", () => {
-  function tree(classes: string[]): DreamViewport["payload"]["root"] {
-    return {
-      id: "root",
-      tag: "html",
-      styles: {},
-      children: classes.map((value, i) => ({
-        id: `e${i}`,
-        tag: "div",
-        label: `Box ${i}`,
-        styles: {},
-        attrs: { class: value },
-        children: [],
-      })),
-    } as unknown as DreamViewport["payload"]["root"];
-  }
-  function viewportWith(sheet: StyleRule[], classes: string[]): DreamViewport {
-    const vp = viewport(sheet);
-    (vp.payload as { root: unknown }).root = tree(classes);
-    return vp;
-  }
-
+describe("the classes a page's selectors name (rule 4)", () => {
   test("referencedClasses reads every .class compound, nested or escaped, and [class=] values", () => {
     expect(
-      [...referencedClasses([
-        { selector: ".card .title, nav:is(.a, .b) > *:not(.c)" },
-        { selector: ".x\\:y" },
-        { selector: "[class~=\"pill\"] , [class=\"one two\"]" },
-      ])].sort(),
-    ).toEqual(["a", "b", "c", "card", "one", "pill", "title", "two", "x:y"]);
+      [
+        ...referencedClasses([
+          ".card .title, nav:is(.a, .b) > *:not(.c)",
+          ".x\\:y",
+          '[class~="pill"] , [class="one two"]',
+          "&.open",
+        ]),
+      ].sort(),
+    ).toEqual(["a", "b", "c", "card", "one", "open", "pill", "title", "two", "x:y"]);
   });
 
   test("prefix, suffix and substring [class…=] forms name every token that satisfies them; [class=] and [class~=] name their tokens", () => {
     const names = classNamer([
-      { selector: '[class*="i-"]' },
-      { selector: "[class^=btn]" },
-      { selector: "[class$='-lg']" },
-      { selector: '[class~="pill"]' },
+      '[class*="i-"]',
+      "[class^=btn]",
+      "[class$='-lg']",
+      '[class~="pill"]',
     ]);
     expect(names("i-home")).toBe(true);
     expect(names("btn-primary")).toBe(true);
@@ -183,35 +172,6 @@ describe("lintUnreferencedClasses (rule 5)", () => {
     expect(names("card-lg")).toBe(true);
     expect(names("pill")).toBe(true);
     expect(names("pills")).toBe(false);
-    expect([...referencedClasses([{ selector: '[class*="i-"]' }])]).toEqual([]);
-    // The lint itself: an element only a substring form reaches is not refused.
-    const vp = viewportWith([{ selector: '[class*="i-"]', styles: { color: "red" } }], ["i-home"]);
-    const out: Parameters<typeof lintUnreferencedClasses>[1] = [];
-    lintUnreferencedClasses(vp, out);
-    expect(out).toEqual([]);
-  });
-
-  test("a class no rule names is a finding on its element; a named one, and an empty class, are not", () => {
-    const vp = viewportWith(
-      [{ selector: ".card", styles: { padding: "16px" } }],
-      ["card", "card featured", ""],
-    );
-    const out: Parameters<typeof lintUnreferencedClasses>[1] = [];
-    lintUnreferencedClasses(vp, out);
-    expect(out).toEqual([
-      {
-        tier: "static",
-        severity: "blocking",
-        elementId: "e1",
-        message: 'class "featured" on Box 1 in viewport v1 is named by no rule; drop it, or write the rule that uses it',
-      },
-    ]);
-  });
-
-  test("with no sheet at all every class is unreferenced", () => {
-    const vp = viewportWith([], ["a", "b c"]);
-    const out: Parameters<typeof lintUnreferencedClasses>[1] = [];
-    lintUnreferencedClasses(vp, out);
-    expect(out.map((f) => f.elementId)).toEqual(["e0", "e1", "e1"]);
+    expect([...referencedClasses(['[class*="i-"]'])]).toEqual([]);
   });
 });

@@ -33,7 +33,14 @@
 // A's p makes A's line dead, which the necessity lint (removal, re-read)
 // reports as such.
 
-import type { StyleRule } from "@daydream/plugin-api";
+/** A rule as the judgment reads it: its selector, the at-rules it sits
+ * inside, and its declarations as a map, later wins (pageCss.ts
+ * `declarationMap` over a page rule). */
+export interface RedundancyRule {
+  selector: string;
+  conditions?: readonly string[];
+  styles: Record<string, string>;
+}
 
 /** One rule matching one element, in the element's winner-first list
  * (matchLint.ts's own ranking: specificity descending, then later index
@@ -89,16 +96,17 @@ export function relatedProperties(property: string, other: string): boolean {
 }
 
 /** Every redundant rule declaration in `sheet`, given each mounted
- * element's ranked matches (`matches`: element id → winner-first list)
+ * element's ranked matches (`matches`: element → winner-first list, the
+ * key only telling the elements apart)
  * and the state-pseudo-class test (statePseudo.ts's `hasStatePseudo`,
  * handed in so this file stays free of any selector reading). */
 export function ruleRestatements(
-  sheet: readonly StyleRule[],
-  matches: ReadonlyMap<string, readonly RankedMatch[]>,
+  sheet: readonly RedundancyRule[],
+  matches: ReadonlyMap<unknown, readonly RankedMatch[]>,
   hasState: (selector: string) => boolean,
 ): RuleRestatement[] {
   const out: RuleRestatement[] = [];
-  const uncertain = (rule: StyleRule): boolean =>
+  const uncertain = (rule: RedundancyRule): boolean =>
     (rule.conditions !== undefined && rule.conditions.length > 0) ||
     hasState(rule.selector);
 

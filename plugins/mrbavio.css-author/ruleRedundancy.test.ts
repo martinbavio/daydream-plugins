@@ -3,12 +3,11 @@
 // seam; this is the judgment over its answer).
 import { describe, expect, test } from "vitest";
 
-import type { StyleRule } from "@daydream/plugin-api";
-
 import {
   relatedProperties,
   ruleRestatements,
   type RankedMatch,
+  type RedundancyRule,
 } from "./ruleRedundancy";
 
 const hasState = (selector: string): boolean => /:hover|:focus|:active/.test(selector);
@@ -32,7 +31,7 @@ function matches(lists: Record<string, (number | string)[]>): Map<string, Ranked
 
 describe("ruleRestatements", () => {
   test("a rule's declaration restating the rule beneath it, everywhere it reaches, is a finding naming that rule", () => {
-    const sheet: StyleRule[] = [
+    const sheet: RedundancyRule[] = [
       { selector: ".card", styles: { color: "#333", padding: "16px" } },
       { selector: ".card.featured", styles: { color: "#333", border: "1px solid" } },
     ];
@@ -42,7 +41,7 @@ describe("ruleRestatements", () => {
   });
 
   test("not redundant when the rule reaches an element the rule beneath does not", () => {
-    const sheet: StyleRule[] = [
+    const sheet: RedundancyRule[] = [
       { selector: ".card", styles: { color: "#333" } },
       { selector: ".title", styles: { color: "#333" } },
     ];
@@ -52,7 +51,7 @@ describe("ruleRestatements", () => {
   });
 
   test("a differing value beneath, or no declarer beneath, is never a finding", () => {
-    const sheet: StyleRule[] = [
+    const sheet: RedundancyRule[] = [
       { selector: ".card", styles: { color: "#111" } },
       { selector: ".card.featured", styles: { color: "#333", margin: "0" } },
     ];
@@ -60,7 +59,7 @@ describe("ruleRestatements", () => {
   });
 
   test("a conditional or state rule anywhere in the pair leaves the declaration alone", () => {
-    const sheet: StyleRule[] = [
+    const sheet: RedundancyRule[] = [
       { selector: ".card", styles: { color: "#333" }, conditions: ["@media (width < 600px)"] },
       { selector: ".card.featured", styles: { color: "#333" } },
       { selector: ".card:hover", styles: { color: "#333" } },
@@ -71,7 +70,7 @@ describe("ruleRestatements", () => {
       ruleRestatements(sheet, matches({ a: [1, 0], b: [3, 2] }), hasState),
     ).toEqual([]);
     // The rule itself conditional or state: never judged.
-    const own: StyleRule[] = [
+    const own: RedundancyRule[] = [
       { selector: ".card", styles: { color: "#333" } },
       { selector: ".card:hover", styles: { color: "#333" } },
       { selector: ".card", styles: { color: "#333" }, conditions: ["@media (width < 600px)"] },
@@ -80,18 +79,18 @@ describe("ruleRestatements", () => {
   });
 
   test("a related longhand or shorthand between the two, or beside the one beneath, keeps the line load-bearing", () => {
-    const between: StyleRule[] = [
+    const between: RedundancyRule[] = [
       { selector: "div", styles: { margin: "0" } },
       { selector: ".card", styles: { "margin-top": "4px" } },
       { selector: ".card.featured", styles: { margin: "0" } },
     ];
     expect(ruleRestatements(between, matches({ a: [2, 1, 0] }), hasState)).toEqual([]);
-    const beside: StyleRule[] = [
+    const beside: RedundancyRule[] = [
       { selector: "div", styles: { margin: "0", "margin-top": "4px" } },
       { selector: ".card", styles: { margin: "0" } },
     ];
     expect(ruleRestatements(beside, matches({ a: [1, 0] }), hasState)).toEqual([]);
-    const all: StyleRule[] = [
+    const all: RedundancyRule[] = [
       { selector: "div", styles: { color: "#333" } },
       { selector: ".card", styles: { all: "unset" } },
       { selector: ".card.featured", styles: { color: "#333" } },
@@ -113,7 +112,7 @@ describe("ruleRestatements", () => {
   });
 
   test("the first declarer beneath decides: an intermediate rule without the property is walked past", () => {
-    const sheet: StyleRule[] = [
+    const sheet: RedundancyRule[] = [
       { selector: "div", styles: { color: "#333" } },
       { selector: ".card", styles: { padding: "8px" } },
       { selector: ".card.featured", styles: { color: "#333" } },
@@ -124,7 +123,7 @@ describe("ruleRestatements", () => {
   });
 
   test("different rules beneath for different elements are all named, ascending", () => {
-    const sheet: StyleRule[] = [
+    const sheet: RedundancyRule[] = [
       { selector: "article", styles: { color: "#333" } },
       { selector: "aside", styles: { color: "#333" } },
       { selector: ".card", styles: { color: "#333" } },
@@ -135,7 +134,7 @@ describe("ruleRestatements", () => {
   });
 
   test("a rule reaching nothing is the dead-rule finding's; one reaching a box through a pseudo-element is left alone", () => {
-    const sheet: StyleRule[] = [
+    const sheet: RedundancyRule[] = [
       { selector: ".card", styles: { color: "#333" } },
       { selector: ".card::before", styles: { color: "#333" } },
       { selector: ".gone", styles: { color: "#333" } },
