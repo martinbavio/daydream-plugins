@@ -121,14 +121,18 @@ describe("impeccable host part", () => {
 
   test("a selected element is the target; the playbook and the craft floor follow the adapter", async () => {
     const { host, prompts } = fakeHost(
-      state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [] }),
+      state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [], selector: ".card" }),
     );
     await activate(host);
     const bolder = prompts.find((p) => p.name === "impeccable-bolder")!;
     const text = await (bolder.build as Build)({});
     expect(text.startsWith("# Impeccable: bolder (Impeccable 9.9.9)")).toBe(true);
-    expect(text).toContain('TARGET: element `el_card` inside viewport `vp_pricing` ("Pricing", 960×600, at 100, 40)');
-    expect(text).toContain('get_viewport {id: "vp_pricing", element: "el_card"}');
+    // The element is named by the selector canvas_state answers for it
+    // (decision #76), never by the canvas's render-time id.
+    expect(text).toContain('TARGET: the element `.card` (a CSS selector naming it alone) inside viewport `vp_pricing` ("Pricing", 960×600, at 100, 40)');
+    expect(text).toContain('get_viewport {id: "vp_pricing", element: ".card"}');
+    expect(text).not.toContain("el_card");
+    expect(text).toContain("The rules that style it are in the page's one stylesheet");
     expect(text).toContain("Read THE TARGET, not the page");
     // Variants land beside the source, one frame plus a gap apart.
     expect(text).toContain("3 VARIANTS");
@@ -138,15 +142,27 @@ describe("impeccable host part", () => {
     expect(text).toContain("`Impeccable bolder · variant n of 3 of vp_pricing`");
     expect(parseVariantMarker("Impeccable bolder · variant 2 of 3 of vp_pricing\n\nA denser card.")).toEqual({ verb: "bolder", n: 2, of: 3, sourceId: "vp_pricing" });
     expect(text).not.toContain("draft_open {from:");
-    // A variant is a copy plus one replace (decision #68), fanned out
-    // to sub-agents where the harness has them.
+    // A variant is a copy of the source's page, then its target's markup
+    // replaced by selector and its rules edited by text (decision #76),
+    // fanned out to sub-agents where the harness has them.
     expect(text).toContain('draft_open {copyOf: "vp_pricing"');
     expect(text).toContain("OPEN ALL 3 COPIES FIRST");
+    expect(text).toContain("the copy is the source's text, so it names the same element");
+    expect(text).toContain("draft_replace {draft, token, target: <the target's selector");
+    expect(text).toContain("html: <the target's markup rewritten for that direction>");
+    expect(text).toContain("draft_edit {draft, token, css: {old, new}}");
+    expect(text).toContain("draft_append {draft, token, css}");
     expect(text).toContain("draft_finalize IMMEDIATELY");
     expect(text).toContain("Never hold finalizes for the end");
-    expect(text).toContain("THE TARGET ELEMENT'S JSON");
+    expect(text).toContain("THE TARGET'S MARKUP AND THE CSS RULES THAT STYLE IT");
     expect(text).toContain("a fast model handles well");
-    expect(text).toContain("There is NO `@keyframes`");
+    // The page is HTML and CSS whole: nothing the tree lacked is ruled out.
+    expect(text).toContain("`@keyframes` and `animation`");
+    expect(text).toContain("What would run is removed at landing");
+    expect(text).toContain("an `@font-face` rule in the css");
+    expect(text).not.toContain("There is NO `@keyframes`");
+    expect(text).not.toContain("`styles` map");
+    expect(text).not.toContain("JSON");
     expect(text).toContain("do not search one");
     expect(text).toContain("IN PARALLEL");
     expect(text).toContain("(c) Write the target rewritten");
@@ -164,7 +180,7 @@ describe("impeccable host part", () => {
 
   test("the tool answers the same text as the prompt, from a sentence's worth of arguments", async () => {
     const { host, prompts, tools } = fakeHost(
-      state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [] }),
+      state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [], selector: ".card" }),
     );
     await activate(host);
     const run = tools[0]!.run as (args: Record<string, string | undefined>) => Promise<{ text: string; isError?: boolean }>;
@@ -180,7 +196,7 @@ describe("impeccable host part", () => {
 
   test("a selected viewport item is the whole page; an in-place verb reworks it as an edit draft", async () => {
     const { host, prompts } = fakeHost(
-      state({ elementId: "html_root", viewportId: "vp_pricing", itemIds: ["vp_pricing"] }),
+      state({ elementId: "vp_pricing", viewportId: "vp_pricing", itemIds: ["vp_pricing"] }),
     );
     await activate(host);
     const polish = prompts.find((p) => p.name === "impeccable-polish")!;
@@ -188,18 +204,40 @@ describe("impeccable host part", () => {
     expect(text).toContain("TARGET: the whole page of viewport `vp_pricing`");
     expect(text).toContain('draft_open {from: "vp_pricing"}');
     expect(text).toContain("IN PLACE");
+    // Reworked by selector and by exact text, not resent whole.
+    expect(text).toContain("draft_replace {draft, token, target: <its selector>, html: <its reworked markup>}");
+    expect(text).toContain("draft_edit {draft, token, css: {old, new}}");
+    expect(text).toContain("never the whole css resent");
+    expect(text).not.toContain("root's styles");
     expect(text).not.toContain("VARIANTS");
     expect(text).toContain("THE USER'S BRIEF (it wins over the playbook's defaults): the footer feels crowded");
   });
 
-  test("arguments override the selection; variants is clamped", async () => {
+  test("an element selected while its page remounts has no selector: the prompt asks rather than widening to the page", async () => {
     const { host, prompts } = fakeHost(
       state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [] }),
     );
     await activate(host);
+    const polish = prompts.find((p) => p.name === "impeccable-polish")!;
+    const text = await (polish.build as Build)({});
+    expect(text).toContain("TARGET: an element of viewport `vp_pricing` is selected, but the canvas could not name it");
+    expect(text).not.toContain("TARGET: the whole page");
+    // Named by argument, it is the target again.
+    expect(await (polish.build as Build)({ viewport: "vp_pricing", element: ".card" })).toContain(
+      "TARGET: the element `.card`",
+    );
+  });
+
+  test("arguments override the selection; variants is clamped", async () => {
+    const { host, prompts } = fakeHost(
+      state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [], selector: ".card" }),
+    );
+    await activate(host);
     const typeset = prompts.find((p) => p.name === "impeccable-typeset")!;
-    const text = await (typeset.build as Build)({ viewport: "vp_docs", element: "el_h1", variants: "2" });
-    expect(text).toContain("TARGET: element `el_h1` inside viewport `vp_docs` (untitled, 720 wide, at 0, 900)");
+    const text = await (typeset.build as Build)({ viewport: "vp_docs", element: 'h1[data-role="title"]', variants: "2" });
+    expect(text).toContain('TARGET: the element `h1[data-role="title"]` (a CSS selector naming it alone) inside viewport `vp_docs` (untitled, 720 wide, at 0, 900)');
+    // A selector with quotes in it reaches the call as valid JSON.
+    expect(text).toContain('get_viewport {id: "vp_docs", element: "h1[data-role=\\"title\\"]"}');
     expect(text).toContain("2 VARIANTS");
     expect(text).toContain("1 at {x: 768, y: 900}, 2 at {x: 1536, y: 900}");
     expect(text).toContain('"Untitled · typeset n/2"');
@@ -285,7 +323,7 @@ describe("impeccable host part", () => {
 
   test("a report verb (critique, audit): the rendered page through impeccable_html and the skill's own detector; nothing lands", async () => {
     const { host, prompts } = fakeHost(
-      state({ elementId: "html_root", viewportId: "vp_pricing", itemIds: ["vp_pricing"] }),
+      state({ elementId: "vp_pricing", viewportId: "vp_pricing", itemIds: ["vp_pricing"] }),
     );
     await activate(host);
     const names = prompts.map((p) => p.name);
@@ -304,10 +342,10 @@ describe("impeccable host part", () => {
     expect(text).toContain("The audit playbook.");
     expect(text).not.toContain("data-impeccable-target");
     // On an element: the export marks the target, the report keeps to it.
-    const scoped = fakeHost(state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [] }));
+    const scoped = fakeHost(state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [], selector: ".card" }));
     await activate(scoped.host);
     const on = await (scoped.prompts.find((p) => p.name === "impeccable-critique")!.build as Build)({});
-    expect(on).toContain('impeccable_detect {viewport: "vp_pricing", element: "el_card"}');
+    expect(on).toContain('impeccable_detect {viewport: "vp_pricing", element: ".card"}');
     expect(on).toContain("PRUNED to the target");
     expect(on).toContain("npx");
   });
@@ -323,17 +361,17 @@ describe("impeccable host part", () => {
   test("resolveTarget: an element argument on a selected page narrows it", () => {
     const s: StateSlice = {
       viewports: [pricing],
-      selection: { elementId: "html_root", viewportId: "vp_pricing", itemIds: ["vp_pricing"] },
+      selection: { elementId: "vp_pricing", viewportId: "vp_pricing", itemIds: ["vp_pricing"] },
     };
-    expect(resolveTarget(s, {})).toEqual({ viewport: pricing, elementId: null });
-    expect(resolveTarget(s, { element: "el_x" })).toEqual({ viewport: pricing, elementId: "el_x" });
+    expect(resolveTarget(s, {})).toEqual({ viewport: pricing, selector: null });
+    expect(resolveTarget(s, { element: "#x" })).toEqual({ viewport: pricing, selector: "#x" });
   });
 
   test("composePrompt without a brief has no brief section", () => {
     const text = composePrompt({
       spec: VERBS[0]!,
       state: { viewports: [pricing], selection: null },
-      target: { viewport: pricing, elementId: null },
+      target: { viewport: pricing, selector: null },
       variants: 3,
       playbook: "p",
       craftFloor: "f",

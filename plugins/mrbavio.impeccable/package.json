@@ -1,7 +1,7 @@
 {
   "name": "@mrbavio/plugin-impeccable",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "dependencies": {
     "@daydream/plugin-api": "github:mbavio-phota/daydream#cbc1b10ed5b84f1852f3511e8712474dfc240f2d&path:packages/plugin-api",
