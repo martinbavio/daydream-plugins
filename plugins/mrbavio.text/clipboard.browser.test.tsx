@@ -40,7 +40,7 @@ afterEach(() => {
 });
 
 const textDocument = (): DreamDocument => ({
-  version: 5,
+  version: 7,
   items: [
     {
       id: "text-1",
@@ -52,7 +52,7 @@ const textDocument = (): DreamDocument => ({
 });
 
 const twoItemDocument = (): DreamDocument => ({
-  version: 5,
+  version: 7,
   items: [
     ...textDocument().items,
     {
