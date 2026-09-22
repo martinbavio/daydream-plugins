@@ -444,6 +444,26 @@ describe("mrbavio.impeccable in the shell", () => {
     expect((await pickTool().run({})) as unknown).toMatchObject({ pick: { verb: "typeset", element: ".header" }, exit: false });
   });
 
+  test("a pick saved before pages, naming its element by id, is dropped with a console note and cleared from the file", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      const { doc, source } = sourceDocument();
+      const { host, files } = fakeHost({
+        [manifest.id]: {
+          [SESSION_KEY]: { seq: 3, exit: false, pick: { verb: "typeset", viewportId: source.id, elementId: "el_4", at: 1 } },
+        },
+      });
+      mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
+      await settle();
+      expect(caption()).toBeNull();
+      expect(info).toHaveBeenCalledWith(expect.stringMatching(/^\[mrbavio\.impeccable\] a waiting pick saved before pages/));
+      expect(await stored(files, 4)).toMatchObject({ pick: null, exit: false });
+      expect((await pickTool().run({})) as unknown).toMatchObject({ pick: null });
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   test("a variant is titled from its marker and the source's title, whatever the agent called it", async () => {
     const { doc, source } = sourceDocument("Pricing");
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
