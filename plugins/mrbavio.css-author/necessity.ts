@@ -129,6 +129,7 @@ import {
   parsePage,
   storedNames,
 } from "./pageDom";
+import { ruleMatcher } from "./ruleMatch";
 import { hasStatePseudo } from "./statePseudo";
 
 /** What the lint needs from the API object: the pure helpers and the
@@ -460,12 +461,16 @@ function judgeAll(
   const nameAt = (node: number): string => nameOf(nodes[node]!);
   const unloaded = nodes.map(isUnloadedImage);
   // Which elements each rule reaches through a member that styles the
-  // element itself (never only its pseudo-element), read once.
+  // element itself (never only its pseudo-element), read once, a rule
+  // inside an `@scope` from its scope's roots (ruleMatch.ts).
+  const match = ruleMatcher(prepared.doc);
   const reached = rules.map((rule) => {
     const selector = plainMembers(rule.selector);
     return selector === ""
       ? []
-      : nodes.flatMap((node, index) => (matches(node, selector) ? [index] : []));
+      : nodes.flatMap((node, index) =>
+          match(node, selector, rule.scopes) ? [index] : [],
+        );
   });
   const candidates: Candidate[] = [];
   const record = (
@@ -667,14 +672,6 @@ function refused(doc: Document, selector: string): boolean {
     return false;
   } catch {
     return true;
-  }
-}
-
-function matches(node: Element, selector: string): boolean {
-  try {
-    return node.matches(selector);
-  } catch {
-    return false;
   }
 }
 

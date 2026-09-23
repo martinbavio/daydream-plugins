@@ -652,6 +652,21 @@ describe("necessity on rules", () => {
     ).toEqual([]);
   });
 
+  test("a rule inside an @scope reaches its elements from the scope's root, so the ones shadowing it in their own style are judged with it", async () => {
+    // `:scope > .a` asked of `.a` itself would match nothing, the rule's
+    // color would be removed alone, and the element's own blue would keep
+    // the page unchanged.
+    expect(
+      await necessityLint(
+        makeDocument(
+          FRAME,
+          '<div class="card"><p class="a" style="color: blue">hi</p></div>',
+          "@scope (.card) { :scope > .a { color: red; } }",
+        ),
+      ),
+    ).toEqual([]);
+  });
+
   test("a rule under a state pseudo-class is never judged — in a rule, :hover belongs to the selector", async () => {
     expect(
       await necessityLint(makeDocument(FRAME, '<div class="a"></div>', ".a:hover { color: red; }")),

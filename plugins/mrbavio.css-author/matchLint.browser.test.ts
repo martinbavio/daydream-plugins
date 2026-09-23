@@ -207,6 +207,24 @@ describe("matchLint", () => {
     ).toEqual([]);
   });
 
+  test("a rule inside an @scope is matched from the scope's roots: `:scope` is the root, a bare member its descendant, and a limit ends the scope", async () => {
+    expect(
+      await messages(
+        page(
+          `@scope (.card) { :scope { padding: 8px; } :scope > img { width: 10px; } p { margin: 0; } border: 0; }
+@scope (.card) to (.content) { img { height: 10px; } }
+@scope (.card) to (.content) { .content p { color: red; } }
+@scope (.content) { .card p { color: blue; } }
+.card { @scope (img) { :scope { max-width: 100%; } } }`,
+          '<div class="card"><img><div class="content"><p>x</p></div></div>',
+        ),
+      ),
+    ).toEqual([
+      "rule `.content p` in `@scope (.card) to (.content)` in viewport v1 matches no element",
+      "rule `.card p` in `@scope (.content)` in viewport v1 matches no element",
+    ]);
+  });
+
   test("the legacy comment markers `<!--` and `-->` between rules are no part of the next rule's selector", async () => {
     expect(
       await matchLint(

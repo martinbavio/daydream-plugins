@@ -20,9 +20,12 @@
 // The rules are the page's css as written (pageCss.ts `pageRules`, the
 // same list and the same `rule` indices the static and necessity lints
 // use), a nested rule's selector resolved against its parents the way the
-// browser desugars nesting. An element's own declarations are its `style`
-// attribute, and it is named by its unique selector in the page's stored
-// markup (pageDom.ts storedNames), not in the mounted copy.
+// browser desugars nesting, and a rule inside an `@scope` matched from its
+// scope's roots, within its limits (ruleMatch.ts) — never by
+// `Element.matches` alone, which reads its `:scope` as the element asked.
+// An element's own declarations are its `style` attribute, and it is
+// named by its unique selector in the page's stored markup (pageDom.ts
+// storedNames), not in the mounted copy.
 //
 // REDUNDANCY: an element's own declaration a matched, unconditional rule
 // already sets with the identical value — the element's line does nothing
@@ -91,6 +94,7 @@ import {
   parsePage,
   storedNames,
 } from "./pageDom";
+import { ruleMatcher, type RuleMatcher } from "./ruleMatch";
 import { ruleRestatements, type RedundancyRule } from "./ruleRedundancy";
 import { hasStatePseudo, stripStatePseudo } from "./statePseudo";
 
@@ -108,6 +112,8 @@ interface MountedPage {
   nodes: Element[];
   own: Map<Element, CssDeclaration[]>;
   nameOf(node: Element): string;
+  /** Matching in the copy, a rule's `@scope` included (ruleMatch.ts). */
+  match: RuleMatcher;
 }
 
 /** Every match-dependent static finding for the document: redundancy (an
@@ -146,6 +152,7 @@ export async function matchLint(
           ]),
         ),
         nameOf: storedNames(stored.doc, mdoc),
+        match: ruleMatcher(mdoc),
       };
       const ranked = rankedMatches(dd.core, read);
       lintRedundancy(read, ranked, findings);
@@ -162,17 +169,15 @@ export async function matchLint(
 // ---------------------------------------------------------------------------
 // Matching against the mounted page — the one seam every question shares.
 
-function matches(node: Element, selector: string): boolean {
-  try {
-    return node.matches(selector);
-  } catch {
-    // A selector the browser refuses matches nothing, as in its cascade.
-    return false;
-  }
-}
-
-function matchesAny(nodes: readonly Element[], selector: string): boolean {
-  return nodes.some((node) => matches(node, selector));
+/** Whether some node matches `selector`, a variant of `rule`'s, read
+ * under the rule's `@scope`s. A selector the browser refuses matches
+ * nothing, as in its cascade. */
+function matchesAny(
+  read: MountedPage,
+  rule: PageRule,
+  selector: string,
+): boolean {
+  return read.nodes.some((node) => read.match(node, selector, rule.scopes));
 }
 
 /** One rule matching a node, ranked the way the browser's cascade would:
@@ -193,18 +198,18 @@ interface RuleMatch {
  * not match `.card` right now, as a browser loading the page cold says. */
 function matchedRulesFor(
   core: CoreApi,
-  rules: readonly PageRule[],
+  read: MountedPage,
   node: Element,
 ): RuleMatch[] {
   const out: RuleMatch[] = [];
-  for (const rule of rules) {
+  for (const rule of read.rules) {
     let best: { specificity: [number, number, number]; pseudo?: string } | null =
       null;
     let plain = false;
     for (const member of splitTopLevelCommas(rule.selector)) {
       const trimmed = member.trim();
       const trailing = trailingPseudoElement(trimmed);
-      if (!matches(node, trailing?.base ?? trimmed)) continue;
+      if (!read.match(node, trailing?.base ?? trimmed, rule.scopes)) continue;
       if (trailing === null) plain = true;
       const rank = core.specificity(trimmed);
       if (best === null || isMoreSpecific(rank, best.specificity)) {
@@ -254,7 +259,7 @@ function compareSpecificityDescending(
  * both redundancy questions. */
 function rankedMatches(core: CoreApi, read: MountedPage): Map<Element, RuleMatch[]> {
   const out = new Map<Element, RuleMatch[]>();
-  for (const node of read.nodes) out.set(node, matchedRulesFor(core, read.rules, node));
+  for (const node of read.nodes) out.set(node, matchedRulesFor(core, read, node));
   return out;
 }
 
@@ -339,12 +344,13 @@ function lintDeadRules(
 ): void {
   for (const rule of read.rules) {
     if (hasInactiveMediaCondition(core, read.page, rule)) continue;
-    let dead = !matchesAny(read.nodes, selectorForMatching(rule.selector));
+    let dead = !matchesAny(read, rule, selectorForMatching(rule.selector));
     if (dead && hasStatePseudo(rule.selector)) {
       // A second chance, state-stripped: a `.card:hover` that matches
       // SOME element once hovered is not a rule that matches nothing.
       dead = !matchesAny(
-        read.nodes,
+        read,
+        rule,
         selectorForMatching(stripStatePseudo(rule.selector)),
       );
     }
@@ -396,7 +402,7 @@ function lintContainerQueries(read: MountedPage, findings: Finding[]): void {
       const selector = splitTopLevelCommas(stripStatePseudo(rule.selector))
         .filter((member) => trailingPseudoElement(member) === null)
         .join(", ");
-      if (selector.trim() !== "" && matches(node, selector)) {
+      if (selector.trim() !== "" && read.match(node, selector, rule.scopes)) {
         mergeContainerDeclaration(out, rule.declarations);
       }
     }
@@ -411,7 +417,7 @@ function lintContainerQueries(read: MountedPage, findings: Finding[]): void {
       const needs = queryNeeds(inner);
       if (!needs.size && !needs.scrollState) continue; // style()-only
       const matched = read.nodes.filter((node) =>
-        matches(node, selectorForMatching(rule.selector)),
+        read.match(node, selectorForMatching(rule.selector), rule.scopes),
       );
       // A rule matching no element is the dead-rule finding's to report.
       if (matched.length === 0) continue;
