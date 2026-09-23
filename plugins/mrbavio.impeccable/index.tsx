@@ -292,7 +292,13 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     if (added.length > 0) queueMicrotask(() => titleVariants(added));
   });
   dd.on("document", ({ restored }) => {
+    untrack(session.check);
     if (!restored) untrack(trackBuilding);
+  });
+  // A markup edit remounts the page, and until it has, the selector may
+  // name nothing the check can place.
+  dd.on("geometry", () => {
+    untrack(session.check);
   });
 
   // After the await: a reload keeps a waiting pick whose viewport is still
