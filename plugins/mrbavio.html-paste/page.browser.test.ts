@@ -30,7 +30,7 @@ import {
   pageFromPaste,
   parseHtml,
   withStoredImages,
-  writtenImageSources,
+  writtenImageUrls,
   type PastedPage,
 } from "./page";
 
@@ -168,39 +168,46 @@ describe("the html", () => {
     expect(withStoredImages(source, new Map())).toBe(source);
   });
 
-  test("withStoredImages replaces an img's whole src and nothing else: not text, css, a comment, or a longer url it begins", () => {
+  test("withStoredImages replaces an img's whole src and a css url()'s whole url, and nothing else: not text, a comment, a css string, or a longer url it begins", () => {
     const url = "data:image/png;base64,AAAA";
     const longer = `${url}BBBB`;
     const source = [
-      `<style>.a { background: url(${url}) }</style>`,
-      `<p>Copy ${url} as text</p>`,
+      `<style>.a { background: url(${url}) } /* url(${url}) */ .b::after { content: "url(${url})" }</style>`,
+      `<p>Copy ${url} as text, url(${url})</p>`,
       `<div style="background: url(${url})"></div>`,
+      `<div style='background: URL( "${url}" )' title="url(${url})"></div>`,
       `<!-- <img src="${url}"> -->`,
       `<img src="${longer}" alt="${url}">`,
       `<IMG data-src="${url}" SRC=${url}>`,
       `<textarea><img src="${url}"></textarea>`,
     ].join("\n");
     const stored = new Map([[url, "assets/a.png"]]);
-    expect(withStoredImages(source, stored)).toBe(
-      source.replace(`SRC=${url}`, "SRC=assets/a.png"),
-    );
+    const once = source
+      .replace(
+        `{ background: url(${url}) }`,
+        "{ background: url(assets/a.png) }",
+      )
+      .replace(`"background: url(${url})"`, '"background: url(assets/a.png)"')
+      .replace(`URL( "${url}" )`, 'URL( "assets/a.png" )')
+      .replace(`SRC=${url}`, "SRC=assets/a.png");
+    expect(withStoredImages(source, stored)).toBe(once);
     // Both stored: each src is its own url's copy, whichever comes first.
     stored.set(longer, "assets/b.png");
     expect(withStoredImages(source, stored)).toBe(
-      source
-        .replace(`SRC=${url}`, "SRC=assets/a.png")
-        .replace(`src="${longer}"`, 'src="assets/b.png"'),
+      once.replace(`src="${longer}"`, 'src="assets/b.png"'),
     );
   });
 
-  test("writtenImageSources names each img src as written, the first of two", () => {
+  test("writtenImageUrls names each img src as written, the first of two, and each css url() in a style block or attribute", () => {
     expect(
       Array.from(
-        writtenImageSources(
-          `<img src=" a" src="b"><img alt=x src='c'><!-- <img src=d> --><p src=e>`,
+        writtenImageUrls(
+          `<img src=" a" src="b"><img alt=x src='c'><!-- <img src=d> --><p src=e>` +
+            `<style>.f { background: url( 'f' ) } /* url(g) */</style>` +
+            `<div style="mask: url(h), url('i')" data-x="url(j)">url(k)</div>`,
         ),
       ),
-    ).toEqual([" a", "c"]);
+    ).toEqual([" a", "c", "f", "h", "i"]);
   });
 
   test("hasElements tells markup from text that starts with <", () => {
@@ -310,6 +317,23 @@ describe("data: images", () => {
     expect(found.map(({ file }) => file?.type ?? null)).toEqual([
       "image/png",
       null,
+    ]);
+    expect(found.every(({ inCss }) => !inCss)).toBe(true);
+  });
+
+  test("dataImages finds each data: url a css url() names too, a style block's or a style attribute's, and says so", () => {
+    const png = "data:image/png;base64,iVBORw0KGgo=";
+    const font = "data:font/woff2;base64,d09G";
+    const doc = parseHtml(
+      `<img src="${png}"><style>.a { background: url("${png}") } /* url(data:image/gif;base64,R0lGOD) */</style>` +
+        `<div style="background-image: url(${font})"></div><img alt="no src" style="background: url(${png})">`,
+    );
+    // Named by an img and by a css url(): in css, one entry.
+    expect(
+      dataImages(doc).map(({ url, file, inCss }) => [url, file?.type, inCss]),
+    ).toEqual([
+      [png, "image/png", true],
+      [font, undefined, true],
     ]);
   });
 

@@ -22,7 +22,7 @@ import {
   parseHtml,
   VIEWPORT_WIDTH,
   withStoredImages,
-  writtenImageSources,
+  writtenImageUrls,
   type PastedPage,
 } from "./page";
 import { hasContent, isSingleParagraph } from "./prose";
@@ -140,12 +140,14 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
     );
   };
 
-  /** A page stores no `data:` url (decision #76): each image is stored
+  /** A page names its images by url, not by their bytes (decision #76):
+   * each `data:` image an `img`'s `src` or a css `url()` names is stored
    * through the host first and the page's name for the copy written in
-   * place of its url. One that cannot be is left as written, for the
-   * cleaning to take its `src` off and say so; the `img` stays, with its
-   * `alt`. Then the text is cleaned as a landing cleans it, and lands —
-   * unless another document was loaded meanwhile. */
+   * place of its url. One that cannot be is left as written and said: the
+   * cleaning takes it off an `img` (which stays, with its `alt`), and
+   * keeps it in css, as it keeps any `data:` url there. Then the text is
+   * cleaned as a landing cleans it, and lands — unless another document
+   * was loaded meanwhile. */
   const cleanThenLand = async (
     source: HtmlSource,
     position: { x: number; y: number },
@@ -153,10 +155,18 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
   ): Promise<void> => {
     const said: string[] = [];
     const stored = new Map<string, string>();
-    const written = writtenImageSources(source.text);
-    for (const { url, file } of dataImages(source.doc)) {
-      // Not an image: the cleaning's to remove and say.
-      if (file === null) continue;
+    const written = writtenImageUrls(source.text);
+    for (const { url, file, inCss } of dataImages(source.doc)) {
+      if (file === null) {
+        // Not an image: in an `img`'s `src`, the cleaning's to remove and
+        // say; the cleaning keeps css as written, so that is said here.
+        if (inCss) {
+          said.push(
+            "a data: url in css that is not an image was left as written",
+          );
+        }
+        continue;
+      }
       if (!written.has(url)) {
         said.push(
           "a data: image written with character references was not stored",
