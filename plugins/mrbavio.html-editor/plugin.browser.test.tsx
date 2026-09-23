@@ -24,7 +24,7 @@ import {
   type MountedPlugin,
 } from "@daydream/plugin-testing";
 
-import { APPLY_DEBOUNCE_MS, CHANGED_UNDERNEATH } from "./HtmlPanel";
+import { APPLY_DEBOUNCE_MS, CHANGED_UNDERNEATH, PAGE_BACK } from "./HtmlPanel";
 import activate, {
   BLUR_COMMAND,
   DELETE_COMMAND,
@@ -887,5 +887,36 @@ describe("mrbavio.html-editor", () => {
     expect(panel().querySelector(".cm-content")).toBeNull();
     expect(panel().textContent).toContain("Select a page");
     expect(m.store.document.items).toHaveLength(0);
+  });
+
+  test("text held because its page left the canvas is told apart once an undo brings the page back", async () => {
+    const m = await mountPage();
+    select(itemId);
+    content().focus();
+    const typed = edited("Old headline", "Typing");
+    await typeAll(typed);
+    const kernel = createTestKernel();
+    kernel.dd.mutateItems((items) => {
+      items.splice(0, 1);
+    });
+    kernel.dispose();
+    flush();
+    expect(panel().querySelector(".cm-content")).toBeNull();
+
+    // The page is back: the typing with it, and a note that says so —
+    // not that the page is gone.
+    m.store.undo();
+    flush();
+    await waitMounted(itemId, "h1");
+    select(itemId);
+    expect(stored()).toBe(HTML);
+    expect(text()).toBe(typed);
+    expect(message()).toBe(PAGE_BACK);
+
+    // ⌘S saves it over the page, as the note says.
+    content().focus();
+    key(content(), { key: "s", metaKey: true });
+    expect(stored()).toBe(typed);
+    expect(message()).toBeNull();
   });
 });

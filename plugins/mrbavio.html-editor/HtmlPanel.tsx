@@ -87,6 +87,11 @@ export const CHANGED_UNDERNEATH =
 /** The sentence for a page gone from the canvas mid-save. */
 const PAGE_GONE = "The page is no longer on the canvas.";
 
+/** The sentence for text held while its page was gone, once the page is
+ * back on the canvas (an undo, a redo). */
+export const PAGE_BACK =
+  "The page left the canvas while you were typing, so nothing was saved. Your text is kept here: ⌘S saves it over the page as it is now, and ⌘Z drops it.";
+
 /** What the selection points at: the page it is in, and the element
  * (null when the page itself is selected). */
 export interface Target {
@@ -384,10 +389,32 @@ export default function createHtmlPanel(state: PanelState) {
     saveEditor(id);
   };
 
+  /** Page `id`'s draft, re-evaluated against the page as it is now. One
+   * held because the page had left the canvas is shown only once the page
+   * is back — an undo or a redo brought it — so it is gone no longer:
+   * dropped when the page holds its text, else held as text the page
+   * changed under while it was away, which ⌘S saves over it. */
+  const heldDraft = (id: string): Draft | undefined => {
+    const draft = drafts().get(id);
+    const current = stored(id);
+    if (draft?.reason !== "gone" || current === null) return draft;
+    if (current === draft.text) {
+      drafts().delete(id);
+      return undefined;
+    }
+    const back: Draft = {
+      ...draft,
+      reason: "changed-underneath",
+      message: PAGE_BACK,
+    };
+    drafts().set(id, back);
+    return back;
+  };
+
   /** Show page `id` in the editor, nothing typed pending: its draft with
    * its sentence when it has one, else its text as stored. */
   function showPage(ed: HtmlEditorHandle, id: string): void {
-    const draft = drafts().get(id);
+    const draft = heldDraft(id);
     const text = stored(id) ?? "";
     dirty = false;
     synced = draft?.base ?? text;
@@ -439,7 +466,8 @@ export default function createHtmlPanel(state: PanelState) {
   // even mid-focus — through historyVersion, which only undo, redo and a
   // load bump; a restore drops what was pending (the edit belonged to the
   // state just reverted) and keeps a draft (it was never part of any
-  // state). Otherwise the text follows the page whenever nothing typed is
+  // state), re-evaluated against the page restored (heldDraft).
+  // Otherwise the text follows the page whenever nothing typed is
   // pending or held. `last` is what the previous run applied (none on the
   // first).
   createEffect(
