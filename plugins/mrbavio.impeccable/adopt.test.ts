@@ -23,8 +23,10 @@ const viewport = (
   },
 });
 
-const notes = (verb: string, n: number, of: number, source: string, why = "Because.") =>
-  `${variantMarker({ verb, n, of, sourceId: source })}\n\n${why}`;
+/** A variant's notes: its marker, then the direction. No `round`: a
+ * variant landed before rounds had ids. */
+const notes = (verb: string, n: number, of: number, source: string, round?: string, why = "Because.") =>
+  `${variantMarker({ verb, n, of, sourceId: source, ...(round === undefined ? {} : { round }) })}\n\n${why}`;
 
 const FRAUNCES = '@font-face { font-family: "Fraunces"; src: url(assets/x.woff2); }\n';
 
@@ -47,6 +49,11 @@ describe("variants", () => {
     expect(parseVariantMarker(`${line}\n\nA serif display face.`)).toEqual({ verb: "typeset", n: 2, of: 3, sourceId: "vp_1" });
     // The older spelling still reads: variants landed before the rename.
     expect(parseVariantMarker("Glaser typeset · variant 2 of 3 of vp_1")).toEqual({ verb: "typeset", n: 2, of: 3, sourceId: "vp_1" });
+    // A round's id rides the line after the source's; a line without one
+    // is a variant landed before rounds had ids.
+    const round = variantMarker({ verb: "typeset", n: 2, of: 3, sourceId: "vp_1", round: "k3x9q2" });
+    expect(round).toBe("Impeccable typeset · variant 2 of 3 of vp_1 · round k3x9q2");
+    expect(parseVariantMarker(`${round}\n\nA serif display face.`)).toEqual({ verb: "typeset", n: 2, of: 3, sourceId: "vp_1", round: "k3x9q2" });
     expect(parseVariantMarker("A serif display face.\n" + line)).toBeNull();
     expect(parseVariantMarker(undefined)).toBeNull();
     expect(parseVariantMarker("")).toBeNull();
@@ -91,6 +98,30 @@ describe("adopt", () => {
     expect(roundOf(fan(), "nope")).toBeNull();
     // A source that is gone: nothing to adopt into.
     expect(roundOf(fan().filter((i) => i.id !== "src"), "v2")).toBeNull();
+  });
+
+  test("a round is one run of the verb: two runs on one source are two rounds, and adopting from one leaves the other", () => {
+    const items: DreamItem[] = [
+      viewport("src", "white", { title: "Pricing" }),
+      viewport("a1", "red", { notes: notes("bolder", 1, 3, "src", "r1") }),
+      viewport("a2", "red", { notes: notes("bolder", 2, 3, "src", "r1") }),
+      viewport("a3", "red", { notes: notes("bolder", 3, 3, "src", "r1") }),
+      viewport("b1", "blue", { notes: notes("bolder", 1, 3, "src", "r2") }),
+      viewport("b2", "blue", { notes: notes("bolder", 2, 3, "src", "r2") }),
+      viewport("b3", "blue", { notes: notes("bolder", 3, 3, "src", "r2") }),
+      // Landed before rounds had ids: one round of their own, as before,
+      // and never part of a round that has one.
+      viewport("l1", "gray", { notes: notes("bolder", 1, 2, "src") }),
+      viewport("l2", "gray", { notes: notes("bolder", 2, 2, "src") }),
+    ];
+    expect(roundOf(items, "a2")!.variants.map((v) => v.id)).toEqual(["a1", "a2", "a3"]);
+    expect(roundOf(items, "b1")!.variants.map((v) => v.id)).toEqual(["b1", "b2", "b3"]);
+    expect(roundOf(items, "l2")!.variants.map((v) => v.id)).toEqual(["l1", "l2"]);
+    expect(adoptInto(items, "b2")).toBe(true);
+    expect(items.map((i) => i.id)).toEqual(["src", "a1", "a2", "a3", "l1", "l2"]);
+    expect((items[0] as DreamPage).payload.css).toBe("body { background: blue; }\n");
+    expect(adoptInto(items, "l1")).toBe(true);
+    expect(items.map((i) => i.id)).toEqual(["src", "a1", "a2", "a3"]);
   });
 
   test("adopting keeps the source's envelope and meta — its title is its name — takes the variant's page, fonts included, and drops the round", () => {

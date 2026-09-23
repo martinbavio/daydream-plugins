@@ -139,8 +139,15 @@ describe("impeccable host part", () => {
     expect(text).toContain("1 at {x: 1108, y: 40}, 2 at {x: 2116, y: 40}, 3 at {x: 3124, y: 40}");
     expect(text).toContain('"Pricing · bolder n/3"');
     // The notes marker the canvas reads back, as the adopt command parses it.
-    expect(text).toContain("`Impeccable bolder · variant n of 3 of vp_pricing`");
-    expect(parseVariantMarker("Impeccable bolder · variant 2 of 3 of vp_pricing\n\nA denser card.")).toEqual({ verb: "bolder", n: 2, of: 3, sourceId: "vp_pricing" });
+    // Each run of the verb is a round of its own, named on the line: a
+    // second run over the same source is another round, which adopting
+    // from the first leaves alone.
+    const round = /`Impeccable bolder · variant n of 3 of vp_pricing · round ([a-z0-9]+)`/.exec(text)?.[1];
+    expect(round).toMatch(/^[a-z0-9]{6}$/);
+    const again = await (bolder.build as Build)({});
+    expect(again).toMatch(/`Impeccable bolder · variant n of 3 of vp_pricing · round [a-z0-9]+`/);
+    expect(again).not.toContain(`· round ${round}`);
+    expect(parseVariantMarker(`Impeccable bolder · variant 2 of 3 of vp_pricing · round ${round}\n\nA denser card.`)).toEqual({ verb: "bolder", n: 2, of: 3, sourceId: "vp_pricing", round });
     expect(text).not.toContain("draft_open {from:");
     // A variant is a copy of the source's page, then its target's markup
     // replaced by selector and its rules edited by text (decision #76),
@@ -186,7 +193,11 @@ describe("impeccable host part", () => {
     const run = tools[0]!.run as (args: Record<string, string | undefined>) => Promise<{ text: string; isError?: boolean }>;
     const viaTool = await run({ verb: "quieter", brief: "less shouty" });
     const viaPrompt = await (prompts.find((p) => p.name === "impeccable-quieter")!.build as Build)({ brief: "less shouty" });
-    expect(viaTool.text).toBe(viaPrompt);
+    // The same text but for the round id: each run of the verb is a round
+    // of its own.
+    const sameRound = (text: string) => text.replace(/ · round [a-z0-9]+`/g, " · round <id>`");
+    expect(sameRound(viaTool.text)).toBe(sameRound(viaPrompt));
+    expect(viaTool.text).not.toBe(viaPrompt);
     expect(viaTool.isError).toBe(false);
     expect(viaTool.text).toContain("# Impeccable: quieter");
     // The verb is an enum of the same list the prompts cover.
@@ -373,6 +384,7 @@ describe("impeccable host part", () => {
       state: { viewports: [pricing], selection: null },
       target: { viewport: pricing, selector: null },
       variants: 3,
+      round: "r1",
       playbook: "p",
       craftFloor: "f",
       skillVersion: null,

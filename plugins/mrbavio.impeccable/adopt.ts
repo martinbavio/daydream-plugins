@@ -26,9 +26,12 @@ export interface Round {
   variants: DreamPage[];
 }
 
-/** The round the item belongs to: its source and every sibling with the
- * same source and verb. Null when the item is not a variant, or its source
- * is gone (adopting into nothing is not a thing; the user deletes it). */
+/** The round the item belongs to: its source and every sibling from the
+ * same run of the verb over it — the same source, verb and round id. A
+ * variant landed before rounds had ids has none, and its round is every
+ * such sibling of the same source and verb, never one with an id. Null
+ * when the item is not a variant, or its source is gone (adopting into
+ * nothing is not a thing; the user deletes it). */
 export function roundOf(items: readonly DreamItem[], variantId: string): Round | null {
   const variant = items.find((i) => i.id === variantId);
   if (variant === undefined) return null;
@@ -40,7 +43,12 @@ export function roundOf(items: readonly DreamItem[], variantId: string): Round |
   if (source === undefined) return null;
   const variants = items.filter((i): i is DreamPage => {
     const m = markerOf(i);
-    return m !== null && m.sourceId === marker.sourceId && m.verb === marker.verb;
+    return (
+      m !== null &&
+      m.sourceId === marker.sourceId &&
+      m.verb === marker.verb &&
+      m.round === marker.round
+    );
   });
   return { source, variants };
 }

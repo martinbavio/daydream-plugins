@@ -13,18 +13,26 @@ export interface VariantMarker {
   of: number;
   /** The source viewport item's id. */
   sourceId: string;
+  /** Which run of the verb over the source the variant is from: the same
+   * verb run twice on one source is two rounds, and adopting from one
+   * leaves the other. Absent on a variant landed before rounds had ids —
+   * those keep to themselves, one round per source and verb. */
+  round?: string;
 }
 
 /** The line, and the older spelling a canvas may still carry from before
- * the plugin took Impeccable's name. */
-const MARKER = /^(?:Impeccable|Glaser) ([a-z]+) · variant (\d+) of (\d+) of (\S+)\s*$/;
+ * the plugin took Impeccable's name; ` · round <id>` after the source is
+ * absent from a line written before rounds had ids. */
+const MARKER =
+  /^(?:Impeccable|Glaser) ([a-z]+) · variant (\d+) of (\d+) of (\S+)(?: · round ([a-z0-9]+))?\s*$/;
 
 /** The line; `n` may be the letter, for a prompt describing every
  * variant at once. */
 export function variantMarker(
   m: Omit<VariantMarker, "n"> & { n: number | "n" },
 ): string {
-  return `Impeccable ${m.verb} · variant ${m.n} of ${m.of} of ${m.sourceId}`;
+  const round = m.round === undefined ? "" : ` · round ${m.round}`;
+  return `Impeccable ${m.verb} · variant ${m.n} of ${m.of} of ${m.sourceId}${round}`;
 }
 
 /** The marker on the first line of a notes text, or null. */
@@ -40,6 +48,7 @@ export function parseVariantMarker(
     n: Number(match[2]),
     of: Number(match[3]),
     sourceId: match[4]!,
+    ...(match[5] === undefined ? {} : { round: match[5] }),
   };
 }
 

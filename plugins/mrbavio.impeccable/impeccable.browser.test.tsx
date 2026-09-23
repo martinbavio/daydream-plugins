@@ -107,11 +107,12 @@ function sourceDocument(title = "Pricing"): { doc: DreamDocument; source: DreamP
   return { doc, source };
 }
 
-/** A variant of `source` for `verb`, `n` of `of`, as an agent lands it. */
-function variantOf(source: DreamPage, verb: string, n: number, of: number): DreamPage {
+/** A variant of `source` for `verb`, `n` of `of`, as an agent lands it —
+ * from the round `round`, or, without one, landed before rounds had ids. */
+function variantOf(source: DreamPage, verb: string, n: number, of: number, round?: string): DreamPage {
   const v = page(`rgb(${n}, 0, 0)`, {
     title: `${source.payload.meta?.title ?? "Untitled"} · ${verb} ${n}/${of}`,
-    notes: `${variantMarker({ verb, n, of, sourceId: source.id })}\n\nDirection ${n}.`,
+    notes: `${variantMarker({ verb, n, of, sourceId: source.id, ...(round === undefined ? {} : { round }) })}\n\nDirection ${n}.`,
   });
   v.position = { x: 1000 * n, y: 0 };
   return v;
@@ -705,5 +706,21 @@ describe("mrbavio.impeccable in the shell", () => {
     mounted.kernel.commands.runCommand("core.undo");
     flush();
     expect(mounted.store.document.items.length).toBe(4);
+  });
+
+  test("the same verb run twice on one source is two rounds: adopting from one leaves the other on the canvas", async () => {
+    const { doc, source } = sourceDocument("Pricing");
+    const first = [1, 2, 3].map((n) => variantOf(source, "bolder", n, 3, "r1"));
+    const second = [1, 2, 3].map((n) => variantOf(source, "bolder", n, 3, "r2"));
+    doc.items.push(...first, ...second);
+    mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
+    await settle();
+
+    const buttons = Array.from(mounted.host.querySelectorAll<HTMLElement>('[data-item-action="mrbavio.impeccable:adopt"]'));
+    expect(buttons.length).toBe(6);
+    buttons[4]!.click(); // the second round's second variant
+    flush();
+    expect(mounted.store.document.items.map((i) => i.id)).toEqual([source.id, ...first.map((v) => v.id)]);
+    expect((mounted.store.document.items[0] as DreamPage).payload.css).toBe(second[1]!.payload.css);
   });
 });
