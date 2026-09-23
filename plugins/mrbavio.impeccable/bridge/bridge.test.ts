@@ -346,7 +346,7 @@ describe("impeccable host part", () => {
     await activate(scoped.host);
     const on = await (scoped.prompts.find((p) => p.name === "impeccable-critique")!.build as Build)({});
     expect(on).toContain('impeccable_detect {viewport: "vp_pricing", element: ".card"}');
-    expect(on).toContain("PRUNED to the target");
+    expect(on).toContain("only the findings the target adds are answered");
     expect(on).toContain("npx");
   });
 
