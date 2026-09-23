@@ -5,9 +5,10 @@
 // host holds; and adopting a variant folds it into its source as one undo
 // step. Every viewport is a page (decision #76): an element is selected by
 // the id its mount stamped, and a pick names it by selector.
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi, type MockInstance } from "vitest";
 
 import type {
+  DaydreamApi,
   DreamDocument,
   DreamPage,
   PluginManifest,
@@ -382,16 +383,17 @@ describe("mrbavio.impeccable in the shell", () => {
     await settle();
     expect(caption()!.textContent).toBe("typeset · waiting for an agent");
     expect(onElement()).toBe(true);
-    // A second div.header: the selector names neither alone, and the
-    // caption goes inside the page's top-left corner.
+    // Taken, and a second div.header written while it builds: the
+    // selector names neither alone, and the caption goes inside the
+    // page's top-left corner. (A waiting pick would be dropped there.)
+    expect((await pickTool().run({})) as unknown).toMatchObject({ pick: { verb: "typeset", element: "div.header" } });
     mounted.store.setDocument((d) => {
       const p = d.items[0] as DreamPage;
       p.payload.html = p.payload.html.replace("</body>", '<div class="header"></div></body>');
     });
     await settle();
-    expect(caption()!.textContent).toBe("typeset · waiting for an agent");
+    expect(caption()!.textContent).toBe("typeset · building");
     expect(onElement(".grid > .header")).toBe(false);
-    expect((await pickTool().run({})) as unknown).toMatchObject({ pick: { verb: "typeset", element: "div.header" } });
   });
 
   test("a waiting pick holds its element through edits of the page; once its selector names another element, the pick is dropped with a note", async () => {
@@ -461,6 +463,140 @@ describe("mrbavio.impeccable in the shell", () => {
       expect(info).toHaveBeenCalledWith(expect.stringMatching(/names another element since the page was edited/));
       expect(await stored(files, 5)).toMatchObject({ pick: null });
     } finally {
+      info.mockRestore();
+    }
+  });
+
+  test("a waiting pick whose selector names no element, or several, since an edit is dropped with a note, and no lookup runs for it after", async () => {
+    const item = createPageItem(
+      { html: '<!doctype html><html><head></head><body><main><p id="b">b</p><p class="k">k</p></main></body></html>', css: "" },
+      { frame: { width: 640 } },
+    );
+    const { host, files } = fakeHost();
+    let api = null as DaydreamApi | null;
+    mounted = await mountPlugin({
+      entry: (dd) => {
+        api = dd;
+        return activate(dd);
+      },
+      manifest,
+      document: { version: 7, items: [item] },
+      host,
+    });
+    const edit = (from: string, to: string): void => {
+      mounted!.store.setDocument((d) => {
+        const page = d.items[0] as DreamPage;
+        page.payload.html = page.payload.html.replace(from, to);
+      });
+    };
+    const find = vi.spyOn(api!, "pageFind");
+    /** Whether anything looks the pick's element up while the canvas
+     * pans, once the pick is settled. */
+    const looksUp = async (): Promise<boolean> => {
+      find.mockClear();
+      for (let i = 0; i < 3; i++) {
+        api!.geometry.invalidate();
+        await settle();
+      }
+      return find.mock.calls.length > 0;
+    };
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      // Held and unedited: nothing to look up.
+      select(await mountedId(item.id, "#b"));
+      await pickVerb("typeset");
+      expect(((await stored(files, 1))["pick"] as { element: string }).element).toMatch(/#b/);
+      expect(await looksUp()).toBe(false);
+
+      // The id rewritten: the selector names nothing now.
+      edit('id="b"', 'id="z"');
+      await settle();
+      await vi.waitFor(() => expect(pageNode(item.id, "#z")).not.toBeNull());
+      await settle();
+      expect(caption()).toBeNull();
+      expect(info).toHaveBeenCalledWith(
+        expect.stringMatching(/^\[mrbavio\.impeccable\] the waiting pick's element .* names no element since the page was edited, so the pick was dropped/),
+      );
+      expect(await stored(files, 2)).toMatchObject({ pick: null, exit: false });
+      expect(await looksUp()).toBe(false);
+
+      // A second p.k: the selector names two.
+      info.mockClear();
+      select(await mountedId(item.id, "p.k"));
+      await pickVerb("typeset");
+      expect(((await stored(files, 3))["pick"] as { element: string }).element).toMatch(/\.k/);
+      edit("</main>", '<p class="k">k2</p></main>');
+      await settle();
+      await vi.waitFor(() => expect(pageShadow(item.id)!.querySelectorAll("p.k").length).toBe(2));
+      await settle();
+      expect(caption()).toBeNull();
+      expect(info).toHaveBeenCalledWith(expect.stringMatching(/names 2 elements since the page was edited, so the pick was dropped/));
+      expect(await stored(files, 4)).toMatchObject({ pick: null, exit: false });
+      expect(await looksUp()).toBe(false);
+      expect((await pickTool().run({})) as unknown).toMatchObject({ pick: null });
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  test("a restored pick whose selector names several elements is dropped with a note", async () => {
+    const item = createPageItem(
+      { html: "<!doctype html><html><head></head><body><main><p>a</p><p>b</p></main></body></html>", css: "" },
+      { frame: { width: 640 } },
+    );
+    const { host, files } = fakeHost({
+      [manifest.id]: {
+        [SESSION_KEY]: { seq: 4, exit: false, pick: { verb: "typeset", viewportId: item.id, element: "main > p", at: 1 } },
+      },
+    });
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      mounted = await mountPlugin({ entry: activate, manifest, document: { version: 7, items: [item] }, host });
+      await mountedId(item.id, "main > p:nth-of-type(2)");
+      await settle();
+      expect(caption()).toBeNull();
+      expect(info).toHaveBeenCalledWith(expect.stringMatching(/`main > p` names 2 elements/));
+      expect(await stored(files, 5)).toMatchObject({ pick: null });
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  test("a restored pick whose page is edited before its element could be found is dropped with a note", async () => {
+    const item = createPageItem(
+      { html: "<!doctype html><html><head></head><body><main><p>a</p><p>b</p></main></body></html>", css: "" },
+      { frame: { width: 640 } },
+    );
+    const { host, files } = fakeHost({
+      [manifest.id]: {
+        [SESSION_KEY]: { seq: 4, exit: false, pick: { verb: "typeset", viewportId: item.id, element: "main > p:nth-of-type(2)", at: 1 } },
+      },
+    });
+    let find = null as MockInstance<DaydreamApi["pageFind"]> | null;
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      // The page still mounting: nothing the selector names can be found.
+      mounted = await mountPlugin({
+        entry: (dd) => {
+          find = vi.spyOn(dd, "pageFind").mockReturnValue(null);
+          return activate(dd);
+        },
+        manifest,
+        document: { version: 7, items: [item] },
+        host,
+      });
+      await settle();
+      expect(caption()!.textContent).toBe("typeset · waiting for an agent");
+      mounted.store.setDocument((d) => {
+        const page = d.items[0] as DreamPage;
+        page.payload.html = page.payload.html.replace("<main>", "<main><p>new</p>");
+      });
+      await settle();
+      expect(caption()).toBeNull();
+      expect(info).toHaveBeenCalledWith(expect.stringMatching(/its page was edited before the element could be found in it, so the pick was dropped/));
+      expect(await stored(files, 5)).toMatchObject({ pick: null });
+    } finally {
+      find?.mockRestore();
       info.mockRestore();
     }
   });
