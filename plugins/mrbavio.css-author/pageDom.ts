@@ -52,9 +52,9 @@ function parseMarkup(html: string): Document {
 
 /** A page parsed: its document, and its whole css — the stored text
  * with each `<style>` block the markup still carries folded in after it,
- * in document order, where the renderer and the measurer put it. A
- * landed page carries none (a landing folds them); a gate's dry run may
- * see one. */
+ * in document order and under its `media`, where the renderer and the
+ * measurer put it. A landed page carries none (a landing folds them); a
+ * gate's dry run may see one. */
 export interface ParsedPage {
   doc: Document;
   css: string;
@@ -62,10 +62,21 @@ export interface ParsedPage {
 
 export function parsePage(page: Pick<PagePayload, "html" | "css">): ParsedPage {
   const doc = parseMarkup(page.html);
-  const folded = Array.from(doc.querySelectorAll("style")).map(
-    (style) => style.textContent ?? "",
+  const folded = Array.from(doc.querySelectorAll("style")).map((style) =>
+    withMedia(style.textContent ?? "", style.getAttribute("media") ?? ""),
   );
   return { doc, css: [page.css, ...folded].join("\n") };
+}
+
+/** A `<style>`'s text under its `media`, as the kernel's safety walk
+ * folds it (render/sanitize.ts withMedia), to the letter: wrapped in
+ * `@media` unless the media applies everywhere, the query the browser's
+ * own reading of the list. */
+function withMedia(css: string, media: string): string {
+  if (media.trim() === "") return css;
+  const query = new CSSStyleSheet({ media }).media.mediaText;
+  if (query === "" || query.toLowerCase() === "all") return css;
+  return `@media ${query} {\n${css}\n}`;
 }
 
 /** In a page MOUNTED by `dd.mountViewport` (the live face), the `<style>`
@@ -100,13 +111,16 @@ export function lintElements(doc: Document): Element[] {
 /** How a lint names the nodes of a MOUNTED copy of a page: by the unique
  * selector of each node's twin in the stored markup's parse (`stored`,
  * `parsePage(...).doc`), memoised. The copy is that markup with the
- * safety walk's removals (a `<script>`, a `<style>`, a stylesheet link)
- * and the mount's own additions (its `<style>`s in the head); every
- * element it keeps keeps its tag, `id` and `class`. So the two trees are
- * paired child list by child list: each child of the copy with the first
- * stored sibling left that has the same three, the stored siblings
- * skipped between being what the walk removed. A node with no twin, which
- * only the mount's own head holds, is named in the copy. */
+ * safety walk's removals (a `<script>`, a `<style>`, a stylesheet link,
+ * an SVG animation of a url) and the mount's own additions (its
+ * `<style>`s in the head); every element it keeps keeps its tag and every
+ * attribute neither the walk nor the mount touches (`sameElement`). So
+ * the two trees are paired child list by child list: each child of the
+ * copy with the first stored sibling left that is the same element, the
+ * stored siblings skipped between being what the walk removed. A node
+ * with no twin, which only the mount's own head holds, is named in the
+ * copy. The API names no predicate for what the walk removes, so the
+ * pairing compares what it can see. */
 export function storedNames(
   stored: Document,
   mounted: Document,
@@ -147,12 +161,53 @@ function pairTrees(
   }
 }
 
-/** The same element as far as a selector can tell: its tag, `id` and
- * `class`, the attributes a unique selector is made of. */
+/** The same element: its tag, and every attribute but those the walk or
+ * the mount may change on an element it keeps — the same names with the
+ * same values. Tag, `id` and `class` alone would pair a kept `<set
+ * class="a">` with a removed `<set attributeName="href" class="a">`
+ * before it. */
 function sameElement(a: Element, b: Element): boolean {
+  if (a.localName !== b.localName) return false;
+  const fixed = (el: Element): Attr[] =>
+    Array.from(el.attributes).filter((attr) => !changeable(attr));
+  const ours = fixed(a);
   return (
-    a.localName === b.localName &&
-    a.id === b.id &&
-    a.getAttribute("class") === b.getAttribute("class")
+    ours.length === fixed(b).length &&
+    ours.every(
+      (attr) =>
+        b.getAttributeNS(attr.namespaceURI, attr.localName) === attr.value,
+    )
   );
 }
+
+/** The attributes the kernel may remove from or rewrite on an element it
+ * keeps (render/sanitize.ts, render/pageAssets.ts, the measurer's stamp):
+ * every handler, the kernel's own `data-dream-*`, `srcdoc`, `http-equiv`,
+ * a url it may not store or points at the document's route (by local
+ * name, so `xlink:href` too), a `style` whose urls it points there, an
+ * iframe's `sandbox`, a template's `shadowrootmode`. */
+function changeable(attr: Attr): boolean {
+  const name = attr.localName.toLowerCase();
+  return (
+    name.startsWith("on") ||
+    name.startsWith("data-dream-") ||
+    CHANGEABLE.has(name)
+  );
+}
+
+const CHANGEABLE: ReadonlySet<string> = new Set([
+  "srcdoc",
+  "http-equiv",
+  "style",
+  "sandbox",
+  "shadowrootmode",
+  "src",
+  "href",
+  "srcset",
+  "poster",
+  "data",
+  "ping",
+  "action",
+  "formaction",
+  "cite",
+]);
