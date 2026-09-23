@@ -130,6 +130,10 @@ describe("parsePage", () => {
       ".a { color: red } /* open",
       '.a { content: "open }',
       ".a { color: red } } .z { color: blue }",
+      // A newline ends a string before its quote: the kernel's guard
+      // refuses it as never closed.
+      '.a { content: "open\n} .z { color: blue }',
+      '.a { color: #url(a"b) }',
     ]) {
       const page = {
         html: `<!doctype html><html><head><style>${sheet}</style><style>.b { color: green }</style></head><body></body></html>`,

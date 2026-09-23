@@ -69,17 +69,37 @@ export function parsePage(page: Pick<PagePayload, "html" | "css">): ParsedPage {
   return { doc, css: [page.css, ...folded].join("\n") };
 }
 
-/** A `<style>`'s text under its `media`, as the kernel's safety walk
- * folds it (render/sanitize.ts withMedia), to the letter. The sheet goes
- * in as written when it closes its own blocks (pageCss.ts
- * closesItsOwnBlocks, the kernel's test); otherwise as the browser reads
- * it, each rule written out whole — with a media or without, since on the
- * page each sheet is parsed on its own: folded, a stray `}` would close
- * the `@media` early, and an unclosed block, comment or string would
- * swallow every rule folded after it, the next sheet's included. Then
- * wrapped in `@media` unless the media applies everywhere, the query the
- * browser's own reading of the list. */
-function withMedia(css: string, media: string): string {
+// THE KERNEL'S FOLD, copied: a `<style>` the markup still carries is
+// folded into the page's css as the kernel's safety walk folds it
+// (render/sanitize.ts), so the lints read the css the page renders. A
+// plugin may not import the kernel's source, so each declaration below is
+// the kernel's, and says so on the line before it (a `mirrors:` line
+// naming the kernel file and the declaration), so the kernel test can
+// compare it with the kernel the plugins pin. Its guard,
+// closesItsOwnBlocks, is pageCss.ts's copy of the kernel's.
+
+// mirrors: src/render/sanitize.ts withMedia
+/**
+ * A stylesheet's text under the `media` it was carried with — a
+ * `<style>`'s attribute, a stylesheet link's — as the css it folds into:
+ * wrapped in `@media` unless the media applies everywhere. The query is
+ * the browser's own reading of the list (a constructed sheet's
+ * `mediaText`), never the attribute spliced in: a list the browser
+ * refuses is `not all`, as it applies, and a brace in the attribute can
+ * never close the block and write css of its own.
+ *
+ * Nor can one in the SHEET, with a media or without: on the page each
+ * sheet is parsed on its own, and whatever it leaves open ends with it.
+ * Folded, a stray `}` would close the `@media` and apply what follows
+ * everywhere, and an unclosed block, comment or string would swallow
+ * every rule folded after it, the next sheet's included. The sheet goes
+ * in as written when it closes its own blocks (cssRanges.ts
+ * closesItsOwnBlocks, read as the CSS tokenizer reads it); otherwise as
+ * the browser reads it, each rule of a constructed sheet written out
+ * whole — the one case a sheet's text is not the author's, and a sheet
+ * that was never valid css. A landing says so (src/ai/cleanPage.ts).
+ */
+export function withMedia(css: string, media: string): string {
   const body = closesItsOwnBlocks(css) ? css : asTheBrowserReadsIt(css);
   if (media.trim() === "") return body;
   const query = new CSSStyleSheet({ media }).media.mediaText;
@@ -87,8 +107,8 @@ function withMedia(css: string, media: string): string {
   return `@media ${query} {\n${body}\n}`;
 }
 
-/** A sheet's rules as the browser parsed them, each written out whole
- * (render/sanitize.ts asTheBrowserReadsIt). */
+// mirrors: src/render/sanitize.ts asTheBrowserReadsIt
+/** A sheet's rules as the browser parsed them, each written out whole. */
 function asTheBrowserReadsIt(css: string): string {
   const sheet = new CSSStyleSheet();
   sheet.replaceSync(css);

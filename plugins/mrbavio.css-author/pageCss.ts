@@ -302,6 +302,16 @@ function stringEnd(css: string, from: number, to: number): number {
   return to;
 }
 
+// THE KERNEL'S GUARD, copied: whether a sheet closes its own blocks
+// decides how a `<style>` folds into the page's css (pageDom.ts
+// withMedia), and the lints must read the css the page renders, so the
+// answer must be the kernel's to the letter. A plugin may not import the
+// kernel's source, so each declaration below is the kernel's, and says so
+// on the line before it (a `mirrors:` line naming the kernel file and the
+// declaration), so the kernel test can compare it with the kernel the
+// plugins pin.
+
+// mirrors: src/render/cssRanges.ts CLOSER
 /** Each bracket that opens a block in CSS, and the one that closes it. */
 const CLOSER: Readonly<Record<string, string>> = {
   "{": "}",
@@ -309,29 +319,54 @@ const CLOSER: Readonly<Record<string, string>> = {
   "[": "]",
 };
 
+// mirrors: src/render/cssRanges.ts BRACKET
+/** Each closer's bracket, named for a sentence. */
+const BRACKET: Readonly<Record<string, string>> = {
+  "}": "brace",
+  ")": "parenthesis",
+  "]": "bracket",
+};
+
+// mirrors: src/render/cssRanges.ts reachProblem
 /**
- * Whether `css` can be put inside a block as written and the block's own
- * `}` after it still close that block — the kernel's own test, to the
- * letter (src/render/cssRanges.ts closesItsOwnBlocks), which decides how
- * its landing folds a `<style media>` (pageDom.ts withMedia): every `{`,
- * `(` and `[` it opens is closed by its own closer and it closes nothing
- * it did not open, and no comment, string or unquoted `url(…)` runs off
- * its end. Read as the CSS tokenizer reads it: a bracket in a comment, a
- * string, a url or an escape is not one, and a url is known by its name
- * with escapes decoded (`\75rl(` is `url(`). Where it is unsure it
- * answers no — a stray `)` the CSS parser would keep as a token is
- * refused here too.
+ * THE GUARD every write of css text goes through, and the landing's fold
+ * (decision #76): the problem with putting `text` inside a block — or at
+ * the end of a sheet — as written, in words an editor can show, or null
+ * when whatever comes after it is still read as it was. Every `{`, `(`
+ * and `[` it opens must be closed by its own closer and it may close
+ * nothing it did not open, and no comment, string or unquoted `url(…)`
+ * may run off its end: one unclosed bracket is enough for the browser to
+ * drop every rule after it, and the damage is on disk.
+ *
+ * Read as the CSS tokenizer reads it: a bracket in a comment, a string, a
+ * url or an escape is not one, and a url is known by its name with
+ * escapes decoded (`\75rl(` is `url(`). A string a newline ends before
+ * its quote is the tokenizer's bad string, and refused as never closed;
+ * an escaped newline continues it. Where it is unsure it refuses — a
+ * stray `)` the CSS parser would keep as a token is refused here too.
+ *
+ * `visit`, when given, is shown every character outside those tokens and
+ * may refuse one — a selector's `{` or `;` — by answering the problem.
  */
-export function closesItsOwnBlocks(text: string): boolean {
+export function reachProblem(
+  text: string,
+  visit?: (ch: string) => string | null,
+): string | null {
   // The tokenizer's preprocessing: every newline is one `\n`.
   const css = text.replace(/\r\n?|\f/g, "\n");
   const open: string[] = [];
   for (let i = 0; i < css.length; i++) {
     const ch = css[i]!;
-    const name = nameAt(css, i);
+    // `@name` and `#name` are one token each: a `url(` there is a name's.
+    const hashed = ch === "@" || ch === "#";
+    const name = nameAt(css, hashed ? i + 1 : i);
     if (name !== null) {
       i = name.end - 1;
-      if (name.value.toLowerCase() !== "url" || css[name.end] !== "(") {
+      if (
+        hashed ||
+        name.value.toLowerCase() !== "url" ||
+        css[name.end] !== "("
+      ) {
         continue;
       }
       let j = name.end + 1;
@@ -341,30 +376,49 @@ export function closesItsOwnBlocks(text: string): boolean {
       // An unquoted one is one token to its `)`, a bad one included: a
       // quote or a bracket inside it is the url's.
       while (j < css.length && css[j] !== ")") j += css[j] === "\\" ? 2 : 1;
-      if (j >= css.length) return false;
+      if (j >= css.length) return "a url( is never closed";
       i = j;
     } else if (ch === "/" && css[i + 1] === "*") {
       const end = css.indexOf("*/", i + 2);
-      if (end === -1) return false;
+      if (end === -1) return "a comment is never closed";
       i = end + 1;
     } else if (ch === '"' || ch === "'") {
-      // Ends at its quote, or at a newline (the tokenizer's bad string);
-      // an escaped newline continues it.
       let j = i + 1;
       while (j < css.length && css[j] !== ch && css[j] !== "\n") {
         j += css[j] === "\\" ? 2 : 1;
       }
-      if (j >= css.length) return false;
+      if (css[j] !== ch) return "a quote is never closed";
       i = j;
-    } else if (ch in CLOSER) {
-      open.push(CLOSER[ch]!);
-    } else if (ch === "}" || ch === ")" || ch === "]") {
-      if (open.pop() !== ch) return false;
+    } else {
+      const refused = visit?.(ch) ?? null;
+      if (refused !== null) return refused;
+      if (ch in CLOSER) {
+        open.push(CLOSER[ch]!);
+      } else if (ch in BRACKET) {
+        if (open.at(-1) === ch) open.pop();
+        // It closes one opened further out: the one inside, left open,
+        // is what went wrong.
+        else if (open.includes(ch)) return neverClosed(open.at(-1)!);
+        else return `a closing ${BRACKET[ch]} has no opening one`;
+      }
     }
   }
-  return open.length === 0;
+  return open.length === 0 ? null : neverClosed(open.at(-1)!);
 }
 
+// mirrors: src/render/cssRanges.ts neverClosed
+function neverClosed(closer: string): string {
+  return `an opening ${BRACKET[closer]} is never closed`;
+}
+
+// mirrors: src/render/cssRanges.ts closesItsOwnBlocks
+/** Whether `text` passes the guard (reachProblem): the landing's question
+ * of a sheet it folds under a `@media`. */
+export function closesItsOwnBlocks(text: string): boolean {
+  return reachProblem(text) === null;
+}
+
+// mirrors: src/render/cssRanges.ts nameAt
 /** The run of name characters starting at `i` — letters, digits, `_`,
  * `-`, anything non-ASCII, and escapes, decoded — or null when none
  * starts there. What the tokenizer reads as one name (a number's unit
