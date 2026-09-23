@@ -723,4 +723,23 @@ describe("mrbavio.impeccable in the shell", () => {
     expect(mounted.store.document.items.map((i) => i.id)).toEqual([source.id, ...first.map((v) => v.id)]);
     expect((mounted.store.document.items[0] as DreamPage).payload.css).toBe(second[1]!.payload.css);
   });
+
+  test("a second round of a verb on one source counts its own variants, not the first round's", async () => {
+    const { doc, source } = sourceDocument("Pricing");
+    doc.items.push(...[1, 2, 3].map((n) => variantOf(source, "bolder", n, 3, "r1")));
+    mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
+    await mountedId(source.id, ".grid");
+
+    select(source.id);
+    await pickVerb("bolder");
+    await pickTool().run({});
+    await settle();
+    expect(caption()!.textContent).toBe("bolder · building");
+    mounted.store.landItems([variantOf(source, "bolder", 1, 3, "r2")]);
+    await settle();
+    expect(caption()!.textContent).toBe("bolder · 1 of 3");
+    mounted.store.landItems([variantOf(source, "bolder", 2, 3, "r2"), variantOf(source, "bolder", 3, 3, "r2")]);
+    await settle();
+    expect(caption()).toBeNull();
+  });
 });
