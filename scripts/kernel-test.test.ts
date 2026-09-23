@@ -1,7 +1,11 @@
-// `kernel-test.mjs --clean <kernel>`: what a `--keep` run left in a
-// kernel checkout — its plugin copies, the lockfile they changed — taken
-// out, and nothing else. Over a scratch git checkout with the one file the
-// script checks a kernel by and a lockfile with nothing to install.
+// `kernel-test.mjs` over a scratch git checkout with the one file the
+// script checks a kernel by and a lockfile with nothing to install, and a
+// fake `pnpm` where a step must not really run: `--clean` takes out what a
+// `--keep` run left — its plugin copies, the lockfile they changed — and
+// nothing else; a signal stops the run and still cleans up; the command
+// line refuses what it does not know; the lock tells a run in progress
+// from a killed one's leftovers; and marked copies of kernel code are
+// checked against the kernel (scripts/mirrors.mjs).
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -263,5 +267,184 @@ describe("kernel-test's plugin paths", () => {
     expect(r.stderr).toContain("mrbavio.htmleditor");
     expect(r.stdout).not.toContain("pnpm install");
     expect(existsSync(path.join(k, "plugins", "mrbavio.notes"))).toBe(false);
+  });
+});
+
+describe("kernel-test's command line", () => {
+  test("an unknown flag stops the run before anything is touched", () => {
+    const k = scratchKernel();
+    const pnpm = fakePnpm();
+    const r = spawnSync("node", [script, k, path.join(repo, "plugins", "mrbavio.notes"), "--kepe"], {
+      encoding: "utf8",
+      env: pnpm.env,
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("unknown flag: --kepe");
+    expect(pnpm.calls()).toEqual([]);
+    expect(existsSync(path.join(k, ".kernel-test.lock"))).toBe(false);
+  });
+
+  test("--clean with a plugin folder is refused, and nothing is removed", () => {
+    const k = scratchKernel();
+    const copy = path.join(k, "plugins", "mrbavio.notes");
+    mkdirSync(copy);
+    writeFileSync(path.join(copy, ".kernel-test-copy"), "");
+    const r = run(k, "--clean", path.join(repo, "plugins", "mrbavio.notes"));
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("--clean takes the kernel checkout alone");
+    expect(existsSync(copy)).toBe(true);
+  });
+});
+
+/** A lock as a run writes it, held by `pid`. */
+function writeLock(k: string, pid: number, started = Date.now()): string {
+  const lock = path.join(k, ".kernel-test.lock");
+  writeFileSync(lock, JSON.stringify({ pid, started }) + "\n");
+  return lock;
+}
+
+describe("kernel-test's lock", () => {
+  test("a run in progress is named as one, never as leftovers, and --clean leaves its copies alone", () => {
+    const k = scratchKernel();
+    // The running run's copy, marked as every copy is.
+    const copy = path.join(k, "plugins", "mrbavio.notes");
+    mkdirSync(copy);
+    writeFileSync(path.join(copy, ".kernel-test-copy"), "");
+    const lock = writeLock(k, process.pid);
+
+    const r = run(k, path.join(repo, "plugins", "mrbavio.notes"));
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain(`another kernel-test run (pid ${process.pid}`);
+    expect(r.stderr).toContain("in progress");
+    expect(r.stderr).not.toContain("--clean");
+
+    const clean = run(k, "--clean");
+    expect(clean.status).toBe(2);
+    expect(clean.stderr).toContain("in progress");
+    expect(existsSync(copy)).toBe(true);
+    expect(existsSync(lock)).toBe(true);
+  });
+
+  test("the lock of a run that was killed is a leftover: a run names --clean, which removes it with the copies", () => {
+    const k = scratchKernel();
+    const pnpm = fakePnpm();
+    const dead = spawnSync("node", ["-e", ""]).pid;
+    const lock = writeLock(k, dead, Date.now() - 60_000);
+    const copy = path.join(k, "plugins", "mrbavio.notes");
+    mkdirSync(copy);
+    writeFileSync(path.join(copy, ".kernel-test-copy"), "");
+
+    const r = spawnSync("node", [script, k, path.join(repo, "plugins", "mrbavio.notes")], {
+      encoding: "utf8",
+      env: pnpm.env,
+    });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("a run that stopped");
+    expect(r.stderr).toContain("--clean");
+
+    const clean = spawnSync("node", [script, k, "--clean"], { encoding: "utf8", env: pnpm.env });
+    expect(clean.status, clean.stderr).toBe(0);
+    expect(existsSync(lock)).toBe(false);
+    expect(existsSync(copy)).toBe(false);
+  });
+});
+
+describe("kernel-test's mirrors", () => {
+  const KERNEL_FILE = [
+    "/** Doubled. */",
+    "export function twice(value: number): number {",
+    "  // As written in the kernel.",
+    "  return value * 2;",
+    "}",
+    "",
+    "function shout(",
+    "  text: string,",
+    "): string {",
+    '  return text.toUpperCase() + "!";',
+    "}",
+    "",
+  ].join("\n");
+
+  /** A kernel with `src/render/thing.ts`, and a plugin whose copies.ts
+   * holds `source`; every step the run spawns passes. */
+  function mirrorRun(source: string) {
+    const k = scratchKernel();
+    mkdirSync(path.join(k, "src", "render"), { recursive: true });
+    writeFileSync(path.join(k, "src", "render", "thing.ts"), KERNEL_FILE);
+    const plugin = path.join(k, ".src", "mrbavio.copies");
+    mkdirSync(plugin, { recursive: true });
+    writeFileSync(path.join(plugin, "manifest.json"), "{}\n");
+    writeFileSync(path.join(plugin, "package.json"), '{ "name": "c" }\n');
+    writeFileSync(path.join(plugin, "copies.ts"), source);
+    const pnpm = fakePnpm({ vitest: " Tests  1 passed (1)\n" });
+    const r = spawnSync("node", [script, k, plugin], { encoding: "utf8", env: pnpm.env });
+    // The run's lock goes with it.
+    expect(existsSync(path.join(k, ".kernel-test.lock"))).toBe(false);
+    return r;
+  }
+
+  test("an exact copy formatted and commented otherwise passes; one that differs fails, pointing at the line in each file", () => {
+    const r = mirrorRun(
+      [
+        "// mirrors: src/render/thing.ts twice",
+        "/** The kernel's, to the letter. */",
+        "export function twice(value: number): number { return value * 2; }",
+        "",
+        "/* mirrors-exact: render/thing.ts#shout() */",
+        "function shout(text: string): string {",
+        '  return text.toUpperCase() + "?";',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/FAIL mirrors \(2 marked\) \(1\)/);
+    expect(r.stdout).toMatch(/ok {3}vitest/);
+    expect(r.stderr).toContain(
+      "mrbavio.copies/copies.ts:5: shout differs from the kernel's shout (src/render/thing.ts:7)",
+    );
+    expect(r.stderr).toContain("from src/render/thing.ts:10");
+    expect(r.stderr).toContain("and  mrbavio.copies/copies.ts:7");
+    expect(r.stderr).not.toContain("twice differs");
+  });
+
+  test("an adapted copy is never compared: a kernel function changed since its recorded hash is reported, and so is one with none, and the run passes", () => {
+    const r = mirrorRun(
+      [
+        "// mirrors-adapted: src/render/thing.ts twice 000000000000",
+        "export function twice(value: number) { return value + value; }",
+        "",
+        "// Mirrors-adapted: src/render/thing.ts shout",
+        'export const shout = (text: string) => text + "!";',
+        "",
+      ].join("\n"),
+    );
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(r.stdout).toMatch(/ok {3}mirrors \(2 marked\)/);
+    expect(r.stdout).toMatch(
+      /copies\.ts:1: the kernel's twice \(src\/render\/thing\.ts:2\) changed since the copy was adapted \(000000000000, now [0-9a-f]{12}\)/,
+    );
+    expect(r.stdout).toMatch(
+      /copies\.ts:4: shout is adapted from src\/render\/thing\.ts:7, whose hash is [0-9a-f]{12}/,
+    );
+  });
+
+  test("a marker naming what the kernel does not have fails", () => {
+    const r = mirrorRun(
+      [
+        "// mirrors: src/render/thing.ts thrice",
+        "export function thrice(value: number) { return value * 3; }",
+        "// mirrors: src/render/gone.ts twice",
+        "export function twice(value: number) { return value * 2; }",
+        "",
+      ].join("\n"),
+    );
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain(
+      "copies.ts:1: mirrors src/render/thing.ts thrice, which the kernel does not have",
+    );
+    expect(r.stderr).toContain(
+      "copies.ts:3: mirrors src/render/gone.ts twice, which the kernel does not have (no such file)",
+    );
   });
 });
