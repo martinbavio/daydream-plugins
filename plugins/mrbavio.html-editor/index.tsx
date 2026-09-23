@@ -1,20 +1,20 @@
 // mrbavio.html-editor — the HTML pane as a plugin (decision #58): the
 // page's markup AS TEXT (decision #76), the `html` the file holds, in
 // CodeMirror — the page the selection is in, with the selected element's
-// span marked. Saved live as you type through `dd.writePage`, whose
-// verdict is the kernel's: what a landing would take out is refused by
-// name, and so is a save over a page that changed underneath. With it, a person can change a page's structure —
-// edit a headline, add an element, change a tag or an attribute — the
-// way they would in a file. Delete and Backspace on an inner element
-// remove that element alone, cut out of the text where it was written
-// (core's own Delete removes the whole item when the page is selected;
-// the `html`, `head` and `body` stay, since a page has them).
+// span marked, and the element the caret is in selected on the canvas.
+// Saved live as you type through `dd.writePage`, whose verdict is the
+// kernel's: what a landing would take out is refused by name, and so is
+// a save over a page that changed underneath. With it, a person can
+// change a page's structure — edit a headline, add an element, change a
+// tag or an attribute — the way they would in a file. Delete and
+// Backspace on an inner element remove that element alone, cut out of
+// the text where it was written (core's own Delete removes the whole item
+// when the page is selected; the `html`, `head` and `body` stay, since a
+// page has them).
 //
-// NOT here, on purpose: in-place text editing on the canvas, and moving
-// the canvas selection from the caret — the plugin API can name a
-// mounted element's place in the text, but not the element at a place
-// in it. Nor a resizer: the dock's width and the split between this pane
-// and the CSS editor above it are the dock's own chrome (decision #59).
+// NOT here, on purpose: in-place text editing on the canvas. Nor a
+// resizer: the dock's width and the split between this pane and the CSS
+// editor above it are the dock's own chrome (decision #59).
 //
 // Everything it knows about the app arrives through `dd`; the entry
 // registers its three commands and the panel.

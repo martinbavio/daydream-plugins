@@ -10,7 +10,6 @@ import {
 import type { DaydreamApi } from "@daydream/plugin-api";
 
 import { createHtmlEditor, type HtmlEditorHandle } from "./htmlEditor";
-import { pageSource, storedElement, type PageSource } from "./pageSource";
 import { classPrefix } from "./styles";
 
 /** Text a save refused, held on screen and kept per page, so a refusal,
@@ -78,10 +77,10 @@ export function targetOf(
       ? { pageId: id, elementId: null }
       : null;
   }
-  const stack = dd.pageStack(id);
-  return stack === null
+  const element = dd.pageElement(id);
+  return element === null
     ? "unmounted"
-    : { pageId: stack.viewportId, elementId: id };
+    : { pageId: element.viewportId, elementId: id };
 }
 
 /** A page's stored markup, or null when it is not on the canvas. */
@@ -121,10 +120,13 @@ type Saved = { ok: true } | { ok: false; problem: string; stale: boolean };
  *
  * Each save rewrites the markup, so the page REMOUNTS and its elements
  * get new ids; the canvas carries the selection by its place. The pane
- * follows the SELECTED ELEMENT into the text: its span is marked, and
- * scrolled into view when the selection moves while the editor is not
- * being typed in (pageSource.ts maps the mounted element to where it was
- * written).
+ * and the canvas follow each other through the kernel's replay of the
+ * mount: the SELECTED ELEMENT is marked where it was written
+ * (`dd.pageSource`), and scrolled to when the selection moves while the
+ * editor is not being typed in; the CARET, moved by the person in text
+ * that is the page's as stored, selects the element it is in
+ * (`dd.pageElementAt`). Neither echoes: the mark never moves a focused
+ * caret, and only the person's own caret moves select.
  *
  * The editor text is rewritten on a page change, an undo or redo, a
  * blur, and whenever the page's html changes while nothing typed is
@@ -202,14 +204,6 @@ export default function createHtmlPanel(state: PanelState) {
   };
 
   const stored = (id: string): string | null => untrack(() => pageHtml(dd, id));
-
-  // The last text read for its elements' places: a mark follows every
-  // selection, and the text changes far less often.
-  let source: PageSource | null = null;
-  const sourceOf = (text: string): PageSource => {
-    if (source?.html !== text) source = pageSource(text);
-    return source;
-  };
 
   /**
    * Save `text` as page `id`'s markup, unless it is what the page holds
@@ -313,19 +307,14 @@ export default function createHtmlPanel(state: PanelState) {
   function mark(ed: HtmlEditorHandle, reveal: boolean): void {
     if (dirty) return;
     const t = untrack(target);
-    const node =
-      t === null || t.elementId === null
-        ? undefined
-        : dd.geometry.node(t.elementId);
-    if (node === undefined || ed.text() !== synced) {
-      ed.setMark(null, false);
-      return;
-    }
-    const read = sourceOf(synced);
-    const el = storedElement(read.parsed, node);
-    const range = el === null ? null : read.rangeOf(el);
+    const range =
+      t === null || t.elementId === null || ed.text() !== synced
+        ? null
+        : dd.pageSource(t.elementId);
     ed.setMark(
-      range === null ? null : { from: range.start, to: range.end },
+      range === null || range.viewportId !== t?.pageId
+        ? null
+        : { from: range.start, to: range.end },
       reveal && !ed.hasFocus(),
     );
   }
@@ -419,6 +408,21 @@ export default function createHtmlPanel(state: PanelState) {
     }, APPLY_DEBOUNCE_MS);
   };
 
+  // The person moved the caret: select the element it is in. Only over
+  // the page's text as stored — the offsets are that text's — and never
+  // for a place in no element (the doctype, a comment outside <html>),
+  // which leaves the selection where it is.
+  const handleCaret = (offset: number): void => {
+    const ed = editor();
+    const id = untrack(pageId);
+    if (ed === undefined || id === null || dirty || !ed.hasFocus()) return;
+    if (ed.text() !== synced || stored(id) !== synced) return;
+    const element = dd.pageElementAt(id, offset);
+    if (element !== null && element !== untrack(dd.selection)) {
+      dd.select(element);
+    }
+  };
+
   const handleBlur = (): void => {
     // A blur the <Show> fires while unmounting the editor (the page was
     // removed, or the selection cleared) is not a gesture: the page-change
@@ -447,10 +451,11 @@ export default function createHtmlPanel(state: PanelState) {
       parent: el,
       doc: draft?.text ?? text,
       onDocChanged: handleDocChanged,
+      onCaret: handleCaret,
       onBlur: handleBlur,
     });
     setEditor(handle);
-    // The selected element's node is read after the render, never
+    // The selected element's place is read after the render, never
     // inside it (decision #33).
     queueMicrotask(() => {
       if (editor() === handle) mark(handle, true);

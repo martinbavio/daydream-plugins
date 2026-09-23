@@ -2,11 +2,12 @@
 // decisions; docs/plugin-authoring.md, "Testing a plugin"): the real
 // shell, the plugin enabled by config, assertions from the DOM and the
 // API — what a person sees. The pane shows the page's html as its text
-// and marks the selected element in it; typing saves live, verbatim,
-// through the kernel's writePage, and quick saves join one undo step; a
-// save the kernel refuses is kept as the page's draft, and one over a
-// page that changed underneath is refused as stale; Delete on an inner
-// element cuts it out of the text and never removes the viewport.
+// and marks the selected element in it, and the caret selects the element
+// it is in; typing saves live, verbatim, through the kernel's writePage,
+// and quick saves join one undo step; a save the kernel refuses is kept
+// as the page's draft, and one over a page that changed underneath is
+// refused as stale; Delete on an inner element cuts it out of the text
+// and never removes the viewport.
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -188,6 +189,17 @@ function select(id: string | null): void {
 async function marks(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
   flush();
+}
+
+/** The person puts the caret at `offset` — a click, as CodeMirror
+ * reports one — and the frame it is reported on passes. */
+async function caret(offset: number): Promise<void> {
+  view().dispatch({
+    selection: { anchor: offset },
+    userEvent: "select.pointer",
+  });
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  await marks();
 }
 
 /** Longer than the kernel's edit burst (decision #20, 500ms): the next
@@ -372,6 +384,47 @@ describe("mrbavio.html-editor", () => {
     await marks();
     expect(marked()).toBe("<p>More Body copy</p>");
     expect(view().state.selection.main.head).toBe(stored().indexOf("<p>More"));
+  });
+
+  test("the caret selects the element it is in on the canvas, and the mark never moves it", async () => {
+    const m = await mountPage();
+    const store = m.store;
+    select(itemId);
+    await marks();
+    content().focus();
+    const inCopy = HTML.indexOf("Body copy") + 3;
+    await caret(inCopy);
+    expect(store.selectedId()).toBe(idOf("p"));
+    expect(store.selectedItemIds()).toEqual([]);
+    expect(marked()).toBe("<p>Body copy</p>");
+    // The mark followed; the caret stayed where the person put it.
+    expect(view().state.selection.main.head).toBe(inCopy);
+
+    const inHeadline = HTML.indexOf("Old headline");
+    await caret(inHeadline);
+    expect(store.selectedId()).toBe(idOf("h1"));
+    expect(marked()).toBe('<h1 class="headline">Old headline</h1>');
+    expect(view().state.selection.main.head).toBe(inHeadline);
+
+    // Between two elements, the innermost one holding the place.
+    await caret(HTML.indexOf("<!-- the copy -->"));
+    expect(store.selectedId()).toBe(idOf("body"));
+
+    // A place in no element — the doctype — leaves the selection be.
+    await caret(3);
+    expect(store.selectedId()).toBe(idOf("body"));
+  });
+
+  test("the caret selects nothing while typed text is not the page's yet", async () => {
+    const m = await mountPage();
+    const store = m.store;
+    const h1 = idOf("h1");
+    select(h1);
+    content().focus();
+    await typeAll(edited("Old headline", "Typing"));
+    // The offsets are the typed text's, not the stored page's.
+    await caret(text().indexOf("Body copy"));
+    expect(store.selectedId()).toBe(h1);
   });
 
   test("⌘Z while typing undoes the typing and re-syncs the editor under the caret", async () => {

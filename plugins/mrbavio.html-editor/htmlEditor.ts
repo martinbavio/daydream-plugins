@@ -5,7 +5,7 @@
  * imperative: HtmlPanel mounts it in a ref and owns every policy decision
  * (when to save, what to mark).
  *
- * Two boundaries, the same two the CSS editor keeps:
+ * Three boundaries, the first two the CSS editor's own:
  * - Store→editor writes go through setText, a minimal span change tagged
  *   with an annotation, so the caret maps through instead of being
  *   clobbered by a whole-string swap.
@@ -13,6 +13,11 @@
  *   transactions — a sync must never read as an edit — and are
  *   microtask-deferred, because CodeMirror forbids dispatching from
  *   inside an update.
+ * - The caret reaches the panel (onCaret) only when the person moved it
+ *   — a click, an arrow key: CodeMirror's `select` user events — and
+ *   once a frame, as the CSS editor's caret line does. A sync mapping it
+ *   and a mark revealing it are no user event, so a canvas selection
+ *   shown in the text never echoes back as a caret move.
  *
  * Deliberately absent: CodeMirror's history. The store's burst-based
  * history is the only undo model; the command router handles ⌘Z at
@@ -51,6 +56,10 @@ export interface HtmlEditorOptions {
   /** The document changed through an actual edit (typing, paste — never
    * a setText sync). Deferred to a microtask. */
   onDocChanged: () => void;
+  /** The person moved the caret to `offset` (a click, a key — never a
+   * sync or a mark). Deferred to the next frame, the last move of the
+   * frame only. */
+  onCaret: (offset: number) => void;
   /** The editor lost focus. */
   onBlur: () => void;
 }
@@ -190,6 +199,7 @@ const highlight = HighlightStyle.define([
 
 export function createHtmlEditor(options: HtmlEditorOptions): HtmlEditorHandle {
   let destroyed = false;
+  let caretFrame: number | null = null;
 
   const view: EditorView = new EditorView({
     parent: options.parent,
@@ -219,6 +229,18 @@ export function createHtmlEditor(options: HtmlEditorOptions): HtmlEditorHandle {
         if (!userEdit) return;
         queueMicrotask(() => {
           if (!destroyed) options.onDocChanged();
+        });
+      }),
+      EditorView.updateListener.of((update) => {
+        if (!update.selectionSet) return;
+        if (!update.transactions.some((tr) => tr.isUserEvent("select"))) {
+          return;
+        }
+        const offset = update.state.selection.main.head;
+        if (caretFrame !== null) cancelAnimationFrame(caretFrame);
+        caretFrame = requestAnimationFrame(() => {
+          caretFrame = null;
+          if (!destroyed) options.onCaret(offset);
         });
       }),
       EditorView.domEventHandlers({
@@ -279,6 +301,7 @@ export function createHtmlEditor(options: HtmlEditorOptions): HtmlEditorHandle {
     },
     destroy: () => {
       destroyed = true;
+      if (caretFrame !== null) cancelAnimationFrame(caretFrame);
       view.destroy();
     },
   };
