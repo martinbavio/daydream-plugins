@@ -8,10 +8,10 @@
     "solid-js": "2.0.0-rc.9"
   },
   "dependencies": {
-    "@daydream/plugin-api": "github:mbavio-phota/daydream#287e36fa007911e6e044ecb9aaf5bd0be60d58aa&path:packages/plugin-api"
+    "@daydream/plugin-api": "github:mbavio-phota/daydream#2a78de14f15618777be5378cd3d6a05818680924&path:packages/plugin-api"
   },
   "devDependencies": {
-    "@daydream/plugin-testing": "github:mbavio-phota/daydream#287e36fa007911e6e044ecb9aaf5bd0be60d58aa&path:packages/plugin-testing",
+    "@daydream/plugin-testing": "github:mbavio-phota/daydream#2a78de14f15618777be5378cd3d6a05818680924&path:packages/plugin-testing",
     "vitest": "^4.1.11"
   }
 }
