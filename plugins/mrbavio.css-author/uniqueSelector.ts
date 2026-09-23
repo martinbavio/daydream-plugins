@@ -11,10 +11,11 @@
 // hand it is the page's STORED markup parsed in standards mode, as the
 // kernel's is (pageDom.ts parsePage, storedNames).
 //
-// Each declaration below is the kernel's, to the letter, and says so on
-// the line before it (a `mirrors:` line naming the kernel file and the
-// declaration), so the kernel test can compare it with the kernel the
-// plugins pin.
+// Everything below is the kernel's, to the letter, and each function says
+// so on the line before it (a `mirrors:` line naming the kernel file and
+// the function), so the kernel test compares it with the kernel the
+// plugins pin (scripts/mirrors.mjs); the `Step` type is checked by the
+// functions that use it.
 
 // mirrors: src/render/uniqueSelector.ts uniqueSelector
 /**
@@ -85,7 +86,6 @@ export function uniqueSelector(
   throw new Error("uniqueSelector: no selector under this root names it");
 }
 
-// mirrors: src/render/uniqueSelector.ts Step
 /** One compound of the path: the element's tag and classes, and the
  * `:nth-of-type` that tells it from a same-looking sibling, kept apart so
  * a pruning pass can try the compound without it. */
