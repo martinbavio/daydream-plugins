@@ -3,9 +3,10 @@
 // CodeMirror — the page the selection is in, with the selected element's
 // span marked, and the element the caret is in selected on the canvas.
 // Saved live as you type through `dd.writePage`, whose verdict is the
-// kernel's: what a landing would take out is refused by name, and so is
-// a save over a page that changed underneath — the typed text is kept as
-// the page's draft either way. With it, a person can change a page's
+// kernel's: what a landing would take out is refused by name. Typing over
+// a page that changed underneath is carried onto the change, or, where the
+// two meet, kept as the page's draft until ⌘S saves it over; a refused
+// text is kept as the draft too. With it, a person can change a page's
 // structure — edit a headline, add an element, change a tag or an
 // attribute — the way they would in a file. Delete and Backspace on an
 // inner element remove that element alone, cut out of the text where it
@@ -17,7 +18,7 @@
 // editor above it are the dock's own chrome (decision #59).
 //
 // Everything it knows about the app arrives through `dd`; the entry
-// registers its three commands and the panel.
+// registers its four commands and the panel.
 
 import { untrack } from "solid-js";
 
@@ -29,6 +30,7 @@ import { classPrefix, css } from "./styles";
 export const BLUR_COMMAND = "mrbavio.html-editor.blur";
 export const UNDO_COMMAND = "mrbavio.html-editor.undo";
 export const DELETE_COMMAND = "mrbavio.html-editor.delete-element";
+export const SAVE_OVER_COMMAND = "mrbavio.html-editor.save-over";
 
 /** The elements a page always has: selected, Delete leaves them. */
 const SKELETON: ReadonlySet<string> = new Set(["html", "head", "body"]);
@@ -51,6 +53,7 @@ export default function activate(dd: DaydreamApi): void {
     dd,
     editor: undefined,
     undo: () => false,
+    saveOver: () => false,
     // Drafts outlive a panel mount: the dock unmounts its panels while
     // hidden (⌘\), and typed text must come back with it.
     drafts: { load: untrack(dd.loadVersion), pages: new Map<string, Draft>() },
@@ -87,6 +90,20 @@ export default function activate(dd: DaydreamApi): void {
     run: () => state.undo(),
   });
   dd.bindShortcut(UNDO_COMMAND, "Mod+Z");
+  // ⌘S while typing: what is pending is saved first, and a draft held
+  // because the page changed where it was typed is saved over the page as
+  // it is now — the one way to write over that change, asked for. ⌘S is
+  // core's save (core.save, in `always` scope); this editor-scope command
+  // is tried first and always declines, so the key goes on to it and the
+  // document is saved as well.
+  dd.registerCommand({
+    id: SAVE_OVER_COMMAND,
+    title: "Save the typing over the page",
+    scope: "editor",
+    when: editorFocused,
+    run: () => state.saveOver(),
+  });
+  dd.bindShortcut(SAVE_OVER_COMMAND, "Mod+S");
 
   // Delete / Backspace removes the selected INNER element of a page — the
   // kernel's `remove` edit, its span cut from where it was written — and

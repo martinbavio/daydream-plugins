@@ -10,6 +10,7 @@ import {
 import type { DaydreamApi } from "@daydream/plugin-api";
 
 import { createHtmlEditor, type HtmlEditorHandle } from "./htmlEditor";
+import { rebase } from "./rebase";
 import { classPrefix } from "./styles";
 
 /** Text a save refused, held on screen and kept per page, so a refusal,
@@ -20,9 +21,9 @@ export interface Draft {
   /** Why it is not the page's: the refusal's sentence, or
    * CHANGED_UNDERNEATH. */
   problem: string;
-  /** The page's html the draft is held against. The next edit of the
-   * draft saves over it; a page whose html is something else by then
-   * changed underneath again, and the save is refused. */
+  /** The page's html the typing started from. The next edit of the
+   * draft is saved as the change from it, carried onto the page as it is
+   * then when the page changed elsewhere (`rebase`). */
   base: string;
 }
 
@@ -40,6 +41,11 @@ export interface PanelState {
    * and the key goes no further. False otherwise, so the key falls
    * through to core's undo. Set by the panel once mounted. */
   undo: () => boolean;
+  /** ⌘S while typing: what is pending is saved first, then a draft held
+   * because the page changed where it was typed is saved over the page as
+   * it is now. Never handles the key (false), so it goes on to core's
+   * save. Set by the panel once mounted. */
+  saveOver: () => boolean;
   /** By viewport id, of the document loaded when they were held: a
    * page id names a page of one document only, so another load (a page
    * of the same id in it, the same document reopened) must never show
@@ -58,11 +64,12 @@ export function draftsNow(state: PanelState): Map<string, Draft> {
 /** Live save while typing, like the CSS editor's (~150ms). */
 export const APPLY_DEBOUNCE_MS = 150;
 
-/** The sentence for text typed over a page that changed on the canvas
+/** The sentence for text typed where the page changed on the canvas
  * meanwhile (an agent, the CSS editor, a draft finalizing): nothing is
- * written, and the typed text is kept as the page's draft. */
+ * written, and the typed text is kept as the page's draft. Typing
+ * elsewhere in the page is carried onto the change and saved. */
 export const CHANGED_UNDERNEATH =
-  "The page's HTML changed on the canvas while you were editing, so nothing was saved. Your text is kept here: your next edit saves it over the page as it is now, and ⌘Z drops it.";
+  "The page's HTML changed on the canvas where you were typing, so nothing was saved. Your text is kept here: ⌘S saves it over the page as it is now, and ⌘Z drops it.";
 
 /** The sentence for a page gone from the canvas mid-save. */
 const PAGE_GONE = "The page is no longer on the canvas.";
@@ -107,7 +114,9 @@ export function pageHtml(dd: DaydreamApi, pageId: string): string | null {
 const sentence = (problem: string): string =>
   problem.charAt(0).toUpperCase() + problem.slice(1) + ".";
 
-type Saved = { ok: true } | { ok: false; problem: string; stale: boolean };
+/** A save's verdict. Saved: `text` is what the page holds now — the
+ * typed text, or the typing carried onto a page that changed elsewhere. */
+type Saved = { ok: true; text: string } | { ok: false; problem: string };
 
 /**
  * The HTML pane (decision #76): the page's `html` AS TEXT, the way the
@@ -127,9 +136,11 @@ type Saved = { ok: true } | { ok: false; problem: string; stale: boolean };
  * A REFUSED text is never lost: it stays on screen as the page's DRAFT
  * with the sentence under it, and comes back with the page when another
  * one was selected in between. Text typed over a page that changed on
- * the canvas meanwhile is kept the same way, with a note that it changed
- * underneath: the next edit saves it over the page as it is then, and ⌘Z
- * drops it.
+ * the canvas meanwhile is saved as a change: the typing, from the text it
+ * started from, carried onto the page as it is now when the other change
+ * is elsewhere. Where the two meet it is kept as the draft instead, with
+ * a note: nothing is written over the other change unless ⌘S, pressed in
+ * the editor, asks for it, and ⌘Z drops it.
  *
  * Each save rewrites the markup, so the page REMOUNTS and its elements
  * get new ids; the canvas carries the selection by its place. The pane
@@ -221,59 +232,89 @@ export default function createHtmlPanel(state: PanelState) {
 
   /**
    * Save `text` as page `id`'s markup, unless it is what the page holds
-   * already. Refused, nothing written: the page is gone, it changed since
-   * the editor last synced (stale), or the kernel refuses the text.
-   * `synced` is set before the write: the page remounts inside it, and
-   * the sync effect may run before it returns. Untracked: called from the
-   * debounce, blur, a command and the disposal only.
+   * already. A page that changed since the editor last synced gets the
+   * typing — `synced` → `text` — carried onto it (`rebase`). Refused,
+   * nothing written: the page is gone, it changed where the text was
+   * typed, or the kernel refuses the text. Untracked: called from
+   * the debounce, blur, a command and the disposal only.
    */
   const saveText = (id: string, text: string): Saved => {
     const current = stored(id);
-    if (current === null) return { ok: false, problem: PAGE_GONE, stale: false };
-    if (current === text) return { ok: true };
-    if (current !== synced) {
-      return { ok: false, problem: CHANGED_UNDERNEATH, stale: true };
+    if (current === null) return { ok: false, problem: PAGE_GONE };
+    if (current === text) return { ok: true, text };
+    const base = synced;
+    const next = current === base ? text : rebase(base, text, current);
+    if (next === null) return { ok: false, problem: CHANGED_UNDERNEATH };
+    return write(id, current, next, base);
+  };
+
+  /**
+   * Write `next` over page `id`, whose html is `current`. `synced` is set
+   * before the write: the page remounts inside it, and the sync effect may
+   * run before it returns. A refusal puts it back to `base`, so the typing
+   * stays a change from the text it started from.
+   */
+  const write = (
+    id: string,
+    current: string,
+    next: string,
+    base: string,
+  ): Saved => {
+    if (next === current) {
+      synced = current;
+      return { ok: true, text: current };
     }
-    synced = text;
+    synced = next;
     const problem = dd.writePage({
       kind: "html",
       viewportId: id,
       expected: current,
-      html: text,
+      html: next,
     });
-    if (problem === null) return { ok: true };
-    synced = current;
-    return { ok: false, problem: sentence(problem), stale: false };
+    if (problem === null) return { ok: true, text: next };
+    synced = base;
+    return { ok: false, problem: sentence(problem) };
   };
 
-  /** The draft a refused save of `text` leaves. A stale one is held
-   * against the page as it is now: the note has said it changed. */
-  const draftOf = (id: string, text: string, refused: Saved): Draft => ({
+  /** The draft a refused save of `text` leaves, held against the text the
+   * typing started from. */
+  const draftOf = (text: string, refused: Saved): Draft => ({
     text,
     problem: refused.ok ? "" : refused.problem,
-    base: !refused.ok && refused.stale ? (stored(id) ?? "") : synced,
+    base: synced,
   });
 
   /** Save the editor's dirty text to page `id` now. Saved: the text is
    * the page's. Refused or stale: it stays on screen, held as the page's
    * draft, the sentence under it. */
-  const saveEditor = (id: string): Saved => {
+  const saveEditor = (id: string): void => {
     const ed = editor();
-    if (ed === undefined || !dirty) return { ok: true };
+    if (ed === undefined || !dirty) return;
     const text = ed.text();
     dirty = false;
-    const result = saveText(id, text);
-    if (result.ok) {
-      drafts().delete(id);
-      setMessage(null);
-      mark(ed, false);
-    } else {
-      const draft = draftOf(id, text, result);
+    settle(ed, id, text, saveText(id, text));
+  };
+
+  /** The editor after a save of `text`. Saved: the draft goes, and the
+   * editor shows what the page holds — the typing carried onto another
+   * change, maybe (a span change, so the caret maps through). Refused:
+   * the text is held as the page's draft, the sentence under it. */
+  const settle = (
+    ed: HtmlEditorHandle,
+    id: string,
+    text: string,
+    result: Saved,
+  ): void => {
+    if (!result.ok) {
+      const draft = draftOf(text, result);
       drafts().set(id, draft);
-      synced = draft.base;
       setMessage(draft.problem);
+      return;
     }
-    return result;
+    drafts().delete(id);
+    setMessage(null);
+    if (ed.text() !== result.text) ed.setText(result.text);
+    mark(ed, false);
   };
 
   state.undo = (): boolean => {
@@ -288,6 +329,21 @@ export default function createHtmlPanel(state: PanelState) {
     showPage(ed, id, stored(id) ?? "");
     mark(ed, false);
     return true;
+  };
+
+  state.saveOver = (): boolean => {
+    const ed = editor();
+    const id = untrack(pageId);
+    if (ed === undefined || id === null) return false;
+    clearDebounce();
+    saveEditor(id);
+    const draft = drafts().get(id);
+    const current = stored(id);
+    if (draft?.problem !== CHANGED_UNDERNEATH || current === null) return false;
+    // Asked for: the typed text over the page as it is now. The kernel's
+    // verdict on the text still holds; a refusal keeps the draft.
+    settle(ed, id, draft.text, write(id, current, draft.text, draft.base));
+    return false;
   };
 
   /** Leave page `id`: save what is pending; a refusal is held as the
@@ -338,7 +394,7 @@ export default function createHtmlPanel(state: PanelState) {
       const text = ed.text();
       queueMicrotask(() => {
         const result = saveText(id, text);
-        if (!result.ok) drafts().set(id, draftOf(id, text, result));
+        if (!result.ok) drafts().set(id, draftOf(text, result));
       });
     }
     ed?.destroy();
