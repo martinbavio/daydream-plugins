@@ -1,10 +1,9 @@
 // mrbavio.html-editor — the HTML pane as a plugin (decision #58): the
 // page's markup AS TEXT (decision #76), the `html` the file holds, in
 // CodeMirror — the page the selection is in, with the selected element's
-// span marked. Saved live as you type through an item transaction that
-// commits as one undo step when the editor is left; every save guarded
-// (what a page can never hold is refused) and refused when the page
-// changed underneath. With it, a person can change a page's structure —
+// span marked. Saved live as you type through `dd.writePage`, whose
+// verdict is the kernel's: what a landing would take out is refused by
+// name, and so is a save over a page that changed underneath. With it, a person can change a page's structure —
 // edit a headline, add an element, change a tag or an attribute — the
 // way they would in a file. Delete and Backspace on an inner element
 // remove that element alone, cut out of the text where it was written
@@ -61,8 +60,8 @@ export default function activate(dd: DaydreamApi): void {
   };
 
   // The editor's key, a router command in EDITOR scope, applying only
-  // while the editor has focus: Escape blurs it, which commits the typing
-  // session through the editor's blur handler — unless the completion
+  // while the editor has focus: Escape blurs it, which saves what is
+  // pending through the editor's blur handler — unless the completion
   // popup is open, when the command steps aside (false) so CodeMirror's
   // own Escape closes it and the field stays focused. No apply key: the
   // pane saves as you type.
@@ -79,12 +78,13 @@ export default function activate(dd: DaydreamApi): void {
     },
   });
   dd.bindShortcut(BLUR_COMMAND, "Escape");
-  // ⌘Z while typing: the open session is one undo step, so undoing it
-  // means cancelling it — the pane shows the page as it was. With no
-  // session open the command declines and the key reaches core's undo.
+  // ⌘Z while typing: what is pending is saved first, so core's undo takes
+  // it with the rest of its edit burst — the command declines and the key
+  // reaches core's undo. Text the page never held (a refused draft) is
+  // dropped instead, and the pane shows the page as it is.
   dd.registerCommand({
     id: UNDO_COMMAND,
-    title: "Undo the typing session",
+    title: "Undo the typing",
     scope: "editor",
     when: editorFocused,
     run: () => state.undo(),

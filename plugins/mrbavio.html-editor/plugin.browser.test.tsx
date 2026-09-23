@@ -2,10 +2,11 @@
 // decisions; docs/plugin-authoring.md, "Testing a plugin"): the real
 // shell, the plugin enabled by config, assertions from the DOM and the
 // API — what a person sees. The pane shows the page's html as its text
-// and marks the selected element in it; typing saves live, verbatim, and
-// the session is one undo step; a save is guarded and refused when the
-// page changed underneath; Delete on an inner element cuts it out of the
-// text and never removes the viewport.
+// and marks the selected element in it; typing saves live, verbatim,
+// through the kernel's writePage, and quick saves join one undo step; a
+// save the kernel refuses is kept as the page's draft, and one over a
+// page that changed underneath is refused as stale; Delete on an inner
+// element cuts it out of the text and never removes the viewport.
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -153,7 +154,7 @@ function key(target: EventTarget, init: KeyboardEventInit): KeyboardEvent {
   return event;
 }
 
-/** Leave the editor: blur commits the typing session. */
+/** Leave the editor: blur saves what is pending. */
 function blur(): void {
   content().blur();
   flush();
@@ -187,6 +188,12 @@ function select(id: string | null): void {
 async function marks(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
   flush();
+}
+
+/** Longer than the kernel's edit burst (decision #20, 500ms): the next
+ * write starts an undo step of its own. */
+async function pause(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 700));
 }
 
 describe("mrbavio.html-editor", () => {
@@ -243,7 +250,7 @@ describe("mrbavio.html-editor", () => {
     expect(styles[0]!.textContent).toMatch(/^@layer dream-plugin \{/);
   });
 
-  test("typing saves the text verbatim, live; the page remounts and the session is one undo step", async () => {
+  test("typing saves the text verbatim, live; the page remounts, and saves in quick succession are one undo step", async () => {
     const m = await mountPage();
     const store = m.store;
     select(idOf("h1"));
@@ -280,13 +287,65 @@ describe("mrbavio.html-editor", () => {
     await marks();
     expect(marked()).toBe('<h1 class="headline">New headline</h1>');
 
-    // The whole session — two saves — is one undo step.
+    // The whole session — two saves, well inside the kernel's edit
+    // burst of each other — is one undo step.
     expect(store.canUndo()).toBe(true);
     store.undo();
     flush();
     expect(stored()).toBe(HTML);
     expect(store.canUndo()).toBe(false);
     expect(text()).toBe(HTML);
+  });
+
+  test("a pause longer than the edit burst splits the typing into two undo steps", async () => {
+    // Every save is its own writePage, and the kernel joins them by time
+    // alone: nothing holds a typing session open across a pause.
+    const m = await mountPage();
+    const store = m.store;
+    select(itemId);
+    content().focus();
+    const first = edited("Old headline", "First");
+    await type(first);
+    await pause();
+    const second = edited("Body copy", "Second", first);
+    await type(second);
+    blur();
+    expect(stored()).toBe(second);
+
+    store.undo();
+    flush();
+    expect(stored()).toBe(first);
+    expect(text()).toBe(first);
+    store.undo();
+    flush();
+    expect(stored()).toBe(HTML);
+    expect(store.canUndo()).toBe(false);
+  });
+
+  test("undoing a markup edit keeps the pane on its page, and the mark follows the next selection", async () => {
+    const m = await mountPage();
+    const store = m.store;
+    select(idOf("p"));
+    content().focus();
+    await type(edited("Old headline", "New headline"));
+    blur();
+    // The save remounted the page: the selection was carried to the new
+    // mount's paragraph, and the mark with it.
+    expect(store.selectedId()).toBe(idOf("p"));
+    await marks();
+    expect(marked()).toBe("<p>Body copy</p>");
+
+    store.undo();
+    flush();
+    expect(stored()).toBe(HTML);
+    await waitMounted(itemId, "h1");
+    await marks();
+    // Whatever id the undo restored, the pane stays on the page it was
+    // showing, re-synced to the text undone to.
+    expect(text()).toBe(HTML);
+    select(idOf("h1"));
+    await marks();
+    expect(marked()).toBe('<h1 class="headline">Old headline</h1>');
   });
 
   test("a save while typing leaves the caret where it was; a selection made on the canvas moves it", async () => {
@@ -315,7 +374,7 @@ describe("mrbavio.html-editor", () => {
     expect(view().state.selection.main.head).toBe(stored().indexOf("<p>More"));
   });
 
-  test("undo mid-session cancels it and re-syncs the editor under the caret", async () => {
+  test("⌘Z while typing undoes the typing and re-syncs the editor under the caret", async () => {
     const m = await mountPage();
     select(idOf("h1"));
     content().focus();
@@ -326,32 +385,69 @@ describe("mrbavio.html-editor", () => {
     expect(stored()).toBe(HTML);
     expect(text()).toBe(HTML);
     expect(m.store.canUndo()).toBe(false);
-    // Typing again starts a fresh session.
+    expect(document.activeElement).toBe(content());
+
+    // Text still inside the debounce is saved first and undone with the
+    // burst it joined: one ⌘Z, never the pending text lost and an older
+    // step undone besides.
     await type(edited("Old headline", "Again"));
-    blur();
-    expect(stored()).toBe(edited("Old headline", "Again"));
-    expect(m.store.canUndo()).toBe(true);
+    await typeAll(edited("Old headline", "Again and more"));
+    key(content(), { key: "z", metaKey: true });
+    expect(stored()).toBe(HTML);
+    expect(text()).toBe(HTML);
+    expect(m.store.canUndo()).toBe(false);
   });
 
-  test("a refused save shows its sentence as you type and writes nothing", async () => {
+  test("a save the kernel refuses shows its sentence as you type and writes nothing", async () => {
     const m = await mountPage();
     select(itemId);
     content().focus();
     await type(edited("Body copy", "Hi <script>alert(1)</script>"));
     expect(message()).toContain("<script>");
+    expect(message()).toContain("nothing was saved");
     expect(stored()).toBe(HTML);
     expect(m.store.canUndo()).toBe(false);
 
     await type(edited("<p>", '<p onclick="x()">'));
-    expect(message()).toContain('"onclick"');
+    expect(message()).toContain("p[onclick]");
     await type(edited("<p>", '<p><a href="javascript:x()">x</a>'));
-    expect(message()).toContain("javascript:x()");
+    expect(message()).toContain("a[href]");
+    // A stylesheet's rules belong in the page's css.
+    await type(edited("<title>", "<style>p { color: red }</style><title>"));
+    expect(message()).toContain("<style>");
     expect(stored()).toBe(HTML);
 
     // A good edit clears the message and saves.
     await type(edited("<p>", '<p class="lead">'));
     expect(message()).toBeNull();
     expect(stored()).toBe(edited("<p>", '<p class="lead">'));
+  });
+
+  test("a javascript: url set through SVG's xlink:href or an animation is refused", async () => {
+    // The review's two misses in the plugin's own guard: the kernel's
+    // walk reads `xlink:href` by its local name, and removes an animation
+    // whose target is a url-bearing attribute.
+    const m = await mountPage();
+    select(itemId);
+    content().focus();
+    await type(
+      edited(
+        "<p>Body copy</p>",
+        '<svg><a xlink:href="javascript:alert(1)"><text>x</text></a></svg>',
+      ),
+    );
+    expect(message()).toContain("xlink:href");
+    expect(stored()).toBe(HTML);
+
+    await type(
+      edited(
+        "<p>Body copy</p>",
+        '<svg><a href="#top"><set attributeName="href" to="javascript:alert(1)"/><text>x</text></a></svg>',
+      ),
+    );
+    expect(message()).toContain("<set>");
+    expect(stored()).toBe(HTML);
+    expect(m.store.canUndo()).toBe(false);
   });
 
   test("blur saves what the debounce had not yet; an untouched editor writes nothing back", async () => {
@@ -463,7 +559,7 @@ describe("mrbavio.html-editor", () => {
     expect(stored()).toBe(edited("    <p>", "      <p>"));
   });
 
-  test("hiding the dock mid-session saves what is pending and commits", async () => {
+  test("hiding the dock mid-edit saves what is pending", async () => {
     const m = await mountPage();
     select(itemId);
     content().focus();
@@ -527,7 +623,7 @@ describe("mrbavio.html-editor", () => {
     await type(refused);
     blur();
     expect(text()).toBe(refused);
-    expect(message()).toContain('"onclick"');
+    expect(message()).toContain("p[onclick]");
     expect(stored(one.id)).toBe(HTML);
 
     // Away and back: the other page shows clean, this one's draft waits.
@@ -536,7 +632,7 @@ describe("mrbavio.html-editor", () => {
     expect(message()).toBeNull();
     select(one.id);
     expect(text()).toBe(refused);
-    expect(message()).toContain('"onclick"');
+    expect(message()).toContain("p[onclick]");
 
     // Corrected: saved, and the draft is gone.
     content().focus();

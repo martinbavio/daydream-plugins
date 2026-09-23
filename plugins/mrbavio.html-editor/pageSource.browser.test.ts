@@ -1,12 +1,11 @@
 // From a page's elements to its text: where each element was written, as
 // the browser's parse pairs it with its tag; which stored element a
-// mounted one is, past what the safety walk removed; a removal cut out of
-// the author's text; and what a save refuses.
+// mounted one is, past what the safety walk removed; and a removal cut out
+// of the author's text.
 import { describe, expect, test, vi } from "vitest";
 
 import { createPageItem, mountShell, pageNode } from "@daydream/plugin-testing";
 
-import { markupProblem } from "./guard";
 import {
   pageSource,
   parsePage,
@@ -120,44 +119,5 @@ describe("withoutElement", () => {
     const out = remove(html, "tbody");
     expect(out).toBe(serializePage(parsePage("<table></table>")));
     expect(out).not.toContain("data-mrbavio");
-  });
-});
-
-describe("markupProblem", () => {
-  test("what a page can never hold is refused by name", () => {
-    expect(markupProblem("<p>Hi <script>alert(1)</script></p>")).toContain(
-      "<script>",
-    );
-    expect(markupProblem('<p onclick="x()">Hi</p>')).toContain('"onclick"');
-    expect(markupProblem('<iframe srcdoc="<p>x</p>"></iframe>')).toContain(
-      '"srcdoc"',
-    );
-    expect(markupProblem('<meta http-equiv="refresh" content="0">')).toContain(
-      '"http-equiv"',
-    );
-    expect(markupProblem('<a href="javascript:alert(1)">x</a>')).toContain(
-      "javascript:alert(1)",
-    );
-    expect(markupProblem('<img src="http://x.test/a.png">')).toContain('"src"');
-    expect(markupProblem("<template><object></object></template>")).toContain(
-      "<object>",
-    );
-  });
-
-  test("everything else a page may hold is saved", () => {
-    expect(
-      markupProblem(
-        [
-          '<!doctype html><html lang="en"><head><title>T</title>',
-          "<style>p { color: red }</style></head><body>",
-          '<p class="a" id="b" style="color: blue">x</p>',
-          '<img src="https://x.test/a.png" srcset="assets/a.png 1x, https://x.test/b.png 2x">',
-          '<a href="http://example.com">site</a><a href="mailto:a@b.c">mail</a>',
-          '<a href="#top">top</a><svg><use href="#g"/></svg>',
-          '<iframe src="https://x.test/"></iframe><form></form>',
-          "</body></html>",
-        ].join(""),
-      ),
-    ).toBeNull();
   });
 });
