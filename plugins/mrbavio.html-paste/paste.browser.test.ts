@@ -636,6 +636,39 @@ describe("data: images", () => {
     );
   });
 
+  test("a data: image in a subtree the cleaning removes is never stored — a <script>'s, an SVG <script>'s, an <object>'s fallback — and one in a <noscript>, which the page keeps, is", async () => {
+    info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const vendorFile = vi.fn(async (file: File) => ({
+      src: `/assets/media-${file.name}`,
+      pageSrc: `assets/page-${file.name}`,
+    }));
+    const shell = await mount({
+      storage: { vendorFile } as unknown as HostStorage,
+    });
+    const png = /src="(data:[^"]*)"/.exec(dataImage)![1]!;
+    const gif = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
+    const source = [
+      `<p>Copy</p>`,
+      `<script>document.write('<img src="${png}">')</script>`,
+      `<svg><script><g style="fill: url(${png})"></g></script></svg>`,
+      `<object data="https://example.com/x.swf"><img src="${png}" alt="fallback"><div style="background: url(${png})">x</div></object>`,
+      `<noscript><img src="${gif}" alt="no script"></noscript>`,
+    ].join("\n");
+    paste(document.body, { "text/html": source });
+    const { html } = await landedPage(shell);
+    // Only the image the page keeps is stored: no orphan file.
+    expect(vendorFile).toHaveBeenCalledTimes(1);
+    expect(vendorFile.mock.calls[0]![0].type).toBe("image/gif");
+    expect(html).toContain(
+      '<noscript><img src="assets/page-pasted-image.gif" alt="no script"></noscript>',
+    );
+    expect(html).not.toContain("data:");
+    expect(html).not.toContain("daydream-paste-");
+    const line = infoLines(info).at(-1)!;
+    expect(line).toContain("removed <script> ×2 and <object> —");
+    expect(line).not.toContain("data:");
+  });
+
   test("a document loaded while vendoring abandons the paste; without storage the img lands with its alt and the removed src is said", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
     type Stored = { src: string; pageSrc: string };

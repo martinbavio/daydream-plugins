@@ -35,12 +35,12 @@ export function hasElements(doc: Document): boolean {
 }
 
 /** A `data:` URL an `img` names as its `src`, or a css `url()` names in a
- * `style` attribute or a `<style>`. The cleaning takes a `data:` url out
- * of an `img`'s `src` and keeps one in css as written; the paste vendors
- * the bytes of an image and names the stored copy in its place, so the
- * page stores neither. `url` is the URL as the parser read it; `file` is
- * null when it is not an image; `inCss` is true when a css `url()` names
- * it. */
+ * `style` attribute, a `<style>` or a page's css. The cleaning takes a
+ * `data:` url out of an `img`'s `src` and keeps one in css as written;
+ * the paste vendors the bytes of an image and names the stored copy in
+ * its place, so the page stores neither. `url` is the URL as the parser
+ * read it; `file` is null when it is not an image; `inCss` is true when a
+ * css `url()` names it. */
 export interface DataImage {
   url: string;
   file: File | null;
@@ -48,9 +48,9 @@ export interface DataImage {
 }
 
 /** Each distinct `data:` URL an `img` names as its `src`, or a css `url()`
- * in a `style` attribute or a `<style>`, in document order: the same
- * image twice is one file. */
-export function dataImages(doc: Document): DataImage[] {
+ * in a `style` attribute or a `<style>` — then in `css`, a page's own
+ * stylesheet — in document order: the same image twice is one file. */
+export function dataImages(doc: Document, css = ""): DataImage[] {
   const found = new Map<string, boolean>();
   const add = (url: string, inCss: boolean): void => {
     if (/^\s*data:/i.test(url))
@@ -71,6 +71,7 @@ export function dataImages(doc: Document): DataImage[] {
     if (style !== null) cssUrls(style);
     if (element.localName === "style") cssUrls(element.textContent ?? "");
   }
+  cssUrls(css);
   return Array.from(found, ([url, inCss]) => ({
     url,
     file: fileFromDataUrl(url.trim()),
@@ -246,11 +247,11 @@ export function writtenImageUrls(text: string): Set<string> {
 }
 
 /** The pasted text with each `img` `src`, and each css `url()`'s url in a
- * `style` attribute or a `<style>`, that is a stored image's `data:` URL,
- * whole, replaced by the page's name for its copy, where the author wrote
- * it: nothing else in the text moves — not the same URL in text, in a
- * comment, in a css string or in another attribute, and not a longer URL
- * it begins. */
+ * `style` attribute or a `<style>`, that is a key of `stored` — an
+ * image's `data:` URL, whole — replaced by its value, where the author
+ * wrote it: nothing else in the text moves — not the same URL in text, in
+ * a comment, in a css string or in another attribute, and not a longer
+ * URL it begins. */
 export function withStoredImages(
   text: string,
   stored: ReadonlyMap<string, string>,
@@ -310,17 +311,51 @@ export interface PastedPage {
   said: string[];
 }
 
+/** Each distinct entry once, with `×n` when it repeats, in first-seen
+ * order — the kernel landing's own counting. */
+function counted(items: readonly string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1);
+  return [...counts].map(([item, n]) => (n === 1 ? item : `${item} ×${n}`));
+}
+
+/** The name the `n`th `data:` image of paste `id` goes by through the
+ * cleaning: a url a page may store, so the cleaning keeps it wherever it
+ * keeps what names it; this paste's own, so nothing the author wrote is
+ * taken for it; and closed (`.held`), so no name begins another. */
+const heldName = (id: string, n: number): string =>
+  `assets/daydream-paste-${id}-${n}.held`;
+
+/** `text` with each key of `names` replaced by its value, everywhere. */
+function renamed(text: string, names: ReadonlyMap<string, string>): string {
+  let out = text;
+  for (const [from, to] of names) out = out.split(from).join(to);
+  return out;
+}
+
 /**
  * The viewport `html` lands as, at `position`: the text cleaned exactly
  * as every landing cleans a page, and stored as the cleaning answers it.
- * `said` carries what the paste said before this point (an image it
- * could not store). A clipboard carries no address — no `<base>` or
- * source-URL comment is read from it — so no `sourceUrl` is passed: a
- * relative stylesheet `href` resolves against nothing, and the cleaning
- * removes and reports it.
+ *
+ * A page names its images by url, not by their bytes (decision #76). So
+ * each `data:` image written in an `img`'s `src` or a css `url()` (a
+ * `style` attribute, a `<style>`) goes through the cleaning under a name
+ * of its own (`heldName`), and only those the cleaning kept — not one in
+ * a subtree it removed — are stored through the host (`dd.vendorFile`),
+ * the page's name for each copy written where the name was. One the host
+ * cannot store is put back as written and the page cleaned again, as it
+ * would have been: taken off an `img` (which stays, with its `alt`) and
+ * kept in css, as the cleaning keeps any `data:` url there. With no
+ * `data:` image and nothing to take out, the text lands byte for byte.
+ *
+ * `said` carries what was said before this point; the paste's own
+ * sentences follow it, then the cleaning's findings. A clipboard carries
+ * no address — no `<base>` or source-URL comment is read from it — so no
+ * `sourceUrl` is passed: a relative stylesheet `href` resolves against
+ * nothing, and the cleaning removes and reports it.
  */
 export async function pageFromPaste(
-  dd: Pick<DaydreamApi, "cleanPage">,
+  dd: Pick<DaydreamApi, "cleanPage" | "vendorFile">,
   html: string,
   options: {
     id: string;
@@ -328,8 +363,56 @@ export async function pageFromPaste(
     said: string[];
   },
 ): Promise<PastedPage> {
-  const cleaned = await dd.cleanPage({ html, css: "" }, { where: "paste" });
-  const landed = parseHtml(cleaned.html);
+  const said: string[] = [];
+  // Each data: image as written, by the name it is cleaned under.
+  const held = new Map<string, string>();
+  for (const url of writtenImageUrls(html)) {
+    if (held.has(url) || fileFromDataUrl(url.trim()) === null) continue;
+    held.set(url, heldName(options.id, held.size));
+  }
+  const cleaned = await dd.cleanPage(
+    { html: withStoredImages(html, held), css: "" },
+    { where: "paste" },
+  );
+  const findings = cleaned.findings.map((finding) => finding.message);
+
+  // What each kept name becomes: the stored copy's name, or the url as
+  // written when the host could not store it.
+  const names = new Map<string, string>();
+  const unstored = new Set<string>();
+  for (const [url, name] of held) {
+    if (!cleaned.html.includes(name) && !cleaned.css.includes(name)) continue;
+    try {
+      names.set(name, (await dd.vendorFile(fileFromDataUrl(url.trim())!)).pageSrc);
+    } catch (error) {
+      said.push(
+        `the host could not store a data: image (${error instanceof Error ? error.message : String(error)})`,
+      );
+      names.set(name, url);
+      unstored.add(url);
+    }
+  }
+  let page = {
+    html: renamed(cleaned.html, names),
+    css: renamed(cleaned.css, names),
+  };
+  if (unstored.size > 0) {
+    const again = await dd.cleanPage(page, { where: "paste" });
+    page = { html: again.html, css: again.css };
+    findings.push(...again.findings.map((finding) => finding.message));
+  }
+
+  // The cleaning keeps css as written: a data: url left there is said.
+  const landed = parseHtml(page.html);
+  for (const { url, file, inCss } of dataImages(landed, page.css)) {
+    if (!inCss || unstored.has(url)) continue;
+    said.push(
+      file === null
+        ? "a data: url in css that is not an image was left as written"
+        : "a data: image written with character references was not stored",
+    );
+  }
+
   const title = landed.title.trim();
   const item: DreamPage = {
     id: options.id,
@@ -337,18 +420,14 @@ export async function pageFromPaste(
     position: options.position,
     frame: { width: VIEWPORT_WIDTH },
     payload: {
-      html: cleaned.html,
-      css: cleaned.css,
+      ...page,
       ...(title === "" ? {} : { meta: { title } }),
     },
   };
   return {
     item,
     elements: landed.body.getElementsByTagName("*").length + 2,
-    said: [
-      ...options.said,
-      ...cleaned.findings.map((finding) => finding.message),
-    ],
+    said: [...options.said, ...counted(said), ...findings],
   };
 }
 
