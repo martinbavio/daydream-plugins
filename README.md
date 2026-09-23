@@ -36,6 +36,19 @@ pnpm build plugins/mrbavio.grid
 Daydream page resolves them through its import map to the one Solid
 instance it runs. Everything else is bundled in.
 
+## The kernel pin
+
+Every plugin builds and tests against one Daydream commit:
+`@daydream/plugin-api` and `@daydream/plugin-testing` come from the
+kernel's repository at that commit
+(`github:…/daydream#<commit>&path:packages/…`). The commit is written
+once, in the `catalog:` of `pnpm-workspace.yaml`. Each package.json asks
+for the two packages as `catalog:`, and the root's `pnpm.overrides` pins
+`@daydream/plugin-api` the same way, so every plugin resolves one copy.
+To move to another kernel, change the commit on both catalog lines and
+run `pnpm install`. `pnpm test:kernel` warns when the checkout it is
+given is at another commit.
+
 ## Ship
 
 The daily loop, from this checkout to a running Daydream (0.1.10 or
@@ -93,4 +106,6 @@ misleads a reader.
 Copy a folder, change the id (two dotted lowercase segments, never the
 `daydream.` prefix — that one is reserved for Daydream's own), and run the
 build. The `@daydream/plugin-api` types are a dev dependency at the root,
-with `zod`, which its host-part contract types tool schemas with.
+with `zod`, which its host-part contract types tool schemas with. A new
+plugin's package.json asks for the `@daydream/*` packages as `catalog:`
+(see the kernel pin above).

@@ -12,7 +12,7 @@
 // Afterwards — pass or fail, or on Ctrl-C — the copies are deleted, the
 // kernel's pnpm-lock.yaml is restored and the kernel reinstalled, so the
 // checkout is left as it was found. The kernel checkout should be at the
-// commit the plugins pin (the sha in the root package.json's override).
+// commit the plugins pin (the one pnpm-workspace.yaml's catalog names).
 //
 // Flags: --no-lint, --no-typecheck, --keep (leave the copies and the
 // changed lockfile for inspection: each copy carries a `.kernel-test-copy`
@@ -128,9 +128,9 @@ if (dirty.stdout.trim() !== "") {
   );
   process.exit(2);
 }
-const pinned = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"))
-  .pnpm?.overrides?.["@daydream/plugin-api"];
-const pinSha = /#([0-9a-f]{7,40})/.exec(pinned ?? "")?.[1];
+const pinSha = /"?@daydream\/plugin-api"?\s*:\s*\S*#([0-9a-f]{7,40})/.exec(
+  readFileSync(path.join(root, "pnpm-workspace.yaml"), "utf8"),
+)?.[1];
 const head = spawnSync("git", ["rev-parse", "HEAD"], {
   cwd: kernel,
   encoding: "utf8",
