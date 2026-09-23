@@ -139,3 +139,63 @@ describe("css-author gates", () => {
     expect(await judge(STATIC_GATE, result.doc)).toEqual([]);
   });
 });
+
+// The CSS the review of the format-7 port found refused, through both
+// gates and so all three lints (static, match, necessity): an @scope
+// rule, @starting-style, @media print, a height query and the legacy
+// `<!--` markers.
+describe("css-author gates on at-rules and markers", () => {
+  /** One 800 × 600 page: a `.card` holding a paragraph, and the css. */
+  function cardPage(css: string): DreamDocument {
+    const result = documentFrom({
+      version: 7,
+      items: [
+        {
+          id: "v1",
+          kind: "daydream.viewport",
+          frame: { width: 800, height: 600 },
+          payload: {
+            html: '<!doctype html><html><body style="margin: 0"><div class="card"><span>a</span><p>b</p></div></body></html>',
+            css,
+          },
+        },
+      ],
+    });
+    if (!result.ok) throw new Error(result.error);
+    return result.doc;
+  }
+
+  const addressed = (findings: Finding[]) =>
+    findings.map((f) => [f.rule, f.property]);
+
+  test("a page that uses them correctly passes both gates", async () => {
+    const doc = cardPage(`<!--
+.card { padding: 16px; transition: opacity 0.2s; }
+-->
+@scope (.card) { :scope > span { display: block; } p { margin: 0; } }
+@starting-style { .card { opacity: 0; } }
+@media print { .card { padding: 0; } }
+@media (min-height: 2000px) { .card { padding: 32px; } }`);
+    expect(await judge(STATIC_GATE, doc)).toEqual([]);
+    expect(await judge(NECESSITY_GATE, doc)).toEqual([]);
+    expect(document.querySelectorAll("iframe")).toHaveLength(0);
+  });
+
+  test("inside them each lint still judges what applies: a unit-less length, a scoped rule matching nothing, a dead declaration under a height the frame meets", async () => {
+    const doc = cardPage(`<!-- .card { padding: 16px; } -->
+@scope (.card) { p { margin: 4; } :scope > .none { color: red; } }
+@starting-style { .card { opacity: 0; } }
+@media print { .card { position: static; } }
+@media (max-height: 1000px) { .card { position: static; } }`);
+    const statics = await judge(STATIC_GATE, doc);
+    expect(statics.map((f) => f.message)).toEqual([
+      "margin: 4 in rule `p` in `@scope (.card)` of viewport v1 has no unit; a length needs one (px, rem, %, …)",
+      "rule `:scope > .none` in `@scope (.card)` in viewport v1 matches no element",
+    ]);
+    expect(addressed(await judge(NECESSITY_GATE, doc))).toEqual([
+      [1, "margin"],
+      [2, "color"],
+      [5, "position"],
+    ]);
+  });
+});

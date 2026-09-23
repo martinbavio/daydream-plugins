@@ -111,6 +111,29 @@ describe("staticLint: unit-less lengths (rule 1)", () => {
     ]);
   });
 
+  test("a rule after the `<!--` marker, inside @scope or @starting-style, or under @media print or a height query is read like any other, named as written", () => {
+    const doc = page(
+      '<div class="a"><p>x</p></div>',
+      `<!-- .a { gap: 1 } -->
+@scope (.a) { p { gap: 2 } }
+@starting-style { .a { gap: 3 } }
+@media print { .a { gap: 4 } }
+@media (min-height: 2000px) { .a { gap: 5 } }`,
+    );
+    expect(staticLint(doc).map((f) => [f.rule, f.message])).toEqual(
+      [
+        "rule `.a`",
+        "rule `p` in `@scope (.a)`",
+        "rule `.a` in `@starting-style`",
+        "rule `.a` in `@media print`",
+        "rule `.a` in `@media (min-height: 2000px)`",
+      ].map((name, i) => [
+        i,
+        `gap: ${i + 1} in ${name} of viewport v1 has no unit; a length needs one (px, rem, %, …)`,
+      ]),
+    );
+  });
+
   test("the logical and physical length families are covered", () => {
     const findings = staticLint(
       box(

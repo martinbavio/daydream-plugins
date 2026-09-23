@@ -22,7 +22,10 @@
 // at-rule nested in a style rule holds for that rule's subject
 // (`.card { @media (…) { padding: 8px } }`). Only the group at-rules are
 // looked into — the ones whose blocks style elements; a `@font-face`, a
-// `@keyframes`, a `@page` hold no rule of the page's.
+// `@keyframes`, a `@page` hold no rule of the page's. A rule inside an
+// `@scope` is relative to the scope's root, as the browser reads it (its
+// `selector` and `scopes`; ruleMatch.ts matches it), and the `@scope`'s
+// own declarations style the root.
 //
 // THE MEASURER'S PROBES. The live face core mounts (dd.mountViewport)
 // carries decision #42's container probes on its copy of the css: a
@@ -75,9 +78,29 @@ export interface PageRule {
   /** The at-rule preludes it sits inside, outermost first. */
   conditions: string[];
   /** The selector the browser matches: nesting resolved against the
-   * parents (`.card { &:hover {…} }` → `:is(.card):hover`). */
+   * parents (`.card { &:hover {…} }` → `:is(.card):hover`), and inside
+   * an `@scope` relative to its root the way the browser reads it — a
+   * member naming neither `:scope` nor `&` is the root's descendant
+   * (`img` → `:where(:scope) img`), and `&` is `:where(:scope)`. Where
+   * `scopes` is not empty, `:scope` in it is the innermost scope's root,
+   * which `Element.matches` does not know: ruleMatch.ts matches it. */
   selector: string;
+  /** The `@scope` rules it sits inside, outermost first; empty outside
+   * any. */
+  scopes: PageScope[];
   declarations: CssDeclaration[];
+}
+
+/** One `@scope` a rule sits inside, its selectors resolved as a rule's
+ * are: the roots' against the style rule the `@scope` is nested in, or
+ * relative to the enclosing scope's root; the limits' relative to the
+ * scope's own root. */
+export interface PageScope {
+  /** The roots' selector, or null for a prelude with none — whose root
+   * is the parent of the `<style>` holding the sheet. */
+  start: string | null;
+  /** The limits' selector, or null for none. */
+  end: string | null;
 }
 
 /** The at-rules whose blocks hold rules (or, inside a style rule,
@@ -104,7 +127,7 @@ export function scanCss(css: string): CssBlock[] {
   const out: CssBlock[] = [];
   let i = 0;
   while (i < css.length) {
-    const scanned = scanBody(css, i, css.length);
+    const scanned = scanBody(css, i, css.length, true);
     out.push(...scanned.blocks);
     // A stray `}` at the top level closes nothing; step over it.
     i = scanned.end + 1;
@@ -118,7 +141,7 @@ export function scanDeclarations(text: string): CssDeclaration[] {
   const declarations: CssDeclaration[] = [];
   let i = 0;
   while (i < text.length) {
-    const scanned = scanBody(text, i, text.length);
+    const scanned = scanBody(text, i, text.length, false);
     declarations.push(...scanned.declarations);
     i = scanned.end + 1;
   }
@@ -126,11 +149,15 @@ export function scanDeclarations(text: string): CssDeclaration[] {
 }
 
 /** Scan from `from` until the `}` that closes the body (its index is
- * `end`) or `to`. */
+ * `end`) or `to`. `topLevel` is the stylesheet's own list of rules, where
+ * the legacy markers `<!--` and `-->` between rules are skipped, as the
+ * CSS tokenizer's CDO and CDC tokens are; inside a block they are part of
+ * the next rule's prelude, which they make invalid. */
 function scanBody(
   css: string,
   from: number,
   to: number,
+  topLevel: boolean,
 ): { blocks: CssBlock[]; declarations: CssDeclaration[]; end: number } {
   const blocks: CssBlock[] = [];
   const declarations: CssDeclaration[] = [];
@@ -162,6 +189,13 @@ function scanBody(
       i = commentEnd(css, i, to);
       continue;
     }
+    if (topLevel && start === -1) {
+      const marker = /^(?:<!--|-->)/.exec(css.slice(i, i + 4));
+      if (marker !== null) {
+        i += marker[0].length;
+        continue;
+      }
+    }
     if (start === -1 && !/\s/.test(ch)) start = i;
     if (ch === '"' || ch === "'") {
       i = stringEnd(css, i, to);
@@ -180,7 +214,7 @@ function scanBody(
     } else if (depth === 0 && ch === "{") {
       const blockStart = start === -1 ? i : start;
       const prelude = withoutComments(css.slice(blockStart, i)).trim();
-      const inner = scanBody(css, i + 1, to);
+      const inner = scanBody(css, i + 1, to, false);
       const close = inner.end;
       blocks.push({
         prelude,
@@ -266,6 +300,101 @@ function stringEnd(css: string, from: number, to: number): number {
   return to;
 }
 
+/** Each bracket that opens a block in CSS, and the one that closes it. */
+const CLOSER: Readonly<Record<string, string>> = {
+  "{": "}",
+  "(": ")",
+  "[": "]",
+};
+
+/**
+ * Whether `css` can be put inside a block as written and the block's own
+ * `}` after it still close that block — the kernel's own test, to the
+ * letter (src/render/cssRanges.ts closesItsOwnBlocks), which decides how
+ * its landing folds a `<style media>` (pageDom.ts withMedia): every `{`,
+ * `(` and `[` it opens is closed by its own closer and it closes nothing
+ * it did not open, and no comment, string or unquoted `url(…)` runs off
+ * its end. Read as the CSS tokenizer reads it: a bracket in a comment, a
+ * string, a url or an escape is not one, and a url is known by its name
+ * with escapes decoded (`\75rl(` is `url(`). Where it is unsure it
+ * answers no — a stray `)` the CSS parser would keep as a token is
+ * refused here too.
+ */
+export function closesItsOwnBlocks(text: string): boolean {
+  // The tokenizer's preprocessing: every newline is one `\n`.
+  const css = text.replace(/\r\n?|\f/g, "\n");
+  const open: string[] = [];
+  for (let i = 0; i < css.length; i++) {
+    const ch = css[i]!;
+    const name = nameAt(css, i);
+    if (name !== null) {
+      i = name.end - 1;
+      if (name.value.toLowerCase() !== "url" || css[name.end] !== "(") {
+        continue;
+      }
+      let j = name.end + 1;
+      while (j < css.length && /[\t\n ]/.test(css[j]!)) j++;
+      // A quoted url is an ordinary function around a string.
+      if (css[j] === '"' || css[j] === "'") continue;
+      // An unquoted one is one token to its `)`, a bad one included: a
+      // quote or a bracket inside it is the url's.
+      while (j < css.length && css[j] !== ")") j += css[j] === "\\" ? 2 : 1;
+      if (j >= css.length) return false;
+      i = j;
+    } else if (ch === "/" && css[i + 1] === "*") {
+      const end = css.indexOf("*/", i + 2);
+      if (end === -1) return false;
+      i = end + 1;
+    } else if (ch === '"' || ch === "'") {
+      // Ends at its quote, or at a newline (the tokenizer's bad string);
+      // an escaped newline continues it.
+      let j = i + 1;
+      while (j < css.length && css[j] !== ch && css[j] !== "\n") {
+        j += css[j] === "\\" ? 2 : 1;
+      }
+      if (j >= css.length) return false;
+      i = j;
+    } else if (ch in CLOSER) {
+      open.push(CLOSER[ch]!);
+    } else if (ch === "}" || ch === ")" || ch === "]") {
+      if (open.pop() !== ch) return false;
+    }
+  }
+  return open.length === 0;
+}
+
+/** The run of name characters starting at `i` — letters, digits, `_`,
+ * `-`, anything non-ASCII, and escapes, decoded — or null when none
+ * starts there. What the tokenizer reads as one name (a number's unit
+ * included), so no part of it is taken for anything else. A `\` before a
+ * newline is no escape, and starts no name. */
+function nameAt(css: string, i: number): { value: string; end: number } | null {
+  let value = "";
+  let j = i;
+  while (j < css.length) {
+    const ch = css[j]!;
+    if (/[\w-]/.test(ch) || ch.charCodeAt(0) >= 0x80) {
+      value += ch;
+      j++;
+    } else if (ch === "\\" && j + 1 < css.length && css[j + 1] !== "\n") {
+      const hex = /^[\dA-Fa-f]{1,6}/.exec(css.slice(j + 1, j + 7))?.[0];
+      if (hex === undefined) {
+        value += css[j + 1];
+        j += 2;
+        continue;
+      }
+      const code = parseInt(hex, 16);
+      value +=
+        code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)
+          ? "�"
+          : String.fromCodePoint(code);
+      j += 1 + hex.length;
+      if (/[\t\n ]/.test(css[j] ?? "")) j++;
+    } else break;
+  }
+  return j === i ? null : { value, end: j };
+}
+
 // ---------------------------------------------------------------------------
 // The rules.
 
@@ -284,6 +413,7 @@ export function pageRules(css: string): PageRule[] {
     conditions: string[],
     parents: string[],
     parentSelector: string | null,
+    scopes: PageScope[],
   ): void => {
     blocks.forEach((block, at) => {
       if (block.statement) return;
@@ -291,15 +421,18 @@ export function pageRules(css: string): PageRule[] {
       const keyword = atKeyword(block.prelude);
       if (keyword === null) {
         const selector =
-          parentSelector === null
-            ? block.prelude
-            : resolveNested(block.prelude, parentSelector);
+          parentSelector !== null
+            ? resolveNested(block.prelude, parentSelector)
+            : scopes.length > 0
+              ? relativeToScope(block.prelude)
+              : block.prelude;
         rules.push({
           index: rules.length,
           prelude: block.prelude,
           parents,
           conditions,
           selector,
+          scopes,
           declarations: ownDeclarations(block),
         });
         visit(
@@ -307,27 +440,163 @@ export function pageRules(css: string): PageRule[] {
           conditions,
           [...parents, block.prelude],
           selector,
+          scopes,
         );
         return;
       }
       if (!GROUP_RULES.has(keyword)) return;
       const inner = [...conditions, block.prelude];
+      // An `@scope` starts afresh: the rules in it are relative to its
+      // root, not nested in the style rule around it (whose selector its
+      // roots' resolve against instead).
+      const scoped = keyword === "scope";
+      const innerScopes = scoped
+        ? [...scopes, scopeOf(block.prelude, parentSelector, scopes.length > 0)]
+        : scopes;
+      const innerParent = scoped ? null : parentSelector;
+      // The block's own declarations style the style rule's subject — or,
+      // an `@scope`'s own, the scope's root, named `:scope` (Chromium
+      // applies none written in another at-rule directly inside one).
       const own = ownDeclarations(block);
-      if (parentSelector !== null && own.length > 0) {
+      if (own.length > 0 && (innerParent !== null || scoped)) {
         rules.push({
           index: rules.length,
-          prelude: parents[parents.length - 1] as string,
-          parents: parents.slice(0, -1),
+          ...(innerParent !== null
+            ? {
+                prelude: parents[parents.length - 1] as string,
+                parents: parents.slice(0, -1),
+                selector: innerParent,
+              }
+            : { prelude: ":scope", parents, selector: SCOPE_ROOT }),
           conditions: inner,
-          selector: parentSelector,
+          scopes: innerScopes,
           declarations: own,
         });
       }
-      visit(block.children, inner, parents, parentSelector);
+      visit(block.children, inner, parents, innerParent, innerScopes);
     });
   };
-  visit(scanCss(css), [], [], null);
+  visit(scanCss(css), [], [], null, []);
   return rules;
+}
+
+/** What `&`, and the implicit start of a member naming no root, is
+ * inside an `@scope`: its root, adding no specificity. */
+const SCOPE_ROOT = ":where(:scope)";
+
+/** A selector list read inside an `@scope`, relative to its root, as the
+ * browser reads it: a member that starts with a combinator, or names
+ * neither `:scope` nor `&`, is the root's descendant (`img` →
+ * `:where(:scope) img`), and `&` is the root. Checked against Chromium:
+ * `:scope` itself is the root, `> img` its child, and `.page img` needs
+ * `.page` inside the root. */
+function relativeToScope(selector: string): string {
+  return splitTopLevelCommas(selector)
+    .map((member) => {
+      const trimmed = member.trim();
+      if (/^[>+~]/.test(trimmed)) return `${SCOPE_ROOT} ${trimmed}`;
+      const rooted = replaceNestingSelector(trimmed, SCOPE_ROOT);
+      return /:scope(?![\w-])/i.test(unquoted(rooted))
+        ? rooted
+        : `${SCOPE_ROOT} ${trimmed}`;
+    })
+    .join(", ");
+}
+
+/** An `@scope` prelude (`@scope (<start>) to (<end>)`, either part
+ * optional) as a PageScope: the roots resolved against the style rule it
+ * is nested in (`parentSelector`, as nesting resolves a rule), or, in
+ * another scope, relative to that scope's root; the limits relative to
+ * this scope's root. A prelude the browser would refuse makes a scope
+ * with no root, so nothing in it matches — as nothing in it applies. */
+function scopeOf(
+  prelude: string,
+  parentSelector: string | null,
+  inScope: boolean,
+): PageScope {
+  const parsed = scopePrelude(prelude);
+  if (parsed === null) return { start: ":not(*)", end: null };
+  const { start, end } = parsed;
+  return {
+    start:
+      start === null
+        ? null
+        : parentSelector !== null
+          ? resolveNested(start, parentSelector)
+          : inScope
+            ? relativeToScope(start)
+            : start,
+    end: end === null ? null : relativeToScope(end),
+  };
+}
+
+/** The two selector lists of an `@scope` prelude, or null when it is
+ * not one. */
+function scopePrelude(
+  prelude: string,
+): { start: string | null; end: string | null } | null {
+  let rest = prelude.replace(/^@scope/i, "").trim();
+  const group = (): string | null => {
+    const close = closingParen(rest);
+    if (close === -1) return null;
+    const inside = rest.slice(1, close).trim();
+    rest = rest.slice(close + 1).trim();
+    return inside;
+  };
+  let start: string | null = null;
+  if (rest.startsWith("(")) {
+    start = group();
+    if (start === null) return null;
+  }
+  let end: string | null = null;
+  const to = /^to\s*(?=\()/i.exec(rest);
+  if (to !== null) {
+    rest = rest.slice(to[0].length);
+    end = group();
+    if (end === null) return null;
+  }
+  return rest === "" ? { start, end } : null;
+}
+
+/** The index of the `)` closing the `(` that `text` opens with, outside
+ * strings, or -1. */
+function closingParen(text: string): number {
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i] as string;
+    if (ch === '"' || ch === "'") i = stringEnd(text, i, text.length) - 1;
+    else if (ch === "\\") i++;
+    else if (ch === "(") depth++;
+    else if (ch === ")" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+/** The selector with each string's contents blanked, so a pattern read
+ * over it never matches inside one. */
+function unquoted(selector: string): string {
+  let out = "";
+  let quote: string | null = null;
+  for (let i = 0; i < selector.length; i++) {
+    const ch = selector[i] as string;
+    if (quote !== null) {
+      if (ch === "\\") {
+        out += "  ";
+        i++;
+      } else if (ch === quote) {
+        quote = null;
+        out += ch;
+      } else out += " ";
+      continue;
+    }
+    if (ch === "\\") {
+      out += ch + (selector[++i] ?? "");
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    out += ch;
+  }
+  return out;
 }
 
 /** Every `@font-face` block of the text, wherever a group rule holds it,

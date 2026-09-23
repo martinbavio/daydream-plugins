@@ -175,6 +175,33 @@ describe("matchLint", () => {
     ).toEqual([]);
   });
 
+  test("an element's own declaration a matched rule restates is not redundancy when the cascade without it picks another rule", async () => {
+    // Without the element's `color: red !important`, the later
+    // `.special`'s important blue wins, not `.card`'s red.
+    expect(
+      await matchLint(
+        page(
+          ".card { color: red !important; }\n.special { color: blue !important; }",
+          '<div class="card special" style="color: red !important"></div>',
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("an element's own declaration is not redundancy when a rule that applies at another width or in another state could win without it", async () => {
+    for (const other of [
+      "@media (width >= 2000px) { .card.x { color: blue; } }",
+      ".card:hover { color: blue; }",
+    ]) {
+      expect(
+        await matchLint(
+          page(`.card { color: red; }\n${other}`, '<div class="card x" style="color: red"></div>'),
+        ),
+        other,
+      ).toEqual([]);
+    }
+  });
+
   test("a pseudo-element rule matches its element (not dead) but is never compared for redundancy against the element's own style", async () => {
     expect(
       await matchLint(
@@ -204,6 +231,48 @@ describe("matchLint", () => {
   test("a rule under an @media condition inactive at the frame is never called dead on that evidence alone", async () => {
     expect(
       await matchLint(page("@media (min-width: 2000px) { .card { color: red; } }")),
+    ).toEqual([]);
+  });
+
+  test("a rule inside an @scope is matched from the scope's roots: `:scope` is the root, a bare member its descendant, and a limit ends the scope", async () => {
+    expect(
+      await messages(
+        page(
+          `@scope (.card) { :scope { padding: 8px; } :scope > img { width: 10px; } p { margin: 0; } border: 0; }
+@scope (.card) to (.content) { img { height: 10px; } }
+@scope (.card) to (.content) { .content p { color: red; } }
+@scope (.content) { .card p { color: blue; } }
+.card { @scope (img) { :scope { max-width: 100%; } } }`,
+          '<div class="card"><img><div class="content"><p>x</p></div></div>',
+        ),
+      ),
+    ).toEqual([
+      "rule `.content p` in `@scope (.card) to (.content)` in viewport v1 matches no element",
+      "rule `.card p` in `@scope (.content)` in viewport v1 matches no element",
+    ]);
+  });
+
+  test("a rule under @media print or a height query the frame fails is never called dead; one under @starting-style is matched like any other", async () => {
+    const doc = page(
+      `@starting-style { .card { opacity: 0; } }
+@media print { .nope { color: red; } }
+@media (min-height: 2000px) { .nope { color: red; } }
+@starting-style { .nope { opacity: 0; } }`,
+    );
+    doc.items[0]!.frame = { width: 960, height: 600 };
+    expect(await messages(doc)).toEqual([
+      "rule `.nope` in `@starting-style` in viewport v1 matches no element",
+    ]);
+  });
+
+  test("the legacy comment markers `<!--` and `-->` between rules are no part of the next rule's selector", async () => {
+    expect(
+      await matchLint(
+        page(
+          '<!--\n.card { color: red; }\n-->\n<!-- .note { color: blue; } -->',
+          '<div class="card"></div><p class="note"></p>',
+        ),
+      ),
     ).toEqual([]);
   });
 
@@ -237,6 +306,20 @@ describe("matchLint", () => {
         page(
           ".card { color: #333; }\n.featured { color: #333; }",
           '<div class="card featured"></div><div class="featured"></div>',
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a rule declaration is not redundancy when a state rule between it and the rule beneath would win without it", async () => {
+    // Hovered, `.a.a.a`'s red holds off `.a:hover`'s blue; without it the
+    // card turns blue. The rule beneath restates it only while nobody
+    // hovers.
+    expect(
+      await matchLint(
+        page(
+          ".a.a.a { color: red; }\n.a:hover { color: blue; }\n.a { color: red; }",
+          '<div class="a"></div>',
         ),
       ),
     ).toEqual([]);

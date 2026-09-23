@@ -100,4 +100,24 @@ describe("parsePage", () => {
       ].join("\n"),
     );
   });
+
+  test("a <style media> whose sheet does not close its own blocks folds as the kernel folds it: as the browser reads it", async () => {
+    // A stray `}` would close the `@media` early and apply what follows
+    // everywhere; an unclosed block, comment or string would swallow the
+    // `@media`'s own `}`. The kernel's landing is the reference.
+    for (const sheet of [
+      ".a { color: red } } .b { color: blue }",
+      ".a { color: red",
+      ".a { color: red } /* open",
+      '.a { content: "open }',
+    ]) {
+      const page = {
+        html: `<!doctype html><html><head><style media="print">${sheet}</style></head><body></body></html>`,
+        css: ".page { margin: 0 }",
+      };
+      expect(parsePage(page).css).toBe(
+        (await kernel.dd.cleanPage(page)).css,
+      );
+    }
+  });
 });

@@ -16,6 +16,7 @@
 
 import type { PagePayload } from "@daydream/plugin-api";
 
+import { closesItsOwnBlocks } from "./pageCss";
 import { uniqueSelector } from "./uniqueSelector";
 
 /** The elements that hold no page content of their own: the head and
@@ -71,12 +72,25 @@ export function parsePage(page: Pick<PagePayload, "html" | "css">): ParsedPage {
 /** A `<style>`'s text under its `media`, as the kernel's safety walk
  * folds it (render/sanitize.ts withMedia), to the letter: wrapped in
  * `@media` unless the media applies everywhere, the query the browser's
- * own reading of the list. */
+ * own reading of the list. The sheet goes in as written when it closes
+ * its own blocks (pageCss.ts closesItsOwnBlocks, the kernel's test);
+ * otherwise as the browser reads it, each rule written out whole — a
+ * stray `}` would close the `@media` early, and an unclosed block,
+ * comment or string would swallow its end. */
 function withMedia(css: string, media: string): string {
   if (media.trim() === "") return css;
   const query = new CSSStyleSheet({ media }).media.mediaText;
   if (query === "" || query.toLowerCase() === "all") return css;
-  return `@media ${query} {\n${css}\n}`;
+  const body = closesItsOwnBlocks(css) ? css : asTheBrowserReadsIt(css);
+  return `@media ${query} {\n${body}\n}`;
+}
+
+/** A sheet's rules as the browser parsed them, each written out whole
+ * (render/sanitize.ts asTheBrowserReadsIt). */
+function asTheBrowserReadsIt(css: string): string {
+  const sheet = new CSSStyleSheet();
+  sheet.replaceSync(css);
+  return Array.from(sheet.cssRules, (rule) => rule.cssText).join("\n");
 }
 
 /** In a page MOUNTED by `dd.mountViewport` (the live face), the `<style>`

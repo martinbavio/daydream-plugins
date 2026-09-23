@@ -123,6 +123,40 @@ nav a, .link:hover { color: inherit !important; }
     ]);
   });
 
+  test("@scope: a rule's selector is relative to the root — a member naming neither `:scope` nor `&` its descendant — and each scope's start and end are resolved as a rule is", () => {
+    expect(
+      pageRules(`@scope (.card) to (.content) { :scope > img, p, > span, & a { margin: 0 } color: red; }
+.card { @scope (& > .x) { :scope { gap: 0 } padding: 0; } }
+@scope (.a) { @scope (.b) to (:scope > i) { i { top: 0 } } }
+@scope { b { left: 0 } }
+@scope nope { u { right: 0 } }`).map((rule) => [
+        rule.prelude,
+        rule.selector,
+        rule.scopes,
+      ]),
+    ).toEqual([
+      [":scope", ":where(:scope)", [{ start: ".card", end: ":where(:scope) .content" }]],
+      [
+        ":scope > img, p, > span, & a",
+        ":scope > img, :where(:scope) p, :where(:scope) > span, :where(:scope) a",
+        [{ start: ".card", end: ":where(:scope) .content" }],
+      ],
+      [".card", ".card", []],
+      [":scope", ":where(:scope)", [{ start: ":is(.card) > .x", end: null }]],
+      [":scope", ":scope", [{ start: ":is(.card) > .x", end: null }]],
+      [
+        "i",
+        ":where(:scope) i",
+        [
+          { start: ".a", end: null },
+          { start: ":where(:scope) .b", end: ":scope > i" },
+        ],
+      ],
+      ["b", ":where(:scope) b", [{ start: null, end: null }]],
+      ["u", ":where(:scope) u", [{ start: ":not(*)", end: null }]],
+    ]);
+  });
+
   test("strings, comments, escapes and parentheses never end a declaration or a block", () => {
     expect(
       shape(`.a\\{b { content: "}; {"; background: url(data:image/png;base64,AAAA); }
@@ -131,6 +165,15 @@ nav a, .link:hover { color: inherit !important; }
       [".a\\{b", ['content: "}; {"', "background: url(data:image/png;base64,AAAA)"]],
       [".c", ["--x: 'a;b'"]],
     ]);
+  });
+
+  test("the legacy markers `<!--` and `-->` between top-level rules are skipped, as the tokenizer skips them; inside a block they stay", () => {
+    expect(
+      shape(`<!--
+.a { color: red }
+--> <!-- .b { color: blue } -->
+@media print { <!-- .c { color: green } }`).map((r) => r.prelude),
+    ).toEqual([".a", ".b", "<!-- .c"]);
   });
 
   test("a custom property keeps its case; every other property is lower-cased", () => {

@@ -109,7 +109,7 @@ describe("dead and live declarations", () => {
     );
   });
 
-  test("a media rule for a width the frame is not at is live (the sweep reaches its breakpoint); one no width can satisfy is dead", async () => {
+  test("a media rule for a width the frame is not at is live (the sweep reaches its breakpoint); one for print, which neither the frame nor a swept width is, is not judged", async () => {
     const findings = await necessityLint(
       makeDocument(
         FRAME,
@@ -119,15 +119,50 @@ describe("dead and live declarations", () => {
 @media print { #box { width: 10px; } }`,
       ),
     );
-    expect(findings).toEqual([
-      {
-        tier: "necessity",
-        severity: "blocking",
-        rule: 2,
-        property: "width",
-        message: `width: 10px in rule \`#box\` in \`@media print\` of viewport v1 changes nothing at ${sweptAt(400, 300, 900)}`,
-      },
-    ]);
+    expect(findings).toEqual([]);
+  });
+
+  test("a rule under a height, orientation or preference query that neither the frame nor a swept width meets is not judged; one they meet is", async () => {
+    // The frame is 400 × 300, and every swept width is wider than 300: a
+    // landscape window at every one of them, never 2000px tall, and the
+    // test browser prefers light.
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div id="box" style="height: 20px"></div>',
+        `@media (min-height: 2000px) { #box { position: static; } }
+@media (orientation: portrait) { #box { position: static; } }
+@media (prefers-color-scheme: dark) { #box { position: static; } }
+@media (max-height: 1000px) { #box { position: static; } }
+#box { @media (height > 1000px) { position: static; } }`,
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([[3, "position"]]);
+  });
+
+  test("a rule under an @supports this browser fails is not judged; one it passes is", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div id="box" style="height: 20px"></div>',
+        `@supports not (display: grid) { #box { position: static; } }
+@supports (display: grid) { #box { position: static; } }`,
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([[1, "position"]]);
+  });
+
+  test("@starting-style declarations are never judged: they apply before an element's first style, which no removal and re-read can see", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div class="a" style="height: 20px"></div><p class="b">b</p>',
+        `.a { opacity: 0.5; transition: opacity 1s; }
+@starting-style { .a { opacity: 0; } }
+.b { color: red; @starting-style { color: blue; } }`,
+      ),
+    );
+    expect(findings).toEqual([]);
   });
 
   test("a base a matching conditional branch of the same selector overrides is judged WITH the branch, so it is live", async () => {
@@ -153,7 +188,7 @@ describe("dead and live declarations", () => {
     ).toEqual([]);
   });
 
-  test("a base that is initial anyway stays dead even when a dead branch restates the property", async () => {
+  test("a base that is initial anyway stays dead even when a branch that never applies restates the property", async () => {
     const findings = await necessityLint(
       makeDocument(
         FRAME,
@@ -161,10 +196,7 @@ describe("dead and live declarations", () => {
         "#box { position: static; height: 20px; }\n@media print { #box { position: relative; } }",
       ),
     );
-    expect(findings.map((f) => [f.rule, f.property])).toEqual([
-      [0, "position"],
-      [1, "position"],
-    ]);
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([[0, "position"]]);
   });
 
   test("a base paired with a branch the sweep reaches is live: the base is the other branch", async () => {
@@ -559,6 +591,15 @@ describe("necessity on rules", () => {
     ]);
   });
 
+  test("a rule after the legacy marker `<!--` is judged and named by its own selector, the marker no part of it", async () => {
+    const findings = await necessityLint(
+      makeDocument(FRAME, '<div class="a">hi</div>', "<!--\n.a { --unused: 1px; }\n-->"),
+    );
+    expect(findings.map((f) => f.message)).toEqual([
+      `--unused: 1px in rule \`.a\` of viewport v1 changes nothing at ${sweptAt(400)}`,
+    ]);
+  });
+
   test("a pseudo-element rule's declaration is necessary when nothing else sets it: the baseline reads getComputedStyle(node, '::before') too", async () => {
     expect(
       await necessityLint(
@@ -609,6 +650,35 @@ describe("necessity on rules", () => {
         makeDocument(FRAME, '<div class="a" style="color: red">hi</div>', ".a { color: red; }"),
       ),
     ).toEqual([]);
+  });
+
+  test("a rule inside an @scope reaches its elements from the scope's root, so the ones shadowing it in their own style are judged with it", async () => {
+    // `:scope > .a` asked of `.a` itself would match nothing, the rule's
+    // color would be removed alone, and the element's own blue would keep
+    // the page unchanged.
+    expect(
+      await necessityLint(
+        makeDocument(
+          FRAME,
+          '<div class="card"><p class="a" style="color: blue">hi</p></div>',
+          "@scope (.card) { :scope > .a { color: red; } }",
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("@scope and @layer gate nothing by themselves: a dead declaration in either is found", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div class="card"><p class="a">hi</p></div>',
+        "@scope (.card) { :scope > .a { position: static; } }\n@layer base { .a { float: none; } }",
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([
+      [0, "position"],
+      [1, "float"],
+    ]);
   });
 
   test("a rule under a state pseudo-class is never judged — in a rule, :hover belongs to the selector", async () => {
