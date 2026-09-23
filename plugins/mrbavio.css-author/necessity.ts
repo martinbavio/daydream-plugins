@@ -27,16 +27,20 @@
 //
 // What that catches is the "just in case" class of failure: explicit
 // initial values, a custom property nothing reads, a declaration the
-// parser dropped, a rule for a condition no width satisfies. What it
+// parser dropped, a container query no swept width lets match. What it
 // deliberately does not judge: interaction-state properties (transition*,
 // animation*) and `cursor`, exempt by the PRD's rule; a rule under a state
-// pseudo-class, since nobody hovers a lint run; a rule whose selector the
-// browser refuses (the static gate's dead rule says so); and a
-// vendor-prefixed property this browser does not know, which is another
-// engine's. Two declarations of one property in one block are ONE
-// judgement, named by the last: the earlier is a fallback (`height: 100vh;
-// height: 100dvh`), and where this browser takes both to the same value,
-// either alone would read dead.
+// pseudo-class, since nobody hovers a lint run; a rule under
+// `@starting-style`, which styles only the moment before an element's
+// first style; a rule under an `@media` or `@supports` that holds neither
+// at the frame nor at any swept width (`@media print`, a height or a
+// preference the window never has), which no read of the lint can see
+// apply; a rule whose selector the browser refuses (the static gate's dead
+// rule says so); and a vendor-prefixed property this browser does not
+// know, which is another engine's. Two declarations of one property in
+// one block are ONE judgement, named by the last: the earlier is a
+// fallback (`height: 100vh; height: 100dvh`), and where this browser takes
+// both to the same value, either alone would read dead.
 //
 // An IMAGE THE COPY COULD NOT LOAD (an `img` complete with natural width
 // 0) is not the page's image: Chrome lays a broken image out as its alt
@@ -76,9 +80,12 @@
 //    every one of them. The frame is judged first and in full; the probes
 //    re-judge only the survivors, so a clean page (the common landing)
 //    never mounts a probe at all. The finding names every width it was
-//    dead at. This only ever ACQUITS.
+//    dead at. This only ever ACQUITS — and a rule whose `@media` or
+//    `@supports` held at none of those widths is not judged at all: the
+//    sweep reads width, and cannot make a window print or grow taller.
 // 3. CROSS-VIEWPORT INTERSECTION. With several viewports, a declaration is
-//    dead only if it is dead in EVERY viewport where it exists. An
+//    dead only if it is dead in EVERY viewport where it exists (and
+//    applies: a rule not judged in one viewport has no say there). An
 //    element's own declaration corresponds by the element's unique
 //    selector and the property; a rule's by its selector as written, the
 //    rules it is nested in, its at-rules and its occurrence among rules of
@@ -215,6 +222,10 @@ interface Candidate {
   value: string;
   /** What is removed together (rule 1), the declaration itself first. */
   removal: At[];
+  /** Whether the declaration's own conditions held in some mount so far
+   * (`conditionsHold`) — always, for an element's own. One that never
+   * holds at the frame nor at any swept width is not judged here. */
+  applies: boolean;
   dead: boolean;
   finding: Finding;
 }
@@ -277,16 +288,73 @@ async function lintViewport(
     await withMount(dd, page, width, async (m) => {
       const prepared = await prepare(m);
       const probe = baseline(prepared);
-      for (const c of pending) c.dead = isDead(prepared, probe, c.removal);
+      for (const c of pending) {
+        c.applies ||= appliesIn(prepared, c.removal[0]!);
+        c.dead = isDead(prepared, probe, c.removal);
+      }
     });
     swept.push(width);
     pending = pending.filter((c) => c.dead);
   }
   for (const c of pending) c.finding = findingFor(page, c, swept, naming);
+  // A declaration whose conditions held nowhere it was read is not judged
+  // in this viewport: it does not exist here for rule 3 either.
   return {
-    candidates,
+    candidates: candidates.filter((c) => c.applies || !c.dead),
     notes: unloaded.length === 0 ? [] : [unloadedNote(page, unloaded)],
   };
+}
+
+/** Whether the conditions of the declaration at `where` hold in the
+ * mounted copy (`conditionsHold`); an element's own always do. */
+function appliesIn(prepared: Prepared, where: At): boolean {
+  if (!("rule" in where)) return true;
+  const rule = prepared.rules[where.rule];
+  return rule === undefined || conditionsHold(prepared.doc, rule.conditions);
+}
+
+/**
+ * Whether every condition a rule sits under holds in a mounted copy — the
+ * browser's own answer in that window: an `@media` is asked of the
+ * iframe's `matchMedia`, so its width, its height, its orientation and
+ * its preferences are the copy's; an `@supports` of `CSS.supports`. A
+ * rule under one that holds neither at the frame nor at any swept width
+ * — `@media print`, a height or a preference the window never has, a
+ * feature this browser lacks — is not the page's at any width the lint
+ * can read, so it is not judged (the width sweep can acquit a rule for a
+ * width the frame is not at; it cannot make a window print). An
+ * `@container` is left to the removal itself, as before: its query is a
+ * container's size, which the sweep varies, and a rule no swept width
+ * lets it match is dead. `@layer` and `@scope` gate nothing by
+ * themselves; `@starting-style` is never judged (`isStartingStyle`).
+ */
+function conditionsHold(doc: Document, conditions: readonly string[]): boolean {
+  const view = doc.defaultView;
+  if (view === null) return true;
+  return conditions.every((condition) => {
+    const keyword = atKeyword(condition);
+    const text = condition.replace(/^@[\w-]+/, "").trim();
+    if (keyword === "media") return view.matchMedia(text).matches;
+    if (keyword === "supports") {
+      try {
+        return CSS.supports(text);
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  });
+}
+
+/** Whether a rule sits under `@starting-style`: its declarations style an
+ * element only before its first style change, the start of a transition
+ * into the page. No remove-and-read sees that moment — the copy is past
+ * it, and pins motion off — so they are never judged, like the
+ * transitions they start. */
+function isStartingStyle(rule: Pick<PageRule, "conditions">): boolean {
+  return rule.conditions.some(
+    (condition) => atKeyword(condition) === "starting-style",
+  );
 }
 
 /** Mount (motion pinned off), run, dispose — the one lifecycle every mount
@@ -413,6 +481,7 @@ function judgeAll(
       property: declaration.property,
       value: shown(declaration),
       removal,
+      applies: appliesIn(prepared, removal[0]!),
       dead: !unjudged && isDead(prepared, probe, removal),
       finding: { tier: "necessity", severity: "blocking", message: "" },
     };
@@ -456,7 +525,7 @@ function judgeAll(
     const shape = `${[...rule.parents, rule.prelude].join(" › ")}\u0000${rule.conditions.join("\u0000")}`;
     const occurrence = occurrences.get(shape) ?? 0;
     occurrences.set(shape, occurrence + 1);
-    if (hasStatePseudo(rule.selector)) return;
+    if (hasStatePseudo(rule.selector) || isStartingStyle(rule)) return;
     // A selector the browser refuses styles nothing: that rule is the
     // static gate's dead rule, and every line of it would only repeat it.
     if (refused(prepared.doc, rule.selector)) return;
