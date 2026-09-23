@@ -15,14 +15,11 @@ import type { DaydreamApi } from "@daydream/plugin-api";
 import { flush, untrack } from "solid-js";
 
 import {
-  dataImages,
   describePaste,
   hasElements,
   pageFromPaste,
   parseHtml,
   VIEWPORT_WIDTH,
-  withStoredImages,
-  writtenImageUrls,
   type PastedPage,
 } from "./page";
 import { hasContent, isSingleParagraph } from "./prose";
@@ -75,14 +72,6 @@ export function htmlSource(transfer: DataTransfer | null): HtmlSource | null {
   // wrapped. Text lands the plain face; with none, nothing lands.
   if (isSingleParagraph(doc)) return null;
   return { text: html, doc };
-}
-
-/** Each distinct entry once, with `×n` when it repeats, in first-seen
- * order — the kernel landing's own counting. */
-function counted(items: readonly string[]): string[] {
-  const counts = new Map<string, number>();
-  for (const item of items) counts.set(item, (counts.get(item) ?? 0) + 1);
-  return [...counts].map(([item, n]) => (n === 1 ? item : `${item} ×${n}`));
 }
 
 export function registerHtmlPaste(dd: DaydreamApi): void {
@@ -140,53 +129,20 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
     );
   };
 
-  /** A page names its images by url, not by their bytes (decision #76):
-   * each `data:` image an `img`'s `src` or a css `url()` names is stored
-   * through the host first and the page's name for the copy written in
-   * place of its url. One that cannot be is left as written and said: the
-   * cleaning takes it off an `img` (which stays, with its `alt`), and
-   * keeps it in css, as it keeps any `data:` url there. Then the text is
-   * cleaned as a landing cleans it, and lands — unless another document
-   * was loaded meanwhile. */
+  /** The text cleaned as a landing cleans it, the `data:` images the
+   * cleaning kept stored through the host (pageFromPaste), and landed —
+   * unless another document was loaded meanwhile. */
   const cleanThenLand = async (
     source: HtmlSource,
     position: { x: number; y: number },
     load: number,
   ): Promise<void> => {
-    const said: string[] = [];
-    const stored = new Map<string, string>();
-    const written = writtenImageUrls(source.text);
-    for (const { url, file, inCss } of dataImages(source.doc)) {
-      if (file === null) {
-        // Not an image: in an `img`'s `src`, the cleaning's to remove and
-        // say; the cleaning keeps css as written, so that is said here.
-        if (inCss) {
-          said.push(
-            "a data: url in css that is not an image was left as written",
-          );
-        }
-        continue;
-      }
-      if (!written.has(url)) {
-        said.push(
-          "a data: image written with character references was not stored",
-        );
-        continue;
-      }
-      try {
-        stored.set(url, (await dd.vendorFile(file)).pageSrc);
-      } catch (error) {
-        said.push(
-          `the host could not store a data: image (${error instanceof Error ? error.message : String(error)})`,
-        );
-      }
-    }
     let pasted: PastedPage;
     try {
-      pasted = await pageFromPaste(dd, withStoredImages(source.text, stored), {
+      pasted = await pageFromPaste(dd, source.text, {
         id: dd.core.generateId(),
         position,
-        said: counted(said),
+        said: [],
       });
     } catch (error) {
       console.error(

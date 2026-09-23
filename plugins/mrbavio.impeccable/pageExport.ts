@@ -102,43 +102,89 @@ export function absoluteSrcset(srcset: string, origin: string): string {
   return out + srcset.slice(from);
 }
 
-/** `url(/…)`, quoted or not, made `url(<origin>/…)`, and a root-relative
- * string inside `image-set()` (`image-set("/a.png" 1x)`, the
- * `-webkit-` spelling too) made `"<origin>/…"`. */
-export function absoluteCssUrls(css: string, origin: string): string {
-  const urls = css.replace(/url\(\s*(['"]?)\/(?!\/)/g, (_, quote: string) => `url(${quote}${origin}/`);
-  return absoluteImageSets(urls, origin);
-}
+/** A character an identifier may continue with: CSS's name code points
+ * (an escape is taken apart where it starts). */
+const NAME = /[A-Za-z0-9_\-\u0080-￿]/;
 
-/** The strings of every `image-set(…)` in `css`, root-relative ones made
- * absolute: each `image-set(` is read to its closing parenthesis, strings
- * (escapes honoured) skipped whole so a parenthesis in one does not end
- * it. */
-function absoluteImageSets(css: string, origin: string): string {
-  const opening = /image-set\(/gi;
+/** A css text's urls made absolute to `origin`, read as CSS tokenizes it
+ * so that only a URL is ever touched: a `url(/…)` token, quoted or not
+ * (`url(` in any case), made `url(<origin>/…)`, and a root-relative
+ * string inside `image-set()` (`image-set("/a.png" 1x)`, the `-webkit-`
+ * spelling too) made `"<origin>/…"`. Every other string — the text a
+ * `content` shows, a quoted family name — and every comment is skipped
+ * whole, whatever it spells; a parenthesis in one opens or closes
+ * nothing. */
+export function absoluteCssUrls(css: string, origin: string): string {
   let out = "";
   let from = 0;
-  for (let open = opening.exec(css); open !== null; open = opening.exec(css)) {
-    let i = open.index + open[0].length;
-    let depth = 1;
-    while (i < css.length && depth > 0) {
-      const c = css[i]!;
-      if (c === '"' || c === "'") {
-        let end = i + 1;
-        while (end < css.length && css[end] !== c) end += css[end] === "\\" ? 2 : 1;
-        const body = css.slice(i + 1, end);
-        if (/^\/(?!\/)/.test(body)) {
-          out += css.slice(from, i + 1) + origin;
-          from = i + 1;
+  /** `[at, end)`, a url's text: `origin` goes before it when it is
+   * root-relative. */
+  const urlAt = (at: number, end: number): void => {
+    const text = css.slice(at, end);
+    if (!rootRelative(text)) return;
+    const start = at + text.search(/\S/);
+    out += css.slice(from, start) + origin;
+    from = start;
+  };
+  /** The end of the string whose opening quote is at `i`: just past its
+   * closing quote, or where a newline or the text ends it. */
+  const stringEnd = (i: number): number => {
+    const quote = css[i];
+    let end = i + 1;
+    while (end < css.length && css[end] !== quote && css[end] !== "\n") {
+      end += css[end] === "\\" ? 2 : 1;
+    }
+    return Math.min(end + 1, css.length);
+  };
+  /** The functions open at `i`, innermost last: which of them a string
+   * directly inside is a url in. */
+  const open: Array<"url" | "image-set" | "other"> = [];
+  let i = 0;
+  while (i < css.length) {
+    const c = css[i]!;
+    if (c === "/" && css[i + 1] === "*") {
+      const close = css.indexOf("*/", i + 2);
+      i = close === -1 ? css.length : close + 2;
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      const end = stringEnd(i);
+      const inside = open[open.length - 1];
+      if (inside === "url" || inside === "image-set") urlAt(i + 1, end - 1);
+      i = end;
+      continue;
+    }
+    if (c === "\\") {
+      i += 2;
+      continue;
+    }
+    if (NAME.test(c)) {
+      const start = i;
+      while (i < css.length && (NAME.test(css[i]!) || css[i] === "\\")) i += css[i] === "\\" ? 2 : 1;
+      if (css[i] !== "(") continue;
+      const name = css.slice(start, i).toLowerCase();
+      i += 1;
+      if (name === "url") {
+        let at = i;
+        while (at < css.length && /\s/.test(css[at]!)) at += 1;
+        if (css[at] === '"' || css[at] === "'") {
+          // `url("…")`: a function holding a string, read as any other.
+          open.push("url");
+          continue;
         }
+        // An unquoted url token runs to its `)`.
+        let end = at;
+        while (end < css.length && css[end] !== ")") end += css[end] === "\\" ? 2 : 1;
+        urlAt(at, end);
         i = end + 1;
         continue;
       }
-      if (c === "(") depth += 1;
-      else if (c === ")") depth -= 1;
-      i += 1;
+      open.push(name === "image-set" || name === "-webkit-image-set" ? "image-set" : "other");
+      continue;
     }
-    opening.lastIndex = i;
+    if (c === "(") open.push("other");
+    else if (c === ")") open.pop();
+    i += 1;
   }
   return out + css.slice(from);
 }

@@ -82,7 +82,7 @@ export default function activate(dd: DaydreamApi): void {
   dd.bindShortcut(BLUR_COMMAND, "Escape");
   // ⌘Z while typing: what is pending is saved first, so core's undo takes
   // it with the rest of its edit burst — the command declines and the key
-  // reaches core's undo. Text the page never held (a refused or stale
+  // reaches core's undo. Text the page never held (a refused or held
   // draft) is dropped instead, and the pane shows the page as it is.
   dd.registerCommand({
     id: UNDO_COMMAND,
@@ -92,20 +92,23 @@ export default function activate(dd: DaydreamApi): void {
     run: () => state.undo(),
   });
   dd.bindShortcut(UNDO_COMMAND, "Mod+Z");
-  // ⇧⌘Z while typing: what is pending is saved first, so the restore
-  // never drops it — a new edit, which leaves core's redo, the key's next
-  // stop, nothing to redo. Always declines.
+  // ⇧⌘Z while typing: right after ⌘Z dropped a draft — everything typed
+  // since the last save, which no editor history holds — the draft comes
+  // back, and the key goes no further. Otherwise what is pending is saved
+  // first, so the restore never drops it — a new edit, which leaves
+  // core's redo, the key's next stop, nothing to redo — and it declines.
   dd.registerCommand({
     id: REDO_COMMAND,
-    title: "Save the typing before a redo",
+    title: "Bring back a dropped draft, or save the typing before a redo",
     scope: "editor",
     when: editorFocused,
     run: () => state.redo(),
   });
   dd.bindShortcut(REDO_COMMAND, "Shift+Mod+Z");
   // ⌘S while typing: what is pending is saved first, and a draft held
-  // because the page changed where it was typed is saved over the page as
-  // it is now — the one way to write over that change, asked for. ⌘S is
+  // because the page moved under it — it changed where the text was
+  // typed, or left the canvas and came back — is saved over the page as
+  // it is now: the one way to write over that change, asked for. ⌘S is
   // core's save (core.save, in `always` scope); this editor-scope command
   // is tried first and always declines, so the key goes on to it and the
   // document is saved as well.

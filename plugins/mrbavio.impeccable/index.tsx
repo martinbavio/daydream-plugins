@@ -200,7 +200,9 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   // What the canvas can see of a round's progress (the agent's impeccable_done
   // is the explicit end). A VARIANTS round: every variant carries the
   // source and the verb in its notes marker, so the count on the canvas
-  // against the marker's `of` is the progress, and reaching it is the end.
+  // against the marker's `of` is the progress, and reaching it is the end
+  // — counting only the variants that landed after the pick was taken, so
+  // an earlier round of the same verb on the same source is not this one's.
   // An IN-PLACE round lands as one change to the source's page: its two
   // texts, compared before and after — a move, a rename or a meta edit
   // is not it.
@@ -210,6 +212,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     return JSON.stringify([item.payload.html, item.payload.css]);
   };
   let sourceBefore: string | null = null;
+  let variantsBefore: ReadonlySet<string> = new Set();
 
   dd.registerTool({
     name: PICK_TOOL,
@@ -221,6 +224,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     run: () => {
       const taken = session.take();
       sourceBefore = taken.pick === null ? null : pageText(taken.pick.viewportId);
+      variantsBefore = new Set(dd.items().filter((i) => markerOf(i) !== null).map((i) => i.id));
       return taken;
     },
   });
@@ -247,7 +251,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
       let of: number | null = null;
       for (const item of dd.items()) {
         const m = markerOf(item);
-        if (m !== null && m.sourceId === viewportId && m.verb === verb) {
+        if (m !== null && m.sourceId === viewportId && m.verb === verb && !variantsBefore.has(item.id)) {
           landed += 1;
           of = Math.max(of ?? 0, m.of);
         }

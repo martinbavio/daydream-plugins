@@ -215,6 +215,9 @@ export interface PromptInput {
   target: Target | null;
   brief?: string;
   variants: number;
+  /** This run of the verb's round id, on every variant's marker: the
+   * same verb run twice on one source is two rounds (variants.ts). */
+  round: string;
   /** `reference/<verb>.md`, verbatim. */
   playbook: string;
   /** `reference/craft-floor.md`, verbatim. */
@@ -290,7 +293,7 @@ function deliverableSection(input: PromptInput): string {
     return `${i + 1} at {x: ${x}, y: ${y}}`;
   }).join(", ");
   const title = target?.viewport.title ?? "Untitled";
-  const marker = variantMarker({ verb: spec.verb, n: "n", of: variants, sourceId: id });
+  const marker = variantMarker({ verb: spec.verb, n: "n", of: variants, sourceId: id, round: input.round });
   return [
     `DELIVERABLE: ${variants} VARIANTS of the source, each a new draft viewport beside it, each a genuinely different direction the playbook allows — not ${variants} intensities of one idea. The order of work, for speed on the canvas:
 1. Read THE TARGET, not the page: get_viewport {id: "${id}", element: <the target's selector>} answers its markup and the selector of each ancestor; the rules that style it are in the page's css (get_viewport {id: "${id}"} answers it) — enough to decide the ${variants} directions, a sentence each. Read the whole page only when the page itself is the target.

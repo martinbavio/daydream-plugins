@@ -7,7 +7,8 @@
 // and quick saves join one undo step; typing over a page that changed
 // elsewhere underneath is carried onto it; a save the kernel refuses, or
 // one where the page changed underneath, is kept as the page's draft, and
-// ⌘S saves the latter over the page; Delete on an inner element cuts it
+// ⌘S saves the latter over the page, ⌘Z drops either and ⇧⌘Z straight
+// after brings it back; Delete on an inner element cuts it
 // out of the text and never removes the viewport.
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -784,6 +785,59 @@ describe("mrbavio.html-editor", () => {
     // The agent's edit is not undone: only the typed text goes.
     expect(stored()).toBe(theirs);
     expect(text()).toBe(theirs);
+    expect(message()).toBeNull();
+  });
+
+  test("⌘Z drops a refused draft, all of it, and ⇧⌘Z straight after brings it back", async () => {
+    await mountPage();
+    select(itemId);
+    content().focus();
+    const refused = edited("<p>", '<p onclick="x()">');
+    await type(refused);
+    expect(message()).toContain("p[onclick]");
+
+    key(content(), { key: "z", metaKey: true });
+    expect(text()).toBe(HTML);
+    expect(message()).toBeNull();
+
+    // The editor keeps no history of its own: ⇧⌘Z is the one way back.
+    const back = key(content(), { key: "Z", metaKey: true, shiftKey: true });
+    expect(back.defaultPrevented).toBe(true);
+    expect(text()).toBe(refused);
+    expect(message()).toContain("p[onclick]");
+    expect(stored()).toBe(HTML);
+
+    // Typing after a drop is a new edit: nothing to bring back, and
+    // ⇧⌘Z saves it as it always does.
+    key(content(), { key: "z", metaKey: true });
+    const typed = edited("Body copy", "After the drop");
+    await typeAll(typed);
+    key(content(), { key: "Z", metaKey: true, shiftKey: true });
+    expect(stored()).toBe(typed);
+    expect(text()).toBe(typed);
+    expect(message()).toBeNull();
+  });
+
+  test("a held draft whose page is back as the typing found it says so, and ⌘S saves it", async () => {
+    const m = await mountPage();
+    select(itemId);
+    content().focus();
+    const mine = edited("Old headline", "Mine");
+    await typeAll(mine);
+    outsideEdit(edited("Old headline", "Their headline"));
+    await settled();
+    expect(message()).toBe(CHANGED_UNDERNEATH);
+
+    // Their change undone: the page is as the typing started from it.
+    m.store.undo();
+    flush();
+    expect(stored()).toBe(HTML);
+    expect(text()).toBe(mine);
+    expect(message()).toBe(PAGE_BACK);
+
+    content().focus();
+    key(content(), { key: "s", metaKey: true });
+    expect(stored()).toBe(mine);
     expect(message()).toBeNull();
   });
 

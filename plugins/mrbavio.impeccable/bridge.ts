@@ -111,6 +111,13 @@ export function sessionText(dataFile: string): string {
   ].join("\n");
 }
 
+/** A fresh round id for one run of a verb (variants.ts): six lowercase
+ * letters and digits, a new one per prompt — enough that two rounds over
+ * one source never share one. */
+function roundId(): string {
+  return Math.random().toString(36).slice(2, 8).padEnd(6, "0");
+}
+
 /** The instructions section, computed once per activation from what is
  * on the machine — so an agent connecting learns whether the verbs can
  * run before it tries one. */
@@ -159,6 +166,7 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
       target: state === null ? null : resolveTarget(state, args),
       ...(args.brief === undefined ? {} : { brief: args.brief }),
       variants: variantCount(args.variants),
+      round: roundId(),
       playbook,
       craftFloor,
       skillVersion: version,
