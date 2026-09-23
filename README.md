@@ -91,9 +91,35 @@ they are kept beside the code as the specification and run from a Daydream
 checkout, not from here: `pnpm test:kernel <daydream-checkout> [plugins/<id> …]`
 copies each plugin into the checkout with its `@daydream/*` packages pointed
 at the checkout's own, runs its tests, the kernel's boundary lint and its
-typecheck, and removes the copies (`--keep` leaves them, and the lockfile
-they changed, for inspection; `pnpm test:kernel <daydream-checkout> --clean`
-removes them after). CI runs the same on every pull request
+typecheck, and removes the copies. `--no-lint` and `--no-typecheck` skip
+those two steps; `--keep` leaves the copies, and the lockfile they changed,
+for inspection, and `pnpm test:kernel <daydream-checkout> --clean` removes
+them after — every copy at once, since they share the lockfile, so
+`--clean` takes no plugin folders. Any other flag is refused. While a run
+is going it holds a lock in the checkout (`.kernel-test.lock`, its pid and
+start time): a second run says one is in progress and stops, and `--clean`
+waits for it too; a lock whose process is gone is a killed run's leftover,
+which `--clean` removes.
+
+A plugin may not import the kernel's source, so a function it needs to the
+letter is copied, with a one-line marker above it naming where it came
+from, and `test:kernel` checks each against the kernel it runs on
+(`scripts/mirrors.mjs`):
+
+```
+// mirrors: src/render/uniqueSelector.ts stepFor
+// mirrors-adapted: src/render/cssRanges.ts closesItsOwnBlocks 3f2a9c01b7e4
+```
+
+`mirrors:` (or `mirrors-exact:`) promises the copy is the kernel's function
+as written, comments and formatting aside: the two are compared, and a
+difference fails the run, naming the line where it starts in each file.
+`mirrors-adapted:` is a copy changed on purpose — an import path, a type, a
+helper's name — so the two are never compared; the hash is the kernel
+function's as it was when the copy was adapted, and when the kernel's no
+longer hashes so, the run says the copy should be read again, without
+failing (with no hash, it says which to record). A marker naming a file or
+function the kernel does not have fails either way. CI runs the same on every pull request
 (`.github/workflows/kernel-test.yml`) against the kernel commit the
 plugins pin; it needs the `DAYDREAM_KERNEL_TOKEN` secret, a token that
 can read the private kernel repository. The CSS author's lints read a page through the
