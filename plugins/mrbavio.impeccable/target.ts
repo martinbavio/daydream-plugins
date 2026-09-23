@@ -76,21 +76,52 @@ export function createTargeting(dd: DaydreamApi): Targeting {
 }
 
 /** Where to draw beside a target: its element's box, else the viewport's
- * own (`whole` says which). The element is the anchor while its mount
- * lives; after a remount (a markup write) or a reload it is found again
- * by its selector (`dd.pageFind`), and only a whole page — or an element
- * the selector no longer names alone — gets the viewport's box. A layout
- * read: call it where `dd.geometry.rect` may be called (an effect's apply
- * phase, decision #33). */
-export function targetBox(
-  dd: DaydreamApi,
-  { viewportId, element, anchor }: Target,
-): { rect: OverlayRect; whole: boolean } | null {
-  const own = anchor === null ? null : dd.geometry.rect(anchor);
-  if (own !== null) return { rect: own, whole: false };
-  const found = element === null ? null : dd.pageFind(viewportId, element);
-  const again = found === null ? null : dd.geometry.rect(found);
-  if (again !== null) return { rect: again, whole: false };
-  const item = dd.geometry.itemRect(viewportId);
-  return item === null ? null : { rect: item, whole: true };
+ * own (`whole` says which). */
+export type TargetBox = (
+  target: Target,
+) => { rect: OverlayRect; whole: boolean } | null;
+
+/**
+ * A `TargetBox` for one drawer (the caption, the picker). The element is
+ * the anchor while its mount lives; after a remount (a markup write) or a
+ * reload it is found again by its selector (`dd.pageFind`), and only a
+ * whole page — or an element the selector no longer names alone — gets
+ * the viewport's box. The id found is kept until the document changes
+ * (`dd.documentVersion()`), since a remount is a document change and the
+ * drawer draws on every geometry change, a pan's every frame; an id whose
+ * node is gone is looked for again, and nothing found is never kept (the
+ * page may still be mounting). A layout read: call it where
+ * `dd.geometry.rect` may be called (an effect's apply phase, decision #33).
+ */
+export function createTargetBox(dd: DaydreamApi): TargetBox {
+  let kept: {
+    viewportId: string;
+    element: string;
+    version: number;
+    id: ElementId;
+  } | null = null;
+  /** The element's box, by the id kept for it or found again. */
+  const found = (viewportId: string, element: string): OverlayRect | null => {
+    const version = untrack(dd.documentVersion);
+    if (
+      kept !== null &&
+      kept.viewportId === viewportId &&
+      kept.element === element &&
+      kept.version === version
+    ) {
+      const rect = dd.geometry.rect(kept.id);
+      if (rect !== null) return rect;
+    }
+    const id = dd.pageFind(viewportId, element);
+    kept = id === null ? null : { viewportId, element, version, id };
+    return id === null ? null : dd.geometry.rect(id);
+  };
+  return ({ viewportId, element, anchor }) => {
+    const own = anchor === null ? null : dd.geometry.rect(anchor);
+    if (own !== null) return { rect: own, whole: false };
+    const again = element === null ? null : found(viewportId, element);
+    if (again !== null) return { rect: again, whole: false };
+    const item = dd.geometry.itemRect(viewportId);
+    return item === null ? null : { rect: item, whole: true };
+  };
 }

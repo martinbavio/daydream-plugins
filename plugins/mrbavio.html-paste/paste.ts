@@ -22,6 +22,7 @@ import {
   parseHtml,
   VIEWPORT_WIDTH,
   withStoredImages,
+  writtenImageSources,
   type PastedPage,
 } from "./page";
 import { hasContent, isSingleParagraph } from "./prose";
@@ -152,10 +153,11 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
   ): Promise<void> => {
     const said: string[] = [];
     const stored = new Map<string, string>();
+    const written = writtenImageSources(source.text);
     for (const { url, file } of dataImages(source.doc)) {
       // Not an image: the cleaning's to remove and say.
       if (file === null) continue;
-      if (!source.text.includes(url)) {
+      if (!written.has(url)) {
         said.push(
           "a data: image written with character references was not stored",
         );

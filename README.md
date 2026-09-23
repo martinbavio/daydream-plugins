@@ -71,14 +71,16 @@ plugin on from the plugins page (⌥⌘P).
 
 ## Tests
 
-`pnpm test` runs each plugin's unit tests under node. The browser tests
+`pnpm test` runs each plugin's unit tests, and the scripts', under node. The browser tests
 (`*.browser.test.tsx`) mount Daydream's real shell through its test
 harness, which lives in the Daydream checkout and reaches into its source;
 they are kept beside the code as the specification and run from a Daydream
 checkout, not from here: `pnpm test:kernel <daydream-checkout> [plugins/<id> …]`
 copies each plugin into the checkout with its `@daydream/*` packages pointed
 at the checkout's own, runs its tests, the kernel's boundary lint and its
-typecheck, and removes the copies. The CSS author's lints read a page through the
+typecheck, and removes the copies (`--keep` leaves them, and the lockfile
+they changed, for inspection; `pnpm test:kernel <daydream-checkout> --clean`
+removes them after). The CSS author's lints read a page through the
 browser, so their tests — the static lint's and the corpus's gate check
 among them — are browser tests too. The CSS author's knowledge index
 (`knowledge/INDEX.md`) is

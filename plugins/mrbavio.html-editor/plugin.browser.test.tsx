@@ -4,10 +4,11 @@
 // API — what a person sees. The pane shows the page's html as its text
 // and marks the selected element in it, and the caret selects the element
 // it is in; typing saves live, verbatim, through the kernel's writePage,
-// and quick saves join one undo step; a save the kernel refuses, or one
-// over a page that changed underneath, is kept as the page's draft;
-// Delete on an inner element cuts it out of the text and never removes
-// the viewport.
+// and quick saves join one undo step; typing over a page that changed
+// elsewhere underneath is carried onto it; a save the kernel refuses, or
+// one where the page changed underneath, is kept as the page's draft, and
+// ⌘S saves the latter over the page; Delete on an inner element cuts it
+// out of the text and never removes the viewport.
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -24,7 +25,12 @@ import {
 } from "@daydream/plugin-testing";
 
 import { APPLY_DEBOUNCE_MS, CHANGED_UNDERNEATH } from "./HtmlPanel";
-import activate, { BLUR_COMMAND, DELETE_COMMAND, UNDO_COMMAND } from "./index";
+import activate, {
+  BLUR_COMMAND,
+  DELETE_COMMAND,
+  SAVE_OVER_COMMAND,
+  UNDO_COMMAND,
+} from "./index";
 import rawManifest from "./manifest.json";
 
 const manifest = rawManifest as PluginManifest;
@@ -217,10 +223,12 @@ describe("mrbavio.html-editor", () => {
       BLUR_COMMAND,
       UNDO_COMMAND,
       DELETE_COMMAND,
+      SAVE_OVER_COMMAND,
     ]);
     expect(manifest.contributes?.shortcuts).toEqual({
       Escape: BLUR_COMMAND,
       "Mod+Z": UNDO_COMMAND,
+      "Mod+S": SAVE_OVER_COMMAND,
       Delete: DELETE_COMMAND,
       Backspace: DELETE_COMMAND,
     });
@@ -626,7 +634,24 @@ describe("mrbavio.html-editor", () => {
     expect(text()).toBe(edited("Old headline", "Kept"));
   });
 
-  test("text typed over a page that changed on the canvas is kept as its draft, with a note", async () => {
+  test("text typed over a page that changed elsewhere on the canvas is carried onto it and saved", async () => {
+    await mountPage();
+    select(itemId);
+    content().focus();
+    await typeAll(edited("Old headline", "Mine"));
+    // An agent writes another part of the page before the debounce saves.
+    const theirs = edited("Body copy", "An agent's copy");
+    outsideEdit(theirs);
+    await settled();
+    // Both: the typing carried onto the page as it is now.
+    const both = edited("Old headline", "Mine", theirs);
+    expect(stored()).toBe(both);
+    expect(text()).toBe(both);
+    expect(message()).toBeNull();
+    expect(document.activeElement).toBe(content());
+  });
+
+  test("text typed where the page changed on the canvas is kept as its draft, with a note", async () => {
     const one = createPageItem(
       { html: HTML, css: CSS },
       { frame: { width: 600 } },
@@ -636,14 +661,14 @@ describe("mrbavio.html-editor", () => {
       { html: other, css: "" },
       { frame: { width: 600 }, position: { x: 800, y: 0 } },
     );
-    await mountPage({ version: 7, items: [one, two] });
+    const m = await mountPage({ version: 7, items: [one, two] });
     await waitMounted(two.id, "h1");
     select(one.id);
     content().focus();
     const mine = edited("Old headline", "Mine");
     await typeAll(mine);
-    // An agent writes the page before the debounce saves.
-    const theirs = edited("Body copy", "An agent's copy");
+    // An agent writes the same headline before the debounce saves.
+    const theirs = edited("Old headline", "Their headline");
     outsideEdit(theirs, one.id);
     // Uncontrolled while typing: the typed text is still there.
     expect(text()).toBe(mine);
@@ -665,12 +690,39 @@ describe("mrbavio.html-editor", () => {
     expect(text()).toBe(mine);
     expect(message()).toBe(CHANGED_UNDERNEATH);
 
-    // The next edit saves it over the page as it is now, as the note said.
+    // More typing there is held too: nothing is written over theirs
+    // without being asked.
     content().focus();
     const more = edited("Mine", "Mine, kept", mine);
     await type(more);
-    expect(message()).toBeNull();
+    expect(stored(one.id)).toBe(theirs);
+    expect(text()).toBe(more);
+    expect(message()).toBe(CHANGED_UNDERNEATH);
+
+    // ⌘S in the editor saves it over the page, as the note says, and is
+    // one undo step back to theirs.
+    await pause();
+    const event = key(content(), { key: "s", metaKey: true });
+    expect(event.defaultPrevented).toBe(true);
     expect(stored(one.id)).toBe(more);
+    expect(text()).toBe(more);
+    expect(message()).toBeNull();
+    m.store.undo();
+    flush();
+    expect(stored(one.id)).toBe(theirs);
+  });
+
+  test("⌘S in the editor with nothing held saves what is pending and is the document's save", async () => {
+    await mountPage();
+    select(itemId);
+    content().focus();
+    const typed = edited("Old headline", "Saved now");
+    await typeAll(typed);
+    const event = key(content(), { key: "s", metaKey: true });
+    // Core's save took the key: the browser's save dialog never opens.
+    expect(event.defaultPrevented).toBe(true);
+    expect(stored()).toBe(typed);
+    expect(message()).toBeNull();
   });
 
   test("⌘Z drops a draft the page never held and shows the page as it is", async () => {
@@ -678,7 +730,7 @@ describe("mrbavio.html-editor", () => {
     select(itemId);
     content().focus();
     await typeAll(edited("Old headline", "Mine"));
-    const theirs = edited("Body copy", "An agent's copy");
+    const theirs = edited("Old headline", "Their headline");
     outsideEdit(theirs);
     await settled();
     expect(message()).toBe(CHANGED_UNDERNEATH);
@@ -738,6 +790,42 @@ describe("mrbavio.html-editor", () => {
     select(two.id);
     select(one.id);
     expect(text()).toBe(edited("<p>", '<p class="x">'));
+  });
+
+  test("a draft stays with its document: another document's page of the same id shows as it is", async () => {
+    const a = createPageItem(
+      { html: HTML, css: CSS },
+      { id: "same", frame: { width: 600 } },
+    );
+    const m = await mountPage({ version: 7, items: [a] });
+    select("same");
+    content().focus();
+    const refused = edited("<p>", '<p onclick="x()">');
+    await type(refused);
+    blur();
+    expect(message()).toContain("p[onclick]");
+
+    // Another document, whose page has the same id.
+    const theirs = "<!doctype html>\n<body>\n  <h1>Document B</h1>\n</body>";
+    const b = createPageItem(
+      { html: theirs, css: "" },
+      { id: "same", frame: { width: 600 } },
+    );
+    m.store.loadDocument({ version: 7, items: [b] }, { slug: null });
+    flush();
+    await vi.waitFor(() => {
+      expect(pageNode("same", "h1")?.textContent).toBe("Document B");
+    });
+    select("same");
+    expect(text()).toBe(theirs);
+    expect(message()).toBeNull();
+
+    // Typing there saves over B's page, never A's markup.
+    content().focus();
+    const mine = edited("Document B", "Document B, edited", theirs);
+    await type(mine);
+    expect(message()).toBeNull();
+    expect(stored("same")).toBe(mine);
   });
 
   test("the page removed from outside while the pane is dirty: the pane empties without a write", async () => {

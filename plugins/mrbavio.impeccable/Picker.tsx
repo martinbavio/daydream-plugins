@@ -3,7 +3,7 @@ import { createEffect, createSignal, For, onCleanup, Show, untrack } from "solid
 import type { DaydreamApi, OverlayRect } from "@daydream/plugin-api";
 
 import { classPrefix } from "./styles";
-import { targetBox, type Target } from "./target";
+import { createTargetBox, type Target } from "./target";
 
 import { matchEntries, parseQuery, type PickerEntry } from "./pickerQuery";
 
@@ -24,6 +24,7 @@ export interface PickerState {
  * takes focus once it exists. */
 export default function createPicker(dd: DaydreamApi, entries: readonly PickerEntry[], state: PickerState) {
   const [box, setBox] = createSignal<OverlayRect | null>(null);
+  const targetBox = createTargetBox(dd);
   const [query, setQuery] = createSignal("");
   const [index, setIndex] = createSignal(0);
   const matches = () => matchEntries(entries, query());
@@ -40,7 +41,7 @@ export default function createPicker(dd: DaydreamApi, entries: readonly PickerEn
         setBox(null);
         return;
       }
-      setBox(untrack(() => targetBox(dd, target)?.rect ?? null));
+      setBox(untrack(() => targetBox(target)?.rect ?? null));
       if (previous === null || previous === undefined) {
         setQuery("");
         setIndex(0);

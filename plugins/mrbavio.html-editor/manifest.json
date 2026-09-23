@@ -10,11 +10,13 @@
     "commands": [
       "mrbavio.html-editor.blur",
       "mrbavio.html-editor.undo",
-      "mrbavio.html-editor.delete-element"
+      "mrbavio.html-editor.delete-element",
+      "mrbavio.html-editor.save-over"
     ],
     "shortcuts": {
       "Escape": "mrbavio.html-editor.blur",
       "Mod+Z": "mrbavio.html-editor.undo",
+      "Mod+S": "mrbavio.html-editor.save-over",
       "Delete": "mrbavio.html-editor.delete-element",
       "Backspace": "mrbavio.html-editor.delete-element"
     }

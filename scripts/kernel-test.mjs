@@ -14,7 +14,14 @@
 // checkout is left as it was found. The kernel checkout should be at the
 // commit the plugins pin (the sha in the root package.json's override).
 //
-// Flags: --no-lint, --no-typecheck, --keep (leave the copies for a rerun).
+// Flags: --no-lint, --no-typecheck, --keep (leave the copies and the
+// changed lockfile for inspection: each copy carries a `.kernel-test-copy`
+// mark, and a later run refuses to start until they are gone).
+//
+// `node scripts/kernel-test.mjs <kernel-checkout> --clean` removes what a
+// --keep run left — every marked copy under <kernel>/plugins/, the
+// lockfile restored, the kernel reinstalled — and touches nothing when
+// there is none.
 import { spawnSync } from "node:child_process";
 import {
   cpSync,
@@ -34,7 +41,7 @@ const flags = new Set(args.filter((a) => a.startsWith("--")));
 const [kernelArg, ...given] = args.filter((a) => !a.startsWith("--"));
 if (kernelArg === undefined) {
   console.error(
-    "usage: kernel-test.mjs <kernel-checkout> [plugins/<id> ...] [--no-lint] [--no-typecheck] [--keep]",
+    "usage: kernel-test.mjs <kernel-checkout> [plugins/<id> ...] [--no-lint] [--no-typecheck] [--keep]\n       kernel-test.mjs <kernel-checkout> --clean",
   );
   process.exit(2);
 }
@@ -65,6 +72,48 @@ const run = (cmd, argv, opts = {}) => {
   }
   return r;
 };
+
+// The mark a copy carries, so a --keep run's copies are told from the
+// kernel's own plugins.
+const MARK = ".kernel-test-copy";
+const kernelPlugins = path.join(kernel, "plugins");
+const leftovers = existsSync(kernelPlugins)
+  ? readdirSync(kernelPlugins)
+      .map((name) => path.join(kernelPlugins, name))
+      .filter((dir) => existsSync(path.join(dir, MARK)))
+  : [];
+
+/** Put the kernel back as it was found: the copies removed, the lockfile
+ * restored, node_modules relinked without the copies. */
+const restore = (dirs) => {
+  for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  spawnSync("git", ["checkout", "--", "pnpm-lock.yaml"], {
+    cwd: kernel,
+    stdio: "inherit",
+  });
+  spawnSync("pnpm", ["install", "--frozen-lockfile", "--silent"], {
+    cwd: kernel,
+    stdio: "inherit",
+  });
+};
+
+if (flags.has("--clean")) {
+  if (leftovers.length === 0) {
+    console.log(`${kernelPlugins}: no copies left by a --keep run`);
+    process.exit(0);
+  }
+  restore(leftovers);
+  console.log(
+    `cleaned up: removed ${leftovers.map((dir) => path.basename(dir)).join(", ")}; pnpm-lock.yaml restored`,
+  );
+  process.exit(0);
+}
+if (leftovers.length > 0) {
+  console.error(
+    `${kernelPlugins} holds copies a --keep run left (${leftovers.map((dir) => path.basename(dir)).join(", ")}); \`pnpm test:kernel ${kernelArg} --clean\` removes them and restores the lockfile`,
+  );
+  process.exit(2);
+}
 
 // The kernel must start clean where this script writes: its lockfile, and
 // no plugin folder of the same id (never clobber the kernel's own plugins).
@@ -112,18 +161,15 @@ for (const id of ids) {
 const copies = ids.map((id) => path.join(kernel, "plugins", id));
 let cleaned = false;
 const cleanup = () => {
-  if (cleaned || flags.has("--keep")) return;
+  if (cleaned) return;
   cleaned = true;
-  for (const dir of copies) rmSync(dir, { recursive: true, force: true });
-  spawnSync("git", ["checkout", "--", "pnpm-lock.yaml"], {
-    cwd: kernel,
-    stdio: "inherit",
-  });
-  // Relink node_modules without the copies, so the kernel runs as before.
-  spawnSync("pnpm", ["install", "--frozen-lockfile", "--silent"], {
-    cwd: kernel,
-    stdio: "inherit",
-  });
+  if (flags.has("--keep")) {
+    console.log(
+      `\nkept ${ids.join(", ")} in ${kernelPlugins} and the changed pnpm-lock.yaml; \`pnpm test:kernel ${kernelArg} --clean\` removes them`,
+    );
+    return;
+  }
+  restore(copies);
   console.log(
     `\ncleaned up: removed ${ids.join(", ")}; pnpm-lock.yaml restored`,
   );
@@ -188,6 +234,7 @@ try {
       }
     }
     writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+    writeFileSync(path.join(dest, MARK), "");
   }
   console.log(`copied ${ids.join(", ")} into ${path.join(kernel, "plugins")}`);
 
