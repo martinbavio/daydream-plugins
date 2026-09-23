@@ -1,18 +1,11 @@
 // From a page's elements to its text: where each element was written, as
 // the browser's parse pairs it with its tag; which stored element a
-// mounted one is, past what the safety walk removed; and a removal cut out
-// of the author's text.
+// mounted one is, past what the safety walk removed.
 import { describe, expect, test, vi } from "vitest";
 
 import { createPageItem, mountShell, pageNode } from "@daydream/plugin-testing";
 
-import {
-  pageSource,
-  parsePage,
-  serializePage,
-  storedElement,
-  withoutElement,
-} from "./pageSource";
+import { pageSource, parsePage, storedElement } from "./pageSource";
 
 /** The text an element of `html`'s parse was written as. */
 function written(html: string, selector: string): string | null {
@@ -90,34 +83,5 @@ describe("storedElement", () => {
   test("a node outside any page, or one the text no longer holds, is not found", () => {
     const parsed = parsePage("<p>a</p>");
     expect(storedElement(parsed, document.createElement("p"))).toBeNull();
-  });
-});
-
-describe("withoutElement", () => {
-  const remove = (html: string, selector: string): string => {
-    const source = pageSource(html);
-    return withoutElement(source, source.parsed.querySelector(selector)!);
-  };
-
-  test("the element is cut out with its line, every other character kept", () => {
-    const html =
-      "<!doctype html>\n<body>\n  <h1>Head</h1>\n  <!-- copy -->\n  <p>Copy</p>\n</body>";
-    expect(remove(html, "h1")).toBe(
-      "<!doctype html>\n<body>\n  <!-- copy -->\n  <p>Copy</p>\n</body>",
-    );
-    expect(remove(html, "p")).toBe(
-      "<!doctype html>\n<body>\n  <h1>Head</h1>\n  <!-- copy -->\n</body>",
-    );
-  });
-
-  test("an element sharing its line is cut alone", () => {
-    expect(remove("<p>a <b>b</b> c</p>", "b")).toBe("<p>a  c</p>");
-  });
-
-  test("an element with no tag of its own is removed on the parse and serialized", () => {
-    const html = "<table><tr><td>1</td></tr></table>";
-    const out = remove(html, "tbody");
-    expect(out).toBe(serializePage(parsePage("<table></table>")));
-    expect(out).not.toContain("data-mrbavio");
   });
 });

@@ -488,8 +488,8 @@ describe("mrbavio.html-editor", () => {
     const event = key(window, { key: "Delete" });
     expect(event.defaultPrevented).toBe(true);
     expect(store.document.items).toHaveLength(1);
-    // Cut with its line; every other character as the author wrote it.
-    expect(stored()).toBe(edited("\n    <p>Body copy</p>", ""));
+    // Its span cut; every other character as the author wrote it.
+    expect(stored()).toBe(edited("<p>Body copy</p>", ""));
     await vi.waitFor(() => {
       expect(pageNode(itemId, "p")).toBeNull();
     });
@@ -507,9 +507,7 @@ describe("mrbavio.html-editor", () => {
     select(idOf("h1"));
     key(window, { key: "Backspace" });
     expect(store.document.items).toHaveLength(1);
-    expect(stored()).toBe(
-      edited('\n    <h1 class="headline">Old headline</h1>', ""),
-    );
+    expect(stored()).toBe(edited('<h1 class="headline">Old headline</h1>', ""));
   });
 
   test("Delete with the page selected stays core's: the item goes, not through this plugin", async () => {
