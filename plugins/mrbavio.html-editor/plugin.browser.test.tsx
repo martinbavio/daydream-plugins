@@ -740,6 +740,42 @@ describe("mrbavio.html-editor", () => {
     expect(text()).toBe(edited("<p>", '<p class="x">'));
   });
 
+  test("a draft stays with its document: another document's page of the same id shows as it is", async () => {
+    const a = createPageItem(
+      { html: HTML, css: CSS },
+      { id: "same", frame: { width: 600 } },
+    );
+    const m = await mountPage({ version: 7, items: [a] });
+    select("same");
+    content().focus();
+    const refused = edited("<p>", '<p onclick="x()">');
+    await type(refused);
+    blur();
+    expect(message()).toContain("p[onclick]");
+
+    // Another document, whose page has the same id.
+    const theirs = "<!doctype html>\n<body>\n  <h1>Document B</h1>\n</body>";
+    const b = createPageItem(
+      { html: theirs, css: "" },
+      { id: "same", frame: { width: 600 } },
+    );
+    m.store.loadDocument({ version: 7, items: [b] }, { slug: null });
+    flush();
+    await vi.waitFor(() => {
+      expect(pageNode("same", "h1")?.textContent).toBe("Document B");
+    });
+    select("same");
+    expect(text()).toBe(theirs);
+    expect(message()).toBeNull();
+
+    // Typing there saves over B's page, never A's markup.
+    content().focus();
+    const mine = edited("Document B", "Document B, edited", theirs);
+    await type(mine);
+    expect(message()).toBeNull();
+    expect(stored("same")).toBe(mine);
+  });
+
   test("the page removed from outside while the pane is dirty: the pane empties without a write", async () => {
     const m = await mountPage();
     select(itemId);

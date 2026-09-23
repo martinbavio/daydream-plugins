@@ -19,6 +19,8 @@
 // Everything it knows about the app arrives through `dd`; the entry
 // registers its three commands and the panel.
 
+import { untrack } from "solid-js";
+
 import type { DaydreamApi } from "@daydream/plugin-api";
 
 import createHtmlPanel, { type Draft, type PanelState } from "./HtmlPanel";
@@ -51,7 +53,7 @@ export default function activate(dd: DaydreamApi): void {
     undo: () => false,
     // Drafts outlive a panel mount: the dock unmounts its panels while
     // hidden (⌘\), and typed text must come back with it.
-    drafts: new Map<string, Draft>(),
+    drafts: { load: untrack(dd.loadVersion), pages: new Map<string, Draft>() },
   };
 
   // The editor's key, a router command in EDITOR scope, applying only

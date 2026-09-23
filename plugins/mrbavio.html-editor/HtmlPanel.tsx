@@ -40,8 +40,19 @@ export interface PanelState {
    * and the key goes no further. False otherwise, so the key falls
    * through to core's undo. Set by the panel once mounted. */
   undo: () => boolean;
-  /** By viewport id. */
-  drafts: Map<string, Draft>;
+  /** By viewport id, of the document loaded when they were held: a
+   * page id names a page of one document only, so another load (a page
+   * of the same id in it, the same document reopened) must never show
+   * them. `load` is `dd.loadVersion()` then. Read through `draftsNow`. */
+  drafts: { load: number; pages: Map<string, Draft> };
+}
+
+/** The drafts held for the document loaded now: those of an earlier load
+ * are dropped on the first read after it. */
+export function draftsNow(state: PanelState): Map<string, Draft> {
+  const load = untrack(state.dd.loadVersion);
+  if (state.drafts.load !== load) state.drafts = { load, pages: new Map() };
+  return state.drafts.pages;
 }
 
 /** Live save while typing, like the CSS editor's (~150ms). */
@@ -139,7 +150,8 @@ type Saved = { ok: true } | { ok: false; problem: string; stale: boolean };
  * the entry — never a reactive props proxy.
  */
 export default function createHtmlPanel(state: PanelState) {
-  const { dd, drafts } = state;
+  const { dd } = state;
+  const drafts = (): Map<string, Draft> => draftsNow(state);
   const p = classPrefix(dd.plugin.id);
 
   // The selection's page and element. The page is read untracked: which
@@ -252,12 +264,12 @@ export default function createHtmlPanel(state: PanelState) {
     dirty = false;
     const result = saveText(id, text);
     if (result.ok) {
-      drafts.delete(id);
+      drafts().delete(id);
       setMessage(null);
       mark(ed, false);
     } else {
       const draft = draftOf(id, text, result);
-      drafts.set(id, draft);
+      drafts().set(id, draft);
       synced = draft.base;
       setMessage(draft.problem);
     }
@@ -270,9 +282,9 @@ export default function createHtmlPanel(state: PanelState) {
     if (ed === undefined || id === null) return false;
     clearDebounce();
     saveEditor(id);
-    if (!drafts.has(id)) return false;
+    if (!drafts().has(id)) return false;
     // Text the page never held: undoing it is dropping it.
-    drafts.delete(id);
+    drafts().delete(id);
     showPage(ed, id, stored(id) ?? "");
     mark(ed, false);
     return true;
@@ -287,7 +299,7 @@ export default function createHtmlPanel(state: PanelState) {
 
   /** Show page `id`: its draft when it has one, else its text. */
   function showPage(ed: HtmlEditorHandle, id: string, text: string): void {
-    const draft = drafts.get(id);
+    const draft = drafts().get(id);
     dirty = false;
     synced = draft?.base ?? text;
     ed.setText(draft?.text ?? text);
@@ -326,7 +338,7 @@ export default function createHtmlPanel(state: PanelState) {
       const text = ed.text();
       queueMicrotask(() => {
         const result = saveText(id, text);
-        if (!result.ok) drafts.set(id, draftOf(id, text, result));
+        if (!result.ok) drafts().set(id, draftOf(id, text, result));
       });
     }
     ed?.destroy();
@@ -378,7 +390,7 @@ export default function createHtmlPanel(state: PanelState) {
         if (ed === undefined) return;
         if (restored || pageChanged) {
           showPage(ed, page, text);
-        } else if (!dirty && !drafts.has(page) && text !== synced) {
+        } else if (!dirty && !drafts().has(page) && text !== synced) {
           synced = text;
           ed.setText(text);
         }
@@ -426,7 +438,7 @@ export default function createHtmlPanel(state: PanelState) {
     const id = untrack(pageId);
     if (ed === undefined || id === null) return;
     leave(id);
-    if (!drafts.has(id)) {
+    if (!drafts().has(id)) {
       showPage(ed, id, stored(id) ?? "");
       mark(ed, false);
     }
@@ -437,7 +449,7 @@ export default function createHtmlPanel(state: PanelState) {
     editor()?.destroy();
     const id = untrack(pageId);
     const text = id === null ? "" : (stored(id) ?? "");
-    const draft = id === null ? undefined : drafts.get(id);
+    const draft = id === null ? undefined : drafts().get(id);
     synced = draft?.base ?? text;
     dirty = false;
     if (draft !== undefined) setMessage(draft.problem);
