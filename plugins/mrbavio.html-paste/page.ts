@@ -57,18 +57,128 @@ export function dataImages(doc: Document): DataImage[] {
   }));
 }
 
-/** The pasted text with each stored image's `data:` URL replaced by the
- * page's name for its copy, where the author wrote it: nothing else in
- * the text moves. Only a URL written as the parser reads it — with no
- * character reference in it — is in the text to replace, so the paste
- * stores only those (`text.includes(url)`). */
+/** Elements whose content is text to the parser, never tags: an `<img`
+ * written inside one is not an image. Not `noscript`: DOMParser runs no
+ * script, so its content is markup. */
+const RAW_TEXT = new Set([
+  "script",
+  "style",
+  "textarea",
+  "title",
+  "xmp",
+  "iframe",
+  "noembed",
+  "noframes",
+  "plaintext",
+]);
+
+/** `[start, end)` of a span of text. */
+interface Span {
+  start: number;
+  end: number;
+}
+
+/** A start tag's pieces, read in place (sticky). */
+const TAG_NAME = /[^\s/>]+/y;
+const GAP = /[\s/]*/y;
+const ATTRIBUTE = /[^\s/>][^\s/>=]*/y;
+const EQUALS = /\s*=\s*/y;
+const UNQUOTED = /[^\s>]*/y;
+
+/**
+ * Where each `img`'s `src` value is written in `text`, `[start, end)`
+ * inside its quotes, in document order: the first `src` of a tag, as the
+ * parser keeps the first of a repeated attribute. A tokenizer of start
+ * tags alone — comments, doctypes, end tags and the content of raw-text
+ * elements are stepped over — so a URL in text content, in css or in any
+ * other attribute is never one of these.
+ */
+function imageSourceSpans(text: string): Span[] {
+  const spans: Span[] = [];
+  // Sticky, so each read starts where the last ended: a paste may be
+  // millions of characters, and no read copies the rest of the text.
+  const read = (pattern: RegExp, at: number): string => {
+    pattern.lastIndex = at;
+    return pattern.exec(text)?.[0] ?? "";
+  };
+  const past = (from: number, token: string): number => {
+    const pattern = new RegExp(token, "gi");
+    pattern.lastIndex = from;
+    const found = pattern.exec(text);
+    return found === null ? text.length : found.index + found[0].length;
+  };
+  let i = 0;
+  while (i < text.length) {
+    const open = text.indexOf("<", i);
+    if (open === -1) break;
+    const next = text[open + 1] ?? "";
+    if (text.startsWith("<!--", open)) {
+      i = past(open + 4, "-->");
+      continue;
+    }
+    if (!/[a-z]/i.test(next)) {
+      // An end tag, a doctype, a processing instruction — or text.
+      i = /[!/?]/.test(next) ? past(open, ">") : open + 1;
+      continue;
+    }
+    const name = read(TAG_NAME, open + 1);
+    let at = open + 1 + name.length;
+    let src: Span | null = null;
+    for (;;) {
+      at += read(GAP, at).length;
+      if (at >= text.length || text[at] === ">") break;
+      const attribute = read(ATTRIBUTE, at);
+      at += attribute.length;
+      const equals = read(EQUALS, at);
+      if (equals === "") continue;
+      at += equals.length;
+      const quote = text[at];
+      let value: Span;
+      if (quote === '"' || quote === "'") {
+        const close = text.indexOf(quote, at + 1);
+        value = { start: at + 1, end: close === -1 ? text.length : close };
+        at = value.end + 1;
+      } else {
+        value = { start: at, end: at + read(UNQUOTED, at).length };
+        at = value.end;
+      }
+      if (src === null && attribute.toLowerCase() === "src") src = value;
+    }
+    i = at + 1;
+    const tag = name.toLowerCase();
+    if (tag === "img" && src !== null) spans.push(src);
+    if (RAW_TEXT.has(tag)) i = past(i, `</${tag}`);
+  }
+  return spans;
+}
+
+/** Each `img`'s `src` as it is written in `text`. A `data:` URL the
+ * parser reads (`dataImages`) that is not among them was written with a
+ * character reference, and cannot be replaced where it was written. */
+export function writtenImageSources(text: string): Set<string> {
+  return new Set(
+    imageSourceSpans(text).map(({ start, end }) => text.slice(start, end)),
+  );
+}
+
+/** The pasted text with each `img` `src` that is a stored image's `data:`
+ * URL, whole, replaced by the page's name for its copy, where the author
+ * wrote it: nothing else in the text moves — not the same URL in text,
+ * in css or in another attribute, and not a longer URL it begins. */
 export function withStoredImages(
   text: string,
   stored: ReadonlyMap<string, string>,
 ): string {
-  let out = text;
-  for (const [url, src] of stored) out = out.split(url).join(src);
-  return out;
+  if (stored.size === 0) return text;
+  let out = "";
+  let from = 0;
+  for (const { start, end } of imageSourceSpans(text)) {
+    const src = stored.get(text.slice(start, end));
+    if (src === undefined) continue;
+    out += text.slice(from, start) + src;
+    from = end;
+  }
+  return out + text.slice(from);
 }
 
 /** A `data:` URL as a File named for its type, or null when it is not an

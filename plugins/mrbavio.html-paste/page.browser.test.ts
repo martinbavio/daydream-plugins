@@ -30,6 +30,7 @@ import {
   pageFromPaste,
   parseHtml,
   withStoredImages,
+  writtenImageSources,
   type PastedPage,
 } from "./page";
 
@@ -165,6 +166,41 @@ describe("the html", () => {
       `<figure>\n  <img src="assets/a.png" alt="a">\n  <img alt="b" src='assets/a.png'>\n</figure>`,
     );
     expect(withStoredImages(source, new Map())).toBe(source);
+  });
+
+  test("withStoredImages replaces an img's whole src and nothing else: not text, css, a comment, or a longer url it begins", () => {
+    const url = "data:image/png;base64,AAAA";
+    const longer = `${url}BBBB`;
+    const source = [
+      `<style>.a { background: url(${url}) }</style>`,
+      `<p>Copy ${url} as text</p>`,
+      `<div style="background: url(${url})"></div>`,
+      `<!-- <img src="${url}"> -->`,
+      `<img src="${longer}" alt="${url}">`,
+      `<IMG data-src="${url}" SRC=${url}>`,
+      `<textarea><img src="${url}"></textarea>`,
+    ].join("\n");
+    const stored = new Map([[url, "assets/a.png"]]);
+    expect(withStoredImages(source, stored)).toBe(
+      source.replace(`SRC=${url}`, "SRC=assets/a.png"),
+    );
+    // Both stored: each src is its own url's copy, whichever comes first.
+    stored.set(longer, "assets/b.png");
+    expect(withStoredImages(source, stored)).toBe(
+      source
+        .replace(`SRC=${url}`, "SRC=assets/a.png")
+        .replace(`src="${longer}"`, 'src="assets/b.png"'),
+    );
+  });
+
+  test("writtenImageSources names each img src as written, the first of two", () => {
+    expect(
+      Array.from(
+        writtenImageSources(
+          `<img src=" a" src="b"><img alt=x src='c'><!-- <img src=d> --><p src=e>`,
+        ),
+      ),
+    ).toEqual([" a", "c"]);
   });
 
   test("hasElements tells markup from text that starts with <", () => {
