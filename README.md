@@ -80,7 +80,10 @@ copies each plugin into the checkout with its `@daydream/*` packages pointed
 at the checkout's own, runs its tests, the kernel's boundary lint and its
 typecheck, and removes the copies (`--keep` leaves them, and the lockfile
 they changed, for inspection; `pnpm test:kernel <daydream-checkout> --clean`
-removes them after). The CSS author's lints read a page through the
+removes them after). CI runs the same on every pull request
+(`.github/workflows/kernel-test.yml`) against the kernel commit the
+plugins pin; it needs the `DAYDREAM_KERNEL_TOKEN` secret, a token that
+can read the private kernel repository. The CSS author's lints read a page through the
 browser, so their tests — the static lint's and the corpus's gate check
 among them — are browser tests too. The CSS author's knowledge index
 (`knowledge/INDEX.md`) is
