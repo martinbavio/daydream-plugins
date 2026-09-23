@@ -2,7 +2,7 @@
 // kernel checkout — its plugin copies, the lockfile they changed — taken
 // out, and nothing else. Over a scratch git checkout with the one file the
 // script checks a kernel by and a lockfile with nothing to install.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 const script = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -117,6 +117,62 @@ describe("kernel-test --clean", () => {
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("--clean");
   });
+});
+
+/** A `pnpm` that logs each call to `log` and does nothing — but hangs in
+ * `exec vitest`, as a long test run does — first on PATH. */
+function fakePnpm(): { env: NodeJS.ProcessEnv; calls: () => string[] } {
+  const bin = path.join(kernel, ".bin-fake");
+  const log = path.join(kernel, ".pnpm-calls");
+  mkdirSync(bin);
+  writeFileSync(
+    path.join(bin, "pnpm"),
+    [
+      "#!/bin/sh",
+      'echo "$*" >> "$FAKE_PNPM_LOG"',
+      'case "$*" in',
+      '  "exec vitest"*) exec sleep 5 ;;',
+      "esac",
+      "exit 0",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return {
+    env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env["PATH"]}`, FAKE_PNPM_LOG: log },
+    calls: () => (existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : []),
+  };
+}
+
+describe("kernel-test stopped by a signal", () => {
+  test.each([
+    ["SIGINT", 130],
+    ["SIGTERM", 143],
+  ] as const)("%s stops the step running, runs no step after it, and still cleans up", async (signal, code) => {
+    const k = scratchKernel();
+    const pnpm = fakePnpm();
+    const child = spawn("node", [script, k, path.join(repo, "plugins", "mrbavio.notes")], {
+      env: pnpm.env,
+      stdio: "pipe",
+    });
+    let out = "";
+    child.stdout.on("data", (d: Buffer) => (out += d.toString()));
+    child.stderr.on("data", (d: Buffer) => (out += d.toString()));
+    const exited = new Promise<number | null>((resolve) => child.on("close", (c) => resolve(c)));
+    await vi.waitFor(() => expect(pnpm.calls().some((c) => c.startsWith("exec vitest"))).toBe(true), {
+      timeout: 5000,
+    });
+    const started = Date.now();
+    child.kill(signal);
+    expect(await exited, out).toBe(code);
+    // The hanging step was stopped, not waited out.
+    expect(Date.now() - started).toBeLessThan(4000);
+    const calls = pnpm.calls();
+    expect(calls.some((c) => c.startsWith("exec eslint") || c.startsWith("exec tsc"))).toBe(false);
+    expect(calls.at(-1)).toBe("install --frozen-lockfile --silent");
+    expect(existsSync(path.join(k, "plugins", "mrbavio.notes"))).toBe(false);
+    expect(readFileSync(path.join(k, "pnpm-lock.yaml"), "utf8")).toBe(LOCK);
+  }, 15000);
 });
 
 describe("kernel-test's plugin paths", () => {

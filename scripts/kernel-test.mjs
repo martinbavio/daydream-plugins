@@ -9,9 +9,10 @@
 // `@daydream/plugin-testing` pointed at `workspace:*`, the kernel installs,
 // and the kernel's own vitest/eslint/tsc run over the copies.
 //
-// Afterwards — pass or fail, or on Ctrl-C — the copies are deleted, the
-// kernel's pnpm-lock.yaml is restored and the kernel reinstalled, so the
-// checkout is left as it was found. The kernel checkout should be at the
+// Afterwards — pass or fail, or on Ctrl-C or SIGTERM — the copies are
+// deleted, the kernel's pnpm-lock.yaml is restored and the kernel
+// reinstalled, so the checkout is left as it was found. A signal is passed
+// to the step running and no later step starts. The kernel checkout should be at the
 // commit the plugins pin (the one pnpm-workspace.yaml's catalog names).
 //
 // Flags: --no-lint, --no-typecheck, --keep (leave the copies and the
@@ -22,7 +23,7 @@
 // --keep run left — every marked copy under <kernel>/plugins/, the
 // lockfile restored, the kernel reinstalled — and touches nothing when
 // there is none.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -31,6 +32,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { constants } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -55,22 +57,47 @@ if (
   process.exit(2);
 }
 
+/** The step running now, so a signal reaches it too. */
+let child = null;
+/** The signal that stopped the run, once one has. */
+let stoppedBy = null;
+
+/** One step, its output shown as it comes — and kept, with `capture`.
+ * Asynchronous, so a signal is handled while it runs. Resolves with its
+ * exit status (128 + the signal's number when one ended it) and output. */
 const run = (cmd, argv, opts = {}) => {
   console.log(
-    `\n$ ${cmd} ${argv.join(" ")}  (in ${path.relative(process.cwd(), opts.cwd ?? kernel) || "."})`,
+    `\n$ ${cmd} ${argv.join(" ")}  (in ${path.relative(process.cwd(), kernel) || "."})`,
   );
-  const r = spawnSync(cmd, argv, {
-    cwd: kernel,
-    encoding: "utf8",
-    maxBuffer: 256 * 1024 * 1024,
-    stdio: opts.capture ? "pipe" : "inherit",
-    ...opts,
+  return new Promise((resolve) => {
+    const c = spawn(cmd, argv, {
+      cwd: kernel,
+      stdio: opts.capture ? ["inherit", "pipe", "pipe"] : "inherit",
+    });
+    child = c;
+    let output = "";
+    if (opts.capture) {
+      c.stdout.on("data", (d) => {
+        output += d.toString();
+        process.stdout.write(d);
+      });
+      c.stderr.on("data", (d) => {
+        output += d.toString();
+        process.stderr.write(d);
+      });
+    }
+    c.on("error", (error) => {
+      console.error(`${cmd}: ${error.message}`);
+      resolve({ status: 127, output });
+    });
+    c.on("close", (code, signal) => {
+      child = null;
+      resolve({
+        status: code ?? 128 + (constants.signals[signal] ?? 0),
+        output,
+      });
+    });
   });
-  if (opts.capture) {
-    process.stdout.write(r.stdout ?? "");
-    process.stderr.write(r.stderr ?? "");
-  }
-  return r;
 };
 
 // The mark a copy carries, so a --keep run's copies are told from the
@@ -189,20 +216,33 @@ const cleanup = () => {
     `\ncleaned up: removed ${ids.join(", ")}; pnpm-lock.yaml restored`,
   );
 };
-process.on("SIGINT", () => {
-  cleanup();
-  process.exit(130);
-});
-process.on("SIGTERM", () => {
-  cleanup();
-  process.exit(143);
-});
+// Ctrl-C reaches the step's process too, from the terminal; SIGTERM
+// reaches this one alone. Either way the step is stopped, no later step
+// starts, and the clean-up below runs.
+const EXIT_ON = { SIGINT: 130, SIGTERM: 143 };
+const STOPPED = Symbol("stopped");
+for (const signal of Object.keys(EXIT_ON)) {
+  process.on(signal, () => {
+    if (stoppedBy === null) {
+      stoppedBy = signal;
+      console.error(`\n${signal}: stopping, then cleaning up`);
+    }
+    child?.kill(signal);
+  });
+}
+/** A step, unless a signal stopped the run before it or during it. */
+const step = async (cmd, argv, opts) => {
+  if (stoppedBy !== null) throw STOPPED;
+  const r = await run(cmd, argv, opts);
+  if (stoppedBy !== null) throw STOPPED;
+  return r;
+};
 
 const WORKSPACE = ["@daydream/plugin-api", "@daydream/plugin-testing"];
 const results = [];
 try {
   // The kernel as its lockfile has it, so its own versions can be read.
-  if (run("pnpm", ["install", "--frozen-lockfile"]).status !== 0)
+  if ((await step("pnpm", ["install", "--frozen-lockfile"])).status !== 0)
     throw new Error("kernel install failed");
   // A package the kernel also declares (zod, solid-js, vitest…) is pinned
   // in the copy to the version the kernel runs: two copies of zod make the
@@ -253,15 +293,14 @@ try {
   }
   console.log(`copied ${ids.join(", ")} into ${path.join(kernel, "plugins")}`);
 
-  const install = run("pnpm", ["install", "--no-frozen-lockfile"]);
+  const install = await step("pnpm", ["install", "--no-frozen-lockfile"]);
   if (install.status !== 0) throw new Error("pnpm install failed");
 
   const targets = ids.map((id) => `plugins/${id}/`);
-  const tests = run("pnpm", ["exec", "vitest", "run", ...targets], {
+  const tests = await step("pnpm", ["exec", "vitest", "run", ...targets], {
     capture: true,
   });
-  const out = (tests.stdout ?? "") + (tests.stderr ?? "");
-  const untracked = out
+  const untracked = tests.output
     .split("\n")
     .filter((l) => l.includes("STRICT_READ_UNTRACKED"));
   results.push(["vitest", tests.status]);
@@ -273,14 +312,15 @@ try {
   if (!flags.has("--no-lint"))
     results.push([
       "eslint (boundary rules)",
-      run("pnpm", ["exec", "eslint", ...targets]).status,
+      (await step("pnpm", ["exec", "eslint", ...targets])).status,
     ]);
   // The kernel's tsconfig includes plugins/, so its tsc covers the copies,
   // their browser tests among them.
   if (!flags.has("--no-typecheck"))
-    results.push(["tsc", run("pnpm", ["exec", "tsc"]).status]);
+    results.push(["tsc", (await step("pnpm", ["exec", "tsc"])).status]);
 } catch (error) {
-  results.push(["setup", String(error.message ?? error)]);
+  if (error === STOPPED) results.push([`stopped by ${stoppedBy}`, "no later step ran"]);
+  else results.push(["setup", String(error.message ?? error)]);
 } finally {
   cleanup();
 }
@@ -290,4 +330,10 @@ for (const [name, status] of results)
   console.log(
     `  ${status === 0 ? "ok  " : "FAIL"} ${name}${status === 0 ? "" : ` (${status})`}`,
   );
-process.exit(results.every(([, s]) => s === 0) ? 0 : 1);
+process.exit(
+  stoppedBy !== null
+    ? EXIT_ON[stoppedBy]
+    : results.every(([, s]) => s === 0)
+      ? 0
+      : 1,
+);
