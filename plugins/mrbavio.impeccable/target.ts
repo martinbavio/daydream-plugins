@@ -7,7 +7,9 @@
 //   (`dd.pageElement`: what canvas_state answers for it), is what goes
 //   into the pick and to the agent: get_viewport `element`, the draft
 //   tools' `target` and impeccable_html all address a page element by
-//   selector, and a selector survives the remount a markup write causes.
+//   selector, and a selector survives the remount a markup write causes
+//   (while a pick waits, the session checks it still names the element:
+//   session.ts).
 // - `anchor`, the render-time id the page's mount stamped on it, is what
 //   the caption and the picker are drawn beside (`dd.geometry.rect`). It
 //   dies with the mount, so it is never stored; once it is gone, the

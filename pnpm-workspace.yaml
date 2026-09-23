@@ -1,2 +1,10 @@
 packages:
   - "plugins/*"
+
+# The kernel every plugin builds and tests against: one commit, named once.
+# Each package.json asks for these as `catalog:`, and the root's override
+# pins the API the same way, so a bump is this commit hash and nothing else
+# (README.md, "The kernel pin").
+catalog:
+  "@daydream/plugin-api": github:mbavio-phota/daydream#2a78de14f15618777be5378cd3d6a05818680924&path:packages/plugin-api
+  "@daydream/plugin-testing": github:mbavio-phota/daydream#2a78de14f15618777be5378cd3d6a05818680924&path:packages/plugin-testing

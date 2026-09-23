@@ -4,10 +4,20 @@
 // the host saves to the plugin's file at once — that write IS the
 // channel: an agent's watch wakes on it (bridge.ts). Nothing here reads
 // layout; the caption overlay does.
+//
+// A waiting pick names its element by selector, and an edit of the page
+// can make that selector name another element. So the session also holds
+// the element itself, never stored: its render-time id while its mount
+// lives, and where it is written in the page's text (held.ts), followed
+// through each edit. Once the page is edited, `check` asks whether the
+// selector still names that element, and drops the pick, with a note,
+// when it names another.
 
 import type { DaydreamApi, ElementId } from "@daydream/plugin-api";
 import { createSignal, untrack } from "solid-js";
 
+import { isViewport } from "./adopt";
+import { follow, holdAt, isHeld, type Held } from "./held";
 import type { Target } from "./target";
 
 import {
@@ -60,15 +70,78 @@ export interface Session {
   /** What the last session left in storage — restored at activation so a
    * reload keeps a waiting pick; `exit` is never restored. */
   restore(saved: unknown, viewportExists: (id: string) => boolean): void;
+  /** Whether the waiting pick's selector still names the element picked,
+   * once its page has been edited: a pick whose selector names another
+   * element is dropped, with a note. Cheap when the page has not changed
+   * since the last answer; call it from the document hook and, since the
+   * page remounts after the edit, the geometry hook. Reads untracked. */
+  check(): void;
 }
 
 export function createSession(dd: DaydreamApi): Session {
   const [phase, setPhase] = createSignal<Phase>({ kind: "idle" });
   let state: SessionState = EMPTY_SESSION;
+  /** The waiting pick's element as its page's text has it: learned from
+   * the anchor at the pick, or — for a pick restored from storage — from
+   * the selector, against the text as it was at the restore (`learn`).
+   * `confirmed` is the text the selector was last found to name it in. */
+  let held: Held | null = null;
+  let learn: string | null = null;
+  let confirmed: string | null = null;
 
   const write = (next: Omit<SessionState, "seq">): void => {
     state = { ...next, seq: state.seq + 1 };
     void dd.storage.set(SESSION_KEY, state);
+  };
+  const forget = (): void => {
+    held = null;
+    learn = null;
+    confirmed = null;
+  };
+  const pageHtml = (viewportId: string): string | null => {
+    const item = untrack(dd.items).find((i) => i.id === viewportId);
+    return item !== undefined && isViewport(item) ? item.payload.html : null;
+  };
+  /** Where the element the selector names in the page is written now,
+   * or null when the page cannot tell yet — it is mounting — or the
+   * selector names none, or several, which the agent's tools refuse. */
+  const foundAt = (viewportId: string, selector: string): { start: number; end: number } | null => {
+    const id = dd.pageFind(viewportId, selector);
+    return id === null ? null : dd.pageSource(id);
+  };
+
+  const check = (): void => {
+    const current = untrack(phase);
+    if (current.kind !== "waiting" || current.pick.element === null) return;
+    const { viewportId, element } = current.pick;
+    const html = pageHtml(viewportId);
+    if (html === null || html === confirmed) return;
+    if (held === null) {
+      // Restored: the element is what the selector named at the restore.
+      if (learn !== html) {
+        forget();
+        return;
+      }
+      const at = foundAt(viewportId, element);
+      if (at === null) return;
+      held = holdAt(html, at);
+      confirmed = html;
+      return;
+    }
+    held = follow(held, html);
+    const at = foundAt(viewportId, element);
+    if (at === null) return;
+    if (isHeld(held, html, at)) {
+      held = holdAt(html, at);
+      confirmed = html;
+      return;
+    }
+    console.info(
+      `[${dd.plugin.id}] the waiting pick's element \`${element}\` names another element since the page was edited, so the pick was dropped: pick the verb again`,
+    );
+    forget();
+    setPhase({ kind: "idle" });
+    write({ pick: null, exit: false });
   };
 
   return {
@@ -82,10 +155,20 @@ export function createSession(dd: DaydreamApi): Session {
         ...(trimmed === "" ? {} : { brief: trimmed }),
         at: Date.now(),
       };
+      forget();
+      // The element, while its mount lives: where the anchor was written.
+      const html = pageHtml(target.viewportId);
+      const at = target.anchor === null ? null : dd.pageSource(target.anchor);
+      if (html !== null && at !== null) {
+        held = holdAt(html, at);
+        confirmed = html;
+      }
       setPhase({ kind: "waiting", pick, anchor: target.anchor });
       write({ pick, exit: false });
     },
     take() {
+      check();
+      forget();
       const taken = { pick: state.pick, exit: state.exit };
       if (taken.pick !== null) {
         const current = untrack(phase);
@@ -96,10 +179,12 @@ export function createSession(dd: DaydreamApi): Session {
       return taken;
     },
     cancel() {
+      forget();
       setPhase({ kind: "idle" });
       write({ pick: null, exit: false });
     },
     end() {
+      forget();
       setPhase({ kind: "idle" });
       write({ pick: null, exit: true });
     },
@@ -125,10 +210,13 @@ export function createSession(dd: DaydreamApi): Session {
       const s = sessionState(saved);
       state = { ...s, exit: false };
       if (s.pick !== null && viewportExists(s.pick.viewportId)) {
+        forget();
+        learn = pageHtml(s.pick.viewportId);
         setPhase({ kind: "waiting", pick: s.pick, anchor: null });
       } else if (s.pick !== null || dropped) {
         write({ pick: null, exit: false });
       }
     },
+    check,
   };
 }

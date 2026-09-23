@@ -198,13 +198,13 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
     name: DETECT_TOOL,
     title: "Impeccable detect",
     description:
-      "Impeccable's detector over a viewport as the canvas renders it: the page is exported by the tab (impeccable_html), written to a file by the host, scanned by the installed skill's own launcher, and the findings answered — {viewportId, file, target?, count, byRule, findings: [{antipattern, name, severity, category, snippet}]}. With element, the export is pruned to that element and its ancestors, so every finding is the target's. The evidence step of critique and audit, in one call; the file stays on disk for you to open.",
+      "Impeccable's detector over a viewport as the canvas renders it: the page is exported by the tab (impeccable_html), written to a file by the host, scanned by the installed skill's own launcher, and the findings answered — {viewportId, file, target?, count, byRule, findings: [{antipattern, name, severity, category, snippet}]}. With element, the page is scanned whole and again with that element taken out, and only the findings it adds are answered, so every finding is the target's; target.outside counts the page's others. The evidence step of critique and audit, in one call; the file stays on disk for you to open.",
     inputSchema: {
       viewport: z.string().describe("A viewport id from canvas_state"),
       element: z
         .string()
         .optional()
-        .describe("A CSS selector naming exactly one element of its page: scan the target alone, in its cascade"),
+        .describe("A CSS selector naming exactly one element of its page: answer the target's findings alone, the target scanned in its page"),
     },
     annotations: { readOnlyHint: true },
     run: async ({ viewport, element }) => {
@@ -218,7 +218,7 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
       });
       const rules = Object.entries(report.byRule).map(([rule, n]) => `${n} ${rule}`).join(", ");
       return {
-        text: `${report.count} finding${report.count === 1 ? "" : "s"}${rules === "" ? "" : ` — ${rules}`} over ${report.file}${report.target === undefined ? "" : ` (pruned to ${report.target.selector}: ${report.target.kept} elements kept, ${report.target.pruned} removed)`}.\n${JSON.stringify(report.findings)}`,
+        text: `${report.count} finding${report.count === 1 ? "" : "s"}${rules === "" ? "" : ` — ${rules}`} over ${report.file}${report.target === undefined ? "" : ` (the target ${report.target.selector}, ${report.target.kept} elements: ${report.target.outside} findings elsewhere on the page left out)`}.\n${JSON.stringify(report.findings)}`,
         structured: report as unknown as Record<string, unknown>,
       };
     },

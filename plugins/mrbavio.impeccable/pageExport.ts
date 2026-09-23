@@ -1,7 +1,7 @@
 // impeccable_html's work on a live mount's document (index.tsx): find the
-// target by selector, prune the page to it, and make its urls stand
-// alone. The document is the mount's own copy — the caller disposes it and
-// nothing here is ever stored.
+// target by selector, mark it, take it out for the detector's baseline,
+// and make the page's urls stand alone. The document is the mount's own
+// copy — the caller disposes it and nothing here is ever stored.
 
 /** The one element `selector` names in `doc` — the same addressing
  * get_viewport and the draft tools use (decision #76) — or an error that
@@ -24,27 +24,22 @@ export function soleMatch(doc: Document, selector: string, viewportId: string): 
   return matches[0]!;
 }
 
-/**
- * PRUNE the page to the target: its subtree, its ancestors (the cascade
- * the detector's contrast and size rules read — inherited colour and
- * font, the backgrounds behind it), and nothing else — every ancestor's
- * other children go, `head` excepted. The detector reports no element,
- * only text and colours, so a page holding nothing but the target is the
- * one way a finding is the target's for sure. The subtree is marked
- * `data-impeccable-target`.
- */
-export function pruneTo(node: Element): { kept: number; pruned: number } {
+/** MARK the target: `data-impeccable-target` on it and every element
+ * inside it, the page otherwise untouched — a rule may reach the target
+ * through its siblings (`.lead + .target`, `:nth-child(2)`), so nothing
+ * around it is removed. Answers how many elements the subtree holds. */
+export function markTarget(node: Element): number {
   const subtree = [node, ...node.querySelectorAll("*")];
   for (const n of subtree) n.setAttribute("data-impeccable-target", "");
-  let pruned = 0;
-  for (let el: Element | null = node.parentElement; el !== null; el = el.parentElement) {
-    for (const child of [...el.children]) {
-      if (child === node || child.contains(node) || child.localName === "head") continue;
-      child.remove();
-      pruned += 1;
-    }
-  }
-  return { kept: subtree.length, pruned };
+  return subtree.length;
+}
+
+/** TAKE THE TARGET OUT, for the detector's baseline (bridge/detect.ts):
+ * a bare element of its own tag in its place — no attribute, nothing
+ * inside — so every other element keeps its position among its
+ * siblings, and the rules that find them by it still do. */
+export function takeOut(node: Element): void {
+  node.replaceWith(node.ownerDocument.createElementNS(node.namespaceURI, node.localName));
 }
 
 const URL_ATTRIBUTES = ["src", "href", "poster", "xlink:href"];

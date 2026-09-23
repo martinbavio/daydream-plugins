@@ -393,6 +393,77 @@ describe("mrbavio.impeccable in the shell", () => {
     expect((await pickTool().run({})) as unknown).toMatchObject({ pick: { verb: "typeset", element: "div.header" } });
   });
 
+  test("a waiting pick holds its element through edits of the page; once its selector names another element, the pick is dropped with a note", async () => {
+    const item = createPageItem(
+      { html: "<!doctype html><html><head></head><body><main><p>a</p><p>b</p></main></body></html>", css: "" },
+      { frame: { width: 640 } },
+    );
+    const { host, files } = fakeHost();
+    mounted = await mountPlugin({ entry: activate, manifest, document: { version: 7, items: [item] }, host });
+    select(await mountedId(item.id, "main > p:nth-of-type(2)"));
+    await pickVerb("typeset");
+    const selector = ((await stored(files, 1))["pick"] as { element: string }).element;
+    const edit = (from: string, to: string): void => {
+      mounted!.store.setDocument((d) => {
+        const page = d.items[0] as DreamPage;
+        page.payload.html = page.payload.html.replace(from, to);
+      });
+    };
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      // After it, and inside it: the selector still names it.
+      edit("</main>", "<p>c</p></main>");
+      await settle();
+      edit("<p>b</p>", '<p class="x">bb</p>');
+      await settle();
+      await vi.waitFor(() => expect(pageNode(item.id, "p.x")).not.toBeNull());
+      expect(caption()!.textContent).toBe("typeset · waiting for an agent");
+      expect(info).not.toHaveBeenCalled();
+      expect(pageNode(item.id, selector)!.className).toBe("x");
+      // A paragraph before both: the selector names "a" now.
+      edit("<main>", "<main><p>new</p>");
+      await settle();
+      expect(pageNode(item.id, selector)!.textContent).toBe("a");
+      expect(caption()).toBeNull();
+      expect(info).toHaveBeenCalledWith(
+        expect.stringMatching(/^\[mrbavio\.impeccable\] the waiting pick's element .* names another element since the page was edited/),
+      );
+      expect(await stored(files, 2)).toMatchObject({ pick: null, exit: false });
+      expect((await pickTool().run({})) as unknown).toMatchObject({ pick: null });
+    } finally {
+      info.mockRestore();
+    }
+  });
+
+  test("a pick restored from storage holds the element its selector named at the reload", async () => {
+    const item = createPageItem(
+      { html: "<!doctype html><html><head></head><body><main><p>a</p><p>b</p></main></body></html>", css: "" },
+      { frame: { width: 640 } },
+    );
+    const { host, files } = fakeHost({
+      [manifest.id]: {
+        [SESSION_KEY]: { seq: 4, exit: false, pick: { verb: "typeset", viewportId: item.id, element: "main > p:nth-of-type(2)", at: 1 } },
+      },
+    });
+    mounted = await mountPlugin({ entry: activate, manifest, document: { version: 7, items: [item] }, host });
+    await mountedId(item.id, "main > p:nth-of-type(2)");
+    await settle();
+    expect(caption()!.textContent).toBe("typeset · waiting for an agent");
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    try {
+      mounted.store.setDocument((d) => {
+        const page = d.items[0] as DreamPage;
+        page.payload.html = page.payload.html.replace("<main>", "<main><p>new</p>");
+      });
+      await settle();
+      expect(caption()).toBeNull();
+      expect(info).toHaveBeenCalledWith(expect.stringMatching(/names another element since the page was edited/));
+      expect(await stored(files, 5)).toMatchObject({ pick: null });
+    } finally {
+      info.mockRestore();
+    }
+  });
+
   test("the whole page is the target when the viewport item is selected; Escape closes the picker, then cancels a waiting pick; end session from the picker writes exit", async () => {
     const { doc, source } = sourceDocument();
     const { host, files } = fakeHost();
@@ -464,31 +535,42 @@ describe("mrbavio.impeccable in the shell", () => {
     }
   });
 
-  test("a variant is titled from its marker and the source's title, whatever the agent called it", async () => {
-    const { doc, source } = sourceDocument("Pricing");
-    mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
-    await settle();
-    // The agent gave a stale base title.
-    const v = variantOf(source, "bolder", 2, 3);
-    v.payload.meta!.title = "Pricing · delight 1/3 · bolder 2/3";
-    mounted.store.landItems([v]);
-    await settle();
-    const landed = mounted.store.document.items.find((i) => i.id === v.id) as DreamPage;
-    expect(landed.payload.meta?.title).toBe("Pricing · bolder 2/3");
-    expect(landed.payload.meta?.notes).toBe(v.payload.meta!.notes); // the marker stays
-    expect(landed.payload.html).toBe(v.payload.html); // the page is not touched
-    const bars = Array.from(mounted.host.querySelectorAll("[class*='bar'] span")).map((s) => s.textContent);
-    expect(bars).toContain("Pricing · bolder 2/3");
-    // A variant of a variant chains from its own source's title.
-    const ok = variantOf(landed, "layout", 1, 1);
-    mounted.store.landItems([ok]);
-    await settle();
-    expect((mounted.store.document.items.find((i) => i.id === ok.id) as DreamPage).payload.meta?.title).toBe(
-      "Pricing · bolder 2/3 · layout 1/1",
-    );
+  test("a variant is titled from its marker and the source's title, whatever the agent called it — written after the landing's effects, never inside one", async () => {
+    // A write from inside an effect callback flushes there, which Solid
+    // warns is a no-op.
+    const flushes: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation((message: unknown) => {
+      if (String(message).includes("FLUSH_IN_EFFECT_CALLBACK")) flushes.push(String(message));
+    });
+    try {
+      const { doc, source } = sourceDocument("Pricing");
+      mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
+      await settle();
+      // The agent gave a stale base title.
+      const v = variantOf(source, "bolder", 2, 3);
+      v.payload.meta!.title = "Pricing · delight 1/3 · bolder 2/3";
+      mounted.store.landItems([v]);
+      await settle();
+      const landed = mounted.store.document.items.find((i) => i.id === v.id) as DreamPage;
+      expect(landed.payload.meta?.title).toBe("Pricing · bolder 2/3");
+      expect(landed.payload.meta?.notes).toBe(v.payload.meta!.notes); // the marker stays
+      expect(landed.payload.html).toBe(v.payload.html); // the page is not touched
+      const bars = Array.from(mounted.host.querySelectorAll("[class*='bar'] span")).map((s) => s.textContent);
+      expect(bars).toContain("Pricing · bolder 2/3");
+      // A variant of a variant chains from its own source's title.
+      const ok = variantOf(landed, "layout", 1, 1);
+      mounted.store.landItems([ok]);
+      await settle();
+      expect((mounted.store.document.items.find((i) => i.id === ok.id) as DreamPage).payload.meta?.title).toBe(
+        "Pricing · bolder 2/3 · layout 1/1",
+      );
+      expect(flushes).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
-  test("impeccable_html renders the page as one standalone file, pruned to a selector's element; a report verb captions as reviewing", async () => {
+  test("impeccable_html renders the page as one standalone file, a selector's element marked in it, and the page without it on request; a report verb captions as reviewing", async () => {
     const { doc, source } = sourceDocument();
     // A bundle-relative image and background: the mount points them at
     // this host's route, and the export makes that absolute.
@@ -516,30 +598,38 @@ describe("mrbavio.impeccable in the shell", () => {
     await settle();
     expect(document.querySelectorAll("iframe").length).toBe(0);
     await expect(tool(HTML_TOOL).run({ viewport: "nope" })).rejects.toThrow(/no viewport/);
-    // With an element: the page is pruned to it — its subtree, its
-    // ancestors, the style block — and the subtree is marked.
-    const pruned = (await tool(HTML_TOOL).run({ viewport: source.id, element: ".grid" })) as {
+    // With an element: the page whole — nothing cut from it — and the
+    // target's subtree marked.
+    const marked = (await tool(HTML_TOOL).run({ viewport: source.id, element: ".grid" })) as {
       html: string;
-      target?: { selector: string; kept: number; pruned: number };
+      target?: { selector: string; kept: number };
+      baseline?: string;
     };
-    expect(pruned.target).toMatchObject({ selector: ".grid", kept: 5 }); // the grid, three boxes, the image
-    const page = new DOMParser().parseFromString(pruned.html, "text/html");
+    expect(marked.target).toEqual({ selector: ".grid", kept: 5 }); // the grid, three boxes, the image
+    expect(marked.baseline).toBeUndefined();
+    const page = new DOMParser().parseFromString(marked.html, "text/html");
+    const whole = new DOMParser().parseFromString(reply.html, "text/html");
     expect(page.querySelector("style")).not.toBeNull();
+    expect(page.body.querySelectorAll("*").length).toBe(whole.body.querySelectorAll("*").length);
     expect(page.querySelectorAll("[data-impeccable-target]").length).toBe(5);
-    const gridNode = page.querySelector(".grid")!;
-    expect(gridNode.hasAttribute("data-impeccable-target")).toBe(true);
-    // Every element left is an ancestor of the target or inside it.
-    for (const el of page.body.querySelectorAll("*")) {
-      expect(el.contains(gridNode) || gridNode.contains(el)).toBe(true);
-    }
+    expect(page.querySelector(".grid")!.hasAttribute("data-impeccable-target")).toBe(true);
     expect(page.body.hasAttribute("data-impeccable-target")).toBe(false);
-    // A deeper target prunes its siblings: the header alone of the grid.
-    const header = (await tool(HTML_TOOL).run({ viewport: source.id, element: ".grid > .header" })) as {
+    // With baseline, the page without the target as well, for the
+    // detector's second scan: a bare element of its tag in its place, so
+    // every other element keeps its own.
+    const header = (await tool(HTML_TOOL).run({ viewport: source.id, element: ".grid > .header", baseline: true })) as {
       html: string;
-      target: { kept: number; pruned: number };
+      target: { selector: string; kept: number };
+      baseline: string;
     };
-    expect(header.target).toMatchObject({ kept: 1, pruned: 2 });
-    expect(new DOMParser().parseFromString(header.html, "text/html").querySelector(".aside")).toBeNull();
+    expect(header.target).toEqual({ selector: ".grid > .header", kept: 1 });
+    expect(new DOMParser().parseFromString(header.html, "text/html").querySelector(".header[data-impeccable-target]")).not.toBeNull();
+    const without = new DOMParser().parseFromString(header.baseline, "text/html");
+    const grid = without.querySelector(".grid")!;
+    expect(Array.from(grid.children, (c) => `${c.localName}.${c.className}`)).toEqual(["div.", "div.aside", "div.footer"]);
+    expect(grid.children[0]!.outerHTML).toBe("<div></div>");
+    expect(without.querySelector("[data-impeccable-target]")).toBeNull();
+    expect(without.querySelector("style")!.textContent).toBe(new DOMParser().parseFromString(header.html, "text/html").querySelector("style")!.textContent);
     // A selector matching none, several, or nothing the browser takes.
     await expect(tool(HTML_TOOL).run({ viewport: source.id, element: ".nope" })).rejects.toThrow(/no element matches "\.nope"/);
     await expect(tool(HTML_TOOL).run({ viewport: source.id, element: ".grid > div" })).rejects.toThrow(/matches 3 elements/);
@@ -554,6 +644,32 @@ describe("mrbavio.impeccable in the shell", () => {
     await tool(DONE_TOOL).run({});
     await settle();
     expect(caption()).toBeNull();
+  });
+
+  test("impeccable_html keeps the target as the page styles it: a rule that reaches it through a sibling still does", async () => {
+    const item = createPageItem(
+      {
+        html: '<!doctype html><html><head></head><body><main><p class="lead">a</p><p class="t">b</p><p>c</p></main></body></html>',
+        css: ".lead + .t { color: rgb(1, 2, 3); }\nmain > :nth-child(2) { font-size: 31px; }\n",
+      },
+      { frame: { width: 640 } },
+    );
+    mounted = await mountPlugin({ entry: activate, manifest, document: { version: 7, items: [item] }, host: fakeHost().host });
+    const reply = (await tool(HTML_TOOL).run({ viewport: item.id, element: ".t" })) as { html: string };
+    // The file as a browser opens it.
+    const frame = document.createElement("iframe");
+    const loaded = new Promise((resolve) => frame.addEventListener("load", resolve, { once: true }));
+    frame.srcdoc = reply.html;
+    document.body.append(frame);
+    try {
+      await loaded;
+      const t = frame.contentDocument!.querySelector(".t")!;
+      const style = frame.contentWindow!.getComputedStyle(t);
+      expect(style.color).toBe("rgb(1, 2, 3)");
+      expect(style.fontSize).toBe("31px");
+    } finally {
+      frame.remove();
+    }
   });
 
   test("adopt sits in a variant's title bar: its page replaces the source's, the source keeps its meta, the round is removed, one undo step", async () => {

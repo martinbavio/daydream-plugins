@@ -26,6 +26,42 @@ describe("impeccable_detect's core", () => {
       calls.push([file, args]);
       return { code: 2, stdout: JSON.stringify(FINDINGS), stderr: "" };
     };
+    const report = await detect({
+      viewportId: "vp1",
+      skillDir: "/skill",
+      dir,
+      run,
+      html: async (input) => {
+        calls.push(input);
+        return { viewportId: "vp1", html: "<!doctype html><html></html>", bytes: 29 };
+      },
+    });
+    expect(calls[0]).toEqual({ viewport: "vp1" });
+    const file = path.join(dir, "vp1.html");
+    expect(calls[1]).toEqual(["/skill/scripts/impeccable", ["detect", "--json", "--no-config", file]]);
+    expect(calls).toHaveLength(2);
+    expect(await readFile(file, "utf8")).toBe("<!doctype html><html></html>");
+    expect(report).toEqual({
+      viewportId: "vp1",
+      file,
+      count: 3,
+      byRule: { "tiny-text": 2, "low-contrast": 1 },
+      findings: FINDINGS.map(({ antipattern, name, severity, category, snippet }) => ({ antipattern, name, severity, category, snippet })),
+    });
+  });
+
+  test("with an element, the whole page is scanned and scanned again without the target: only what the target adds is answered", async () => {
+    // Elsewhere on the page: a side tab, and a second 10px text like one
+    // of the target's.
+    const SIDE_TAB = { antipattern: "side-tab", name: "Side tab", severity: "warning", category: "slop", snippet: "border-left: 4px", file: "/x", line: 9 };
+    const calls: unknown[] = [];
+    const run: RunProcess = async (file, args) => {
+      calls.push([file, args]);
+      const baseline = String(args.at(-1)).endsWith(".baseline.html");
+      // Line numbers move when the target is taken out; they never count.
+      const found = baseline ? [{ ...FINDINGS[1]!, line: 3 }, SIDE_TAB] : [...FINDINGS, SIDE_TAB];
+      return { code: 2, stdout: JSON.stringify(found), stderr: "" };
+    };
     // The element is a CSS selector (decision #76); the file is named by a
     // file-safe spelling of it.
     const report = await detect({
@@ -38,23 +74,28 @@ describe("impeccable_detect's core", () => {
         calls.push(input);
         return {
           viewportId: "vp1",
-          html: "<!doctype html><html></html>",
-          bytes: 29,
-          target: { selector: "main > .card:nth-of-type(2)", kept: 3, pruned: 7 },
+          html: "<!doctype html><html>whole</html>",
+          bytes: 34,
+          target: { selector: "main > .card:nth-of-type(2)", kept: 3 },
+          baseline: "<!doctype html><html>without</html>",
         };
       },
     });
-    expect(calls[0]).toEqual({ viewport: "vp1", element: "main > .card:nth-of-type(2)" });
+    expect(calls[0]).toEqual({ viewport: "vp1", element: "main > .card:nth-of-type(2)", baseline: true });
     const file = path.join(dir, "vp1-main_card_nth-of-type_2.html");
+    const baselineFile = path.join(dir, "vp1-main_card_nth-of-type_2.baseline.html");
     expect(calls[1]).toEqual(["/skill/scripts/impeccable", ["detect", "--json", "--no-config", file]]);
-    expect(await readFile(file, "utf8")).toBe("<!doctype html><html></html>");
+    expect(calls[2]).toEqual(["/skill/scripts/impeccable", ["detect", "--json", "--no-config", baselineFile]]);
+    // The page stays for the agent to open; the baseline goes.
+    expect(await readFile(file, "utf8")).toBe("<!doctype html><html>whole</html>");
+    await expect(readFile(baselineFile, "utf8")).rejects.toThrow();
     expect(report).toEqual({
       viewportId: "vp1",
       file,
-      target: { selector: "main > .card:nth-of-type(2)", kept: 3, pruned: 7 },
-      count: 3,
-      byRule: { "tiny-text": 2, "low-contrast": 1 },
-      findings: FINDINGS.map(({ antipattern, name, severity, category, snippet }) => ({ antipattern, name, severity, category, snippet })),
+      target: { selector: "main > .card:nth-of-type(2)", kept: 3, outside: 2 },
+      count: 2,
+      byRule: { "low-contrast": 1, "tiny-text": 1 },
+      findings: [FINDINGS[0]!, FINDINGS[1]!].map(({ antipattern, name, severity, category, snippet }) => ({ antipattern, name, severity, category, snippet })),
     });
   });
 

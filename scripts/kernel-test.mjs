@@ -9,28 +9,36 @@
 // `@daydream/plugin-testing` pointed at `workspace:*`, the kernel installs,
 // and the kernel's own vitest/eslint/tsc run over the copies.
 //
-// Afterwards — pass or fail, or on Ctrl-C — the copies are deleted, the
-// kernel's pnpm-lock.yaml is restored and the kernel reinstalled, so the
-// checkout is left as it was found. The kernel checkout should be at the
-// commit the plugins pin (the sha in the root package.json's override).
+// Afterwards — pass or fail, or on Ctrl-C or SIGTERM — the copies are
+// deleted, the kernel's pnpm-lock.yaml is restored and the kernel
+// reinstalled, so the checkout is left as it was found. A signal is passed
+// to the step running and no later step starts. The kernel checkout should be at the
+// commit the plugins pin (the one pnpm-workspace.yaml's catalog names).
 //
 // Flags: --no-lint, --no-typecheck, --keep (leave the copies and the
 // changed lockfile for inspection: each copy carries a `.kernel-test-copy`
-// mark, and a later run refuses to start until they are gone).
+// mark, written before anything is copied into it and holding the
+// lockfile the run left, and a later run refuses to start until they are
+// gone).
 //
 // `node scripts/kernel-test.mjs <kernel-checkout> --clean` removes what a
 // --keep run left — every marked copy under <kernel>/plugins/, the
 // lockfile restored, the kernel reinstalled — and touches nothing when
-// there is none.
-import { spawnSync } from "node:child_process";
+// there is none. It never resets a lockfile the run did not leave: one
+// changed with no copies there, or changed since the --keep run, is
+// refused. A clean-up that fails says so and exits 1.
+import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { constants } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -55,22 +63,47 @@ if (
   process.exit(2);
 }
 
+/** The step running now, so a signal reaches it too. */
+let child = null;
+/** The signal that stopped the run, once one has. */
+let stoppedBy = null;
+
+/** One step, its output shown as it comes — and kept, with `capture`.
+ * Asynchronous, so a signal is handled while it runs. Resolves with its
+ * exit status (128 + the signal's number when one ended it) and output. */
 const run = (cmd, argv, opts = {}) => {
   console.log(
-    `\n$ ${cmd} ${argv.join(" ")}  (in ${path.relative(process.cwd(), opts.cwd ?? kernel) || "."})`,
+    `\n$ ${cmd} ${argv.join(" ")}  (in ${path.relative(process.cwd(), kernel) || "."})`,
   );
-  const r = spawnSync(cmd, argv, {
-    cwd: kernel,
-    encoding: "utf8",
-    maxBuffer: 256 * 1024 * 1024,
-    stdio: opts.capture ? "pipe" : "inherit",
-    ...opts,
+  return new Promise((resolve) => {
+    const c = spawn(cmd, argv, {
+      cwd: kernel,
+      stdio: opts.capture ? ["inherit", "pipe", "pipe"] : "inherit",
+    });
+    child = c;
+    let output = "";
+    if (opts.capture) {
+      c.stdout.on("data", (d) => {
+        output += d.toString();
+        process.stdout.write(d);
+      });
+      c.stderr.on("data", (d) => {
+        output += d.toString();
+        process.stderr.write(d);
+      });
+    }
+    c.on("error", (error) => {
+      console.error(`${cmd}: ${error.message}`);
+      resolve({ status: 127, output });
+    });
+    c.on("close", (code, signal) => {
+      child = null;
+      resolve({
+        status: code ?? 128 + (constants.signals[signal] ?? 0),
+        output,
+      });
+    });
   });
-  if (opts.capture) {
-    process.stdout.write(r.stdout ?? "");
-    process.stderr.write(r.stderr ?? "");
-  }
-  return r;
 };
 
 // The mark a copy carries, so a --keep run's copies are told from the
@@ -83,26 +116,70 @@ const leftovers = existsSync(kernelPlugins)
       .filter((dir) => existsSync(path.join(dir, MARK)))
   : [];
 
+const LOCKFILE = path.join(kernel, "pnpm-lock.yaml");
+/** Whether the kernel's lockfile differs from its HEAD. */
+const lockfileChanged = () =>
+  spawnSync("git", ["status", "--porcelain", "--", "pnpm-lock.yaml"], {
+    cwd: kernel,
+    encoding: "utf8",
+  }).stdout.trim() !== "";
+const lockfileHash = () =>
+  createHash("sha256").update(readFileSync(LOCKFILE)).digest("hex");
+
 /** Put the kernel back as it was found: the copies removed, the lockfile
- * restored, node_modules relinked without the copies. */
+ * restored, node_modules relinked without the copies. Answers what
+ * failed, empty when nothing did. */
 const restore = (dirs) => {
-  for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
-  spawnSync("git", ["checkout", "--", "pnpm-lock.yaml"], {
-    cwd: kernel,
-    stdio: "inherit",
-  });
-  spawnSync("pnpm", ["install", "--frozen-lockfile", "--silent"], {
-    cwd: kernel,
-    stdio: "inherit",
-  });
+  const failed = [];
+  for (const dir of dirs) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch (error) {
+      failed.push(`removing ${dir}: ${error.message}`);
+    }
+  }
+  const steps = [
+    ["git", ["checkout", "--", "pnpm-lock.yaml"]],
+    ["pnpm", ["install", "--frozen-lockfile", "--silent"]],
+  ];
+  for (const [cmd, argv] of steps) {
+    const r = spawnSync(cmd, argv, { cwd: kernel, stdio: "inherit" });
+    if (r.status !== 0) failed.push(`${cmd} ${argv.join(" ")}`);
+  }
+  return failed;
 };
 
 if (flags.has("--clean")) {
+  const changed = lockfileChanged();
   if (leftovers.length === 0) {
+    if (changed) {
+      console.error(
+        `${kernel}: pnpm-lock.yaml has changes, and no copies a --keep run left: they are not this script's, so --clean leaves them`,
+      );
+      process.exit(2);
+    }
     console.log(`${kernelPlugins}: no copies left by a --keep run`);
     process.exit(0);
   }
-  restore(leftovers);
+  // The lockfile a --keep run left is in its marks; a mark still empty is
+  // a run that stopped before its clean-up, and that run started from a
+  // clean lockfile.
+  const left = new Set(
+    leftovers
+      .map((dir) => readFileSync(path.join(dir, MARK), "utf8").trim())
+      .filter((hash) => hash !== ""),
+  );
+  if (changed && left.size > 0 && !left.has(lockfileHash())) {
+    console.error(
+      `${kernel}: pnpm-lock.yaml changed after the --keep run left it; keep what you need of it and restore it (git checkout -- pnpm-lock.yaml), then --clean again`,
+    );
+    process.exit(2);
+  }
+  const failed = restore(leftovers);
+  if (failed.length > 0) {
+    console.error(`clean-up failed: ${failed.join("; ")}`);
+    process.exit(1);
+  }
   console.log(
     `cleaned up: removed ${leftovers.map((dir) => path.basename(dir)).join(", ")}; pnpm-lock.yaml restored`,
   );
@@ -117,20 +194,15 @@ if (leftovers.length > 0) {
 
 // The kernel must start clean where this script writes: its lockfile, and
 // no plugin folder of the same id (never clobber the kernel's own plugins).
-const dirty = spawnSync(
-  "git",
-  ["status", "--porcelain", "--", "pnpm-lock.yaml"],
-  { cwd: kernel, encoding: "utf8" },
-);
-if (dirty.stdout.trim() !== "") {
+if (lockfileChanged()) {
   console.error(
     `${kernel}: pnpm-lock.yaml has local changes; commit or restore them first`,
   );
   process.exit(2);
 }
-const pinned = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"))
-  .pnpm?.overrides?.["@daydream/plugin-api"];
-const pinSha = /#([0-9a-f]{7,40})/.exec(pinned ?? "")?.[1];
+const pinSha = /"?@daydream\/plugin-api"?\s*:\s*\S*#([0-9a-f]{7,40})/.exec(
+  readFileSync(path.join(root, "pnpm-workspace.yaml"), "utf8"),
+)?.[1];
 const head = spawnSync("git", ["rev-parse", "HEAD"], {
   cwd: kernel,
   encoding: "utf8",
@@ -141,13 +213,28 @@ if (pinSha !== undefined && !head.startsWith(pinSha)) {
   );
 }
 
+const isPlugin = (dir) => existsSync(path.join(dir, "manifest.json"));
+// A folder named on the command line is a plugin or a mistake: dropping it
+// quietly would run whatever is left — or, with nothing left, the kernel's
+// own suite — and report a pass for tests that never ran.
+const notPlugins = given.map((d) => path.resolve(d)).filter((d) => !isPlugin(d));
+if (notPlugins.length > 0) {
+  console.error(
+    `not a plugin folder (no manifest.json): ${notPlugins.join(", ")}`,
+  );
+  process.exit(2);
+}
 const folders = (
   given.length > 0
     ? given.map((d) => path.resolve(d))
     : readdirSync(path.join(root, "plugins")).map((n) =>
         path.join(root, "plugins", n),
       )
-).filter((dir) => existsSync(path.join(dir, "manifest.json")));
+).filter(isPlugin);
+if (folders.length === 0) {
+  console.error(`no plugin folders under ${path.join(root, "plugins")}`);
+  process.exit(2);
+}
 const ids = folders.map((dir) => path.basename(dir));
 for (const id of ids) {
   if (existsSync(path.join(kernel, "plugins", id))) {
@@ -164,30 +251,53 @@ const cleanup = () => {
   if (cleaned) return;
   cleaned = true;
   if (flags.has("--keep")) {
+    const hash = lockfileHash();
+    for (const dir of copies) {
+      if (existsSync(path.join(dir, MARK)))
+        writeFileSync(path.join(dir, MARK), hash);
+    }
     console.log(
       `\nkept ${ids.join(", ")} in ${kernelPlugins} and the changed pnpm-lock.yaml; \`pnpm test:kernel ${kernelArg} --clean\` removes them`,
     );
     return;
   }
-  restore(copies);
+  const failed = restore(copies);
+  if (failed.length > 0) {
+    console.error(`\nclean-up failed: ${failed.join("; ")}`);
+    results.push(["clean-up", "failed"]);
+    return;
+  }
   console.log(
     `\ncleaned up: removed ${ids.join(", ")}; pnpm-lock.yaml restored`,
   );
 };
-process.on("SIGINT", () => {
-  cleanup();
-  process.exit(130);
-});
-process.on("SIGTERM", () => {
-  cleanup();
-  process.exit(143);
-});
+// Ctrl-C reaches the step's process too, from the terminal; SIGTERM
+// reaches this one alone. Either way the step is stopped, no later step
+// starts, and the clean-up below runs.
+const EXIT_ON = { SIGINT: 130, SIGTERM: 143 };
+const STOPPED = Symbol("stopped");
+for (const signal of Object.keys(EXIT_ON)) {
+  process.on(signal, () => {
+    if (stoppedBy === null) {
+      stoppedBy = signal;
+      console.error(`\n${signal}: stopping, then cleaning up`);
+    }
+    child?.kill(signal);
+  });
+}
+/** A step, unless a signal stopped the run before it or during it. */
+const step = async (cmd, argv, opts) => {
+  if (stoppedBy !== null) throw STOPPED;
+  const r = await run(cmd, argv, opts);
+  if (stoppedBy !== null) throw STOPPED;
+  return r;
+};
 
 const WORKSPACE = ["@daydream/plugin-api", "@daydream/plugin-testing"];
 const results = [];
 try {
   // The kernel as its lockfile has it, so its own versions can be read.
-  if (run("pnpm", ["install", "--frozen-lockfile"]).status !== 0)
+  if ((await step("pnpm", ["install", "--frozen-lockfile"])).status !== 0)
     throw new Error("kernel install failed");
   // A package the kernel also declares (zod, solid-js, vitest…) is pinned
   // in the copy to the version the kernel runs: two copies of zod make the
@@ -213,6 +323,9 @@ try {
   };
   for (const [i, src] of folders.entries()) {
     const dest = copies[i];
+    // Marked first: a copy that fails partway is still this script's.
+    mkdirSync(dest);
+    writeFileSync(path.join(dest, MARK), "");
     cpSync(src, dest, {
       recursive: true,
       filter: (p) =>
@@ -234,38 +347,41 @@ try {
       }
     }
     writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-    writeFileSync(path.join(dest, MARK), "");
   }
   console.log(`copied ${ids.join(", ")} into ${path.join(kernel, "plugins")}`);
 
-  const install = run("pnpm", ["install", "--no-frozen-lockfile"]);
+  const install = await step("pnpm", ["install", "--no-frozen-lockfile"]);
   if (install.status !== 0) throw new Error("pnpm install failed");
 
   const targets = ids.map((id) => `plugins/${id}/`);
-  const tests = run("pnpm", ["exec", "vitest", "run", ...targets], {
+  const tests = await step("pnpm", ["exec", "vitest", "run", ...targets], {
     capture: true,
   });
-  const out = (tests.stdout ?? "") + (tests.stderr ?? "");
-  const untracked = out
-    .split("\n")
-    .filter((l) => l.includes("STRICT_READ_UNTRACKED"));
   results.push(["vitest", tests.status]);
-  results.push([
-    "STRICT_READ_UNTRACKED warnings",
-    untracked.length === 0 ? 0 : `${untracked.length} line(s)`,
-  ]);
+  // Solid's dev warnings pass the tests but name a real fault: a read
+  // that will not update, a flush that does nothing. The kernel's own
+  // suite raises neither, so a plugin's run fails on each. One line per
+  // warning; Solid adds one "repair guide" line per code, not counted.
+  const lines = tests.output.split("\n");
+  for (const code of ["STRICT_READ_UNTRACKED", "FLUSH_IN_EFFECT_CALLBACK"]) {
+    const count = lines.filter(
+      (l) => l.includes(`[${code}]`) && !l.includes("repair guide"),
+    ).length;
+    results.push([`${code} warnings`, count]);
+  }
 
   if (!flags.has("--no-lint"))
     results.push([
       "eslint (boundary rules)",
-      run("pnpm", ["exec", "eslint", ...targets]).status,
+      (await step("pnpm", ["exec", "eslint", ...targets])).status,
     ]);
   // The kernel's tsconfig includes plugins/, so its tsc covers the copies,
   // their browser tests among them.
   if (!flags.has("--no-typecheck"))
-    results.push(["tsc", run("pnpm", ["exec", "tsc"]).status]);
+    results.push(["tsc", (await step("pnpm", ["exec", "tsc"])).status]);
 } catch (error) {
-  results.push(["setup", String(error.message ?? error)]);
+  if (error === STOPPED) results.push([`stopped by ${stoppedBy}`, "no later step ran"]);
+  else results.push(["setup", String(error.message ?? error)]);
 } finally {
   cleanup();
 }
@@ -275,4 +391,10 @@ for (const [name, status] of results)
   console.log(
     `  ${status === 0 ? "ok  " : "FAIL"} ${name}${status === 0 ? "" : ` (${status})`}`,
   );
-process.exit(results.every(([, s]) => s === 0) ? 0 : 1);
+process.exit(
+  stoppedBy !== null
+    ? EXIT_ON[stoppedBy]
+    : results.every(([, s]) => s === 0)
+      ? 0
+      : 1,
+);

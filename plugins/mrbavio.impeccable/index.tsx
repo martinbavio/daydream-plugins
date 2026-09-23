@@ -19,7 +19,7 @@ import type { DaydreamApi } from "@daydream/plugin-api";
 import { adoptInto, isViewport, markerOf, roundOf } from "./adopt";
 import { VERBS as VERB_SPECS } from "./bridge/verbs";
 import createCaption from "./Caption";
-import { absoluteUrls, pruneTo, soleMatch } from "./pageExport";
+import { absoluteUrls, markTarget, soleMatch, takeOut } from "./pageExport";
 import createPicker, { type PickerEntry } from "./Picker";
 import { createSession, SESSION_KEY } from "./session";
 import { captionCss, pickerCss } from "./styles";
@@ -147,7 +147,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     name: HTML_TOOL,
     title: "Impeccable HTML",
     description:
-      "One viewport as a standalone HTML file — the page exactly as the canvas renders it, styles and fonts inline — for Impeccable's detector: write it to a file and run `impeccable detect --json <file>`. With `element`, a CSS selector matching exactly one element of the page, the page is PRUNED to that element: its subtree and its ancestors (the cascade it inherits from), every ancestor's other children removed — so every finding over the file is the target's; the subtree also carries data-impeccable-target=\"\". Answers {viewportId, html, bytes, target?: {selector, kept, pruned}}. Reads only.",
+      "One viewport as a standalone HTML file — the page exactly as the canvas renders it, styles and fonts inline — for Impeccable's detector: write it to a file and run `impeccable detect --json <file>`. With `element`, a CSS selector matching exactly one element of the page, that element and its subtree carry data-impeccable-target=\"\" and the page is otherwise whole, so the target is styled as the page styles it; with `baseline` too, the answer adds the page with the target taken out (a bare element of its tag in its place) — the findings over the page that this one lacks are the target's, which is what impeccable_detect answers. Answers {viewportId, html, bytes, target?: {selector, kept}, baseline?}. Reads only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -157,6 +157,10 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
           description:
             "A CSS selector matching exactly one element of the viewport's page (a pick's element, canvas_state's selection.selector): the target to mark, subtree included",
         },
+        baseline: {
+          type: "boolean",
+          description: "With element: also answer the page with the target taken out, as `baseline`",
+        },
       },
       required: ["viewport"],
     },
@@ -164,19 +168,29 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     run: async (input) => {
       const id = String(input["viewport"] ?? "");
       const element = typeof input["element"] === "string" ? input["element"] : undefined;
+      const withBaseline = input["baseline"] === true;
       const viewport = dd.core.viewportItems(dd.document()).find((v) => v.id === id);
       if (viewport === undefined) throw new Error(`no viewport with id "${id}"`);
       const mounted = await dd.mountViewport(viewport, { still: true });
       try {
         const doc = mounted.document();
-        let target: { selector: string; kept: number; pruned: number } | undefined;
-        if (element !== undefined) {
-          const node = soleMatch(doc, element, id);
-          target = { selector: element, ...pruneTo(node) };
-        }
+        const node = element === undefined ? null : soleMatch(doc, element, id);
+        const target = node === null ? undefined : { selector: element!, kept: markTarget(node) };
         absoluteUrls(doc, window.location.origin);
-        const html = `<!doctype html>\n${doc.documentElement.outerHTML}`;
-        return { viewportId: id, html, bytes: html.length, ...(target === undefined ? {} : { target }) };
+        const serialized = (): string => `<!doctype html>\n${doc.documentElement.outerHTML}`;
+        const html = serialized();
+        let baseline: string | undefined;
+        if (node !== null && withBaseline) {
+          takeOut(node);
+          baseline = serialized();
+        }
+        return {
+          viewportId: id,
+          html,
+          bytes: html.length,
+          ...(target === undefined ? {} : { target }),
+          ...(baseline === undefined ? {} : { baseline }),
+        };
       } finally {
         mounted.dispose();
       }
@@ -270,15 +284,21 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     }
   };
   // A hook handler runs in an effect's apply phase: the document is read
-  // there as a snapshot, never tracked.
+  // there as a snapshot, never tracked. The titles are written after it,
+  // in a microtask: dd.updateItem flushes, and a flush from inside an
+  // effect callback is a no-op Solid warns about (FLUSH_IN_EFFECT_CALLBACK).
   dd.on("items", ({ added }) => {
-    untrack(() => {
-      titleVariants(added);
-      trackBuilding();
-    });
+    untrack(trackBuilding);
+    if (added.length > 0) queueMicrotask(() => titleVariants(added));
   });
   dd.on("document", ({ restored }) => {
+    untrack(session.check);
     if (!restored) untrack(trackBuilding);
+  });
+  // A markup edit remounts the page, and until it has, the selector may
+  // name nothing the check can place.
+  dd.on("geometry", () => {
+    untrack(session.check);
   });
 
   // After the await: a reload keeps a waiting pick whose viewport is still
