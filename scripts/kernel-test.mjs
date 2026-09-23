@@ -17,16 +17,22 @@
 //
 // Flags: --no-lint, --no-typecheck, --keep (leave the copies and the
 // changed lockfile for inspection: each copy carries a `.kernel-test-copy`
-// mark, and a later run refuses to start until they are gone).
+// mark, written before anything is copied into it and holding the
+// lockfile the run left, and a later run refuses to start until they are
+// gone).
 //
 // `node scripts/kernel-test.mjs <kernel-checkout> --clean` removes what a
 // --keep run left — every marked copy under <kernel>/plugins/, the
 // lockfile restored, the kernel reinstalled — and touches nothing when
-// there is none.
+// there is none. It never resets a lockfile the run did not leave: one
+// changed with no copies there, or changed since the --keep run, is
+// refused. A clean-up that fails says so and exits 1.
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -110,26 +116,70 @@ const leftovers = existsSync(kernelPlugins)
       .filter((dir) => existsSync(path.join(dir, MARK)))
   : [];
 
+const LOCKFILE = path.join(kernel, "pnpm-lock.yaml");
+/** Whether the kernel's lockfile differs from its HEAD. */
+const lockfileChanged = () =>
+  spawnSync("git", ["status", "--porcelain", "--", "pnpm-lock.yaml"], {
+    cwd: kernel,
+    encoding: "utf8",
+  }).stdout.trim() !== "";
+const lockfileHash = () =>
+  createHash("sha256").update(readFileSync(LOCKFILE)).digest("hex");
+
 /** Put the kernel back as it was found: the copies removed, the lockfile
- * restored, node_modules relinked without the copies. */
+ * restored, node_modules relinked without the copies. Answers what
+ * failed, empty when nothing did. */
 const restore = (dirs) => {
-  for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
-  spawnSync("git", ["checkout", "--", "pnpm-lock.yaml"], {
-    cwd: kernel,
-    stdio: "inherit",
-  });
-  spawnSync("pnpm", ["install", "--frozen-lockfile", "--silent"], {
-    cwd: kernel,
-    stdio: "inherit",
-  });
+  const failed = [];
+  for (const dir of dirs) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch (error) {
+      failed.push(`removing ${dir}: ${error.message}`);
+    }
+  }
+  const steps = [
+    ["git", ["checkout", "--", "pnpm-lock.yaml"]],
+    ["pnpm", ["install", "--frozen-lockfile", "--silent"]],
+  ];
+  for (const [cmd, argv] of steps) {
+    const r = spawnSync(cmd, argv, { cwd: kernel, stdio: "inherit" });
+    if (r.status !== 0) failed.push(`${cmd} ${argv.join(" ")}`);
+  }
+  return failed;
 };
 
 if (flags.has("--clean")) {
+  const changed = lockfileChanged();
   if (leftovers.length === 0) {
+    if (changed) {
+      console.error(
+        `${kernel}: pnpm-lock.yaml has changes, and no copies a --keep run left: they are not this script's, so --clean leaves them`,
+      );
+      process.exit(2);
+    }
     console.log(`${kernelPlugins}: no copies left by a --keep run`);
     process.exit(0);
   }
-  restore(leftovers);
+  // The lockfile a --keep run left is in its marks; a mark still empty is
+  // a run that stopped before its clean-up, and that run started from a
+  // clean lockfile.
+  const left = new Set(
+    leftovers
+      .map((dir) => readFileSync(path.join(dir, MARK), "utf8").trim())
+      .filter((hash) => hash !== ""),
+  );
+  if (changed && left.size > 0 && !left.has(lockfileHash())) {
+    console.error(
+      `${kernel}: pnpm-lock.yaml changed after the --keep run left it; keep what you need of it and restore it (git checkout -- pnpm-lock.yaml), then --clean again`,
+    );
+    process.exit(2);
+  }
+  const failed = restore(leftovers);
+  if (failed.length > 0) {
+    console.error(`clean-up failed: ${failed.join("; ")}`);
+    process.exit(1);
+  }
   console.log(
     `cleaned up: removed ${leftovers.map((dir) => path.basename(dir)).join(", ")}; pnpm-lock.yaml restored`,
   );
@@ -144,12 +194,7 @@ if (leftovers.length > 0) {
 
 // The kernel must start clean where this script writes: its lockfile, and
 // no plugin folder of the same id (never clobber the kernel's own plugins).
-const dirty = spawnSync(
-  "git",
-  ["status", "--porcelain", "--", "pnpm-lock.yaml"],
-  { cwd: kernel, encoding: "utf8" },
-);
-if (dirty.stdout.trim() !== "") {
+if (lockfileChanged()) {
   console.error(
     `${kernel}: pnpm-lock.yaml has local changes; commit or restore them first`,
   );
@@ -206,12 +251,22 @@ const cleanup = () => {
   if (cleaned) return;
   cleaned = true;
   if (flags.has("--keep")) {
+    const hash = lockfileHash();
+    for (const dir of copies) {
+      if (existsSync(path.join(dir, MARK)))
+        writeFileSync(path.join(dir, MARK), hash);
+    }
     console.log(
       `\nkept ${ids.join(", ")} in ${kernelPlugins} and the changed pnpm-lock.yaml; \`pnpm test:kernel ${kernelArg} --clean\` removes them`,
     );
     return;
   }
-  restore(copies);
+  const failed = restore(copies);
+  if (failed.length > 0) {
+    console.error(`\nclean-up failed: ${failed.join("; ")}`);
+    results.push(["clean-up", "failed"]);
+    return;
+  }
   console.log(
     `\ncleaned up: removed ${ids.join(", ")}; pnpm-lock.yaml restored`,
   );
@@ -268,6 +323,9 @@ try {
   };
   for (const [i, src] of folders.entries()) {
     const dest = copies[i];
+    // Marked first: a copy that fails partway is still this script's.
+    mkdirSync(dest);
+    writeFileSync(path.join(dest, MARK), "");
     cpSync(src, dest, {
       recursive: true,
       filter: (p) =>
@@ -289,7 +347,6 @@ try {
       }
     }
     writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
-    writeFileSync(path.join(dest, MARK), "");
   }
   console.log(`copied ${ids.join(", ")} into ${path.join(kernel, "plugins")}`);
 
