@@ -1,12 +1,13 @@
 // The STATIC lint (docs/agent-css-knowledge-prd.md, "Lints"; decision
 // #43, #48 P9): what can be said about a page from its text alone, with
-// no render. Deliberately small — four rules, each a fact about CSS the
-// browser would enforce silently (a declaration the parser drops, a
-// declaration that changes nothing, a font face nothing names, a class
-// no selector names) — because anything that needs a render is the
-// necessity lint's (necessity.ts), and anything that needs a selector
-// MATCHED — dead rules, redundancy, a container query with no container —
-// is matchLint.ts's, which mounts the page. The facts about CSS it reads
+// no render. Deliberately small — three rules, each a fact about CSS the
+// browser would enforce silently (a declaration the parser drops, a font
+// face nothing names, a class no selector names) — because anything that
+// needs a render is the necessity lint's (necessity.ts), and anything
+// that needs a selector MATCHED or a value MEASURED — dead rules,
+// redundancy, an explicit initial value (rule 2, initialValues.ts), a
+// container query with no container — is matchLint.ts's, which mounts the
+// page. The facts about CSS it reads
 // (family names) are core's, through `dd.core` (one implementation,
 // decision #48 P4); the OPINION that these are worth refusing a landing
 // for is this plugin's.
@@ -35,7 +36,6 @@ import {
   ruleName,
   scanDeclarations,
   selectorPreludes,
-  splitTopLevelCommas,
   type CssDeclaration,
   type PageRule,
 } from "./pageCss";
@@ -43,11 +43,10 @@ import { lintElements, parsePage } from "./pageDom";
 import { uniqueSelector } from "./uniqueSelector";
 
 /** Every static finding for the document: per page, the elements' own
- * declarations in tree order (one element's findings together: unit-less
- * lengths, then restated initials), then the page's unused font faces,
- * then its rules' unit-less lengths and restated initials, then the
- * classes no rule names. Empty when the document is clean. Browser only:
- * the markup is parsed by the browser. */
+ * unit-less lengths in tree order, then the page's unused font faces,
+ * then its rules' unit-less lengths, then the classes no rule names.
+ * Empty when the document is clean. Browser only: the markup is parsed
+ * by the browser. */
 export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
   const findings: Finding[] = [];
   for (const page of core.viewportItems(doc) as DreamPage[]) {
@@ -67,11 +66,9 @@ export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
       const own = scanDeclarations(el.getAttribute("style") ?? "");
       if (own.length === 0) continue;
       lintUnitlessLengths(own, nameOf(el), findings);
-      lintRestatedInitials(own, el.localName, nameOf(el), findings);
     }
     lintUnusedFontFaces(core, page, parsed.css, rules, elements, findings);
     lintUnitlessLengthsOnRules(rules, page.id, findings);
-    lintRestatedInitialsOnRules(rules, page.id, findings);
     lintUnreferencedClasses(
       selectorPreludes(parsed.css),
       elements,
@@ -257,170 +254,9 @@ export function lintUnitlessLengthsOnRules(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Rule 2 — an explicit initial value the UA never overrides.
-//
-// `position: static` in an element's own style is a declaration that
-// changes nothing: the property's initial value is what the element would
-// have had anyway, because no UA stylesheet sets it on the elements a page
-// is made of. The table is restricted to exactly those properties, and to
-// NON-INHERITED ones only — an inherited property (letter-spacing,
-// text-transform, visibility, …) restated at its initial under an
-// ancestor that changed it is a real reset, which the text alone cannot
-// tell from a redundant one. Where Chrome's UA sheet DOES touch one of
-// these on a tag — overflow on img and hr — that tag is excused, since
-// restating the initial there is a reset too. `outline-offset: 0` is
-// deliberately absent — the UA sheet sets it on focused form controls, so
-// it is not guaranteed redundant. An `!important` declaration is never
-// judged: it is there to win, which a reset may need to.
-//
-// The premise was re-read against Chromium's html.css when the tree's
-// vocabulary widened (decision #57: tables, description lists, the
-// phrasing elements, ruby, address/hgroup/menu/search): what the UA sets
-// on those tags is display, vertical-align, text-align, border-spacing,
-// border-collapse, border-color, box-sizing and text-indent (table
-// parts), padding (td/th), margins and list-style (dl/dd/menu),
-// font-style, font-family, font-size, font-weight, text-decoration,
-// unicode-bidi, colour and line-height (the phrasing set, sub/sup, rt) —
-// and none of those is in this table, so none needs excusing
-// (staticLint.browser.test.ts pins the audit). A page may use any element
-// HTML has (decision #76); one whose UA styles set a property of the
-// table wants its own exception here.
-
-interface InitialValue {
-  value: string;
-  /** Tags whose UA styles set this property, so the initial is a reset. */
-  except?: ReadonlySet<string>;
-}
-
-const REPLACED_OR_RULED: ReadonlySet<string> = new Set(["img", "hr"]);
-
-const INITIAL_VALUES: ReadonlyMap<string, InitialValue> = new Map([
-  ["position", { value: "static" }],
-  ["float", { value: "none" }],
-  ["clear", { value: "none" }],
-  ["z-index", { value: "auto" }],
-  ["top", { value: "auto" }],
-  ["right", { value: "auto" }],
-  ["bottom", { value: "auto" }],
-  ["left", { value: "auto" }],
-  ["inset", { value: "auto" }],
-  ["flex-direction", { value: "row" }],
-  ["flex-wrap", { value: "nowrap" }],
-  ["flex-grow", { value: "0" }],
-  ["flex-shrink", { value: "1" }],
-  ["flex-basis", { value: "auto" }],
-  ["opacity", { value: "1" }],
-  ["transform", { value: "none" }],
-  ["max-width", { value: "none" }],
-  ["max-height", { value: "none" }],
-  ["min-width", { value: "auto" }],
-  ["min-height", { value: "auto" }],
-  ["overflow", { value: "visible", except: REPLACED_OR_RULED }],
-  ["box-shadow", { value: "none" }],
-]);
-
-/** The table's entry the declaration restates, or undefined. */
-function restatedInitial(declaration: CssDeclaration): InitialValue | undefined {
-  if (declaration.important) return undefined;
-  const initial = INITIAL_VALUES.get(declaration.property);
-  if (initial === undefined) return undefined;
-  return declaration.value.toLowerCase() === initial.value ? initial : undefined;
-}
-
-function lintRestatedInitials(
-  own: readonly CssDeclaration[],
-  tag: string,
-  selector: string,
-  findings: Finding[],
-): void {
-  for (const declaration of own) {
-    const initial = restatedInitial(declaration);
-    if (initial === undefined) continue;
-    if (initial.except?.has(tag) === true) continue;
-    findings.push({
-      tier: "static",
-      severity: "blocking",
-      elementId: selector,
-      property: declaration.property,
-      message: `${declaration.property}: ${declaration.value} on ${named(selector)} restates the initial value`,
-    });
-  }
-}
-
-/** Rule 2 on the page's rules. Judged only where it holds as it does for
- * an element's own style: a TOP-LEVEL rule under no at-rule. A rule inside
- * an `@media`, `@container` or `@supports`, or nested in another rule (the
- * shape a tree's conditional layers take in a page, decision #76), exists
- * to override something under a condition, and resetting to the initial
- * there is the override — as a conditional layer's was. A rule has no
- * concrete tag, so the `img`/`hr` overflow exception is APPROXIMATED from
- * the selector: excused when its rightmost compound (in any list member)
- * could reach one of them — no type selector at all, `*`, or `img`/`hr`
- * itself. */
-export function lintRestatedInitialsOnRules(
-  rules: readonly PageRule[],
-  viewportId: string,
-  findings: Finding[],
-): void {
-  for (const rule of rules) {
-    if (rule.conditions.length > 0 || rule.parents.length > 0) continue;
-    for (const declaration of rule.declarations) {
-      const initial = restatedInitial(declaration);
-      if (initial === undefined) continue;
-      if (
-        initial.except !== undefined &&
-        selectorCanReachReplacedOrRuled(rule.selector)
-      ) {
-        continue;
-      }
-      findings.push({
-        tier: "static",
-        severity: "blocking",
-        rule: rule.index,
-        property: declaration.property,
-        message: `${declaration.property}: ${declaration.value} in rule ${ruleName(rule)} of viewport ${viewportId} restates the initial value`,
-      });
-    }
-  }
-}
-
-/** Whether some member of the selector list could, by its rightmost
- * compound alone, match an `img` or `hr`. */
-function selectorCanReachReplacedOrRuled(selector: string): boolean {
-  return splitTopLevelCommas(selector).some((member) => {
-    const type = rightmostTypeSelector(member.trim());
-    return type === null || type === "*" || REPLACED_OR_RULED.has(type);
-  });
-}
-
-/** The rightmost compound's type selector, lower-cased — the tag a
- * `div.card` or `.a > img` names last — or null when the compound opens
- * with a class, id, attribute or pseudo instead (matches any tag). Split
- * at the last top-level combinator, outside parens, brackets and strings,
- * so `:is(a, b) c` still finds `c`. */
-function rightmostTypeSelector(complex: string): string | null {
-  let depth = 0;
-  let quote: string | null = null;
-  let cut = 0;
-  for (let i = 0; i < complex.length; i++) {
-    const ch = complex[i] as string;
-    if (quote !== null) {
-      if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'") quote = ch;
-    else if (ch === "(" || ch === "[") depth++;
-    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
-    else if (depth === 0 && (ch === " " || ch === ">" || ch === "+" || ch === "~")) {
-      cut = i + 1;
-    }
-  }
-  const compound = complex.slice(cut).trim();
-  if (compound === "" || /^[.#:[]/.test(compound)) return null;
-  const match = /^(\*|[a-z][\w-]*)/i.exec(compound);
-  return match === null ? null : (match[1] as string).toLowerCase();
-}
+// Rule 2 — an explicit initial value — is measured against the mounted
+// page, since whether the UA sheet sets the property on an element is the
+// browser's to say (initialValues.ts, matchLint.ts).
 
 // ---------------------------------------------------------------------------
 // Rule 3 — a @font-face nothing names.

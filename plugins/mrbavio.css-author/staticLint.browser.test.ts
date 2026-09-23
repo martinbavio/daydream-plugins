@@ -5,7 +5,8 @@
 // #76), and reads a `font` shorthand through the CSSOM. The rule-level
 // checks alone are proved under node too (staticLint.rules.test.ts); a
 // container query with no container moved to matchLint.browser.test.ts,
-// since a page's query lives in a rule whose elements only a match finds.
+// since a page's query lives in a rule whose elements only a match finds,
+// and so did an explicit initial value, which is measured.
 import { describe, expect, test } from "vitest";
 
 import type { DreamDocument, Finding } from "@daydream/plugin-api";
@@ -33,8 +34,8 @@ function page(body: string, css = "", html = ""): DreamDocument {
 }
 
 /** One element, `#box`, with the given own style. */
-function box(style: string, tag = "div"): DreamDocument {
-  return page(`<${tag} id="box" style="${style}"></${tag}>`);
+function box(style: string): DreamDocument {
+  return page(`<div id="box" style="${style}"></div>`);
 }
 
 describe("staticLint: unit-less lengths (rule 1)", () => {
@@ -157,152 +158,6 @@ describe("staticLint: unit-less lengths (rule 1)", () => {
   });
 });
 
-describe("staticLint: restated initial values (rule 2)", () => {
-  test("an initial value in an element's own style is a finding", () => {
-    expect(staticLint(box("position: static"))).toEqual([
-      {
-        tier: "static",
-        severity: "blocking",
-        elementId: "#box",
-        property: "position",
-        message: "position: static on `#box` restates the initial value",
-      },
-    ]);
-  });
-
-  test("representative initials across the table are findings", () => {
-    const findings = staticLint(
-      box(
-        "float: none; inset: auto; flex-shrink: 1; flex-basis: auto; opacity: 1; transform: none; max-width: none; min-height: auto; overflow: visible; box-shadow: none",
-      ),
-    );
-    expect(findings.map((f) => f.property)).toEqual([
-      "float",
-      "inset",
-      "flex-shrink",
-      "flex-basis",
-      "opacity",
-      "transform",
-      "max-width",
-      "min-height",
-      "overflow",
-      "box-shadow",
-    ]);
-    expect(findings.every((f) => f.tier === "static")).toBe(true);
-  });
-
-  test("a non-initial value is not a finding", () => {
-    expect(
-      staticLint(
-        box(
-          "position: relative; flex-shrink: 0; flex-grow: 1; opacity: 0.5; max-width: 60ch; min-width: 0; overflow: hidden; z-index: 1",
-        ),
-      ),
-    ).toEqual([]);
-  });
-
-  test("value comparison ignores case and surrounding whitespace", () => {
-    expect(staticLint(box("position:  Static ; float: NONE"))).toHaveLength(2);
-  });
-
-  test("a rule under a condition resetting to the initial value is a legitimate override", () => {
-    const doc = page(
-      '<div id="box" style="position: absolute"></div>',
-      "@media (width >= 600px) { #box { position: static; max-width: none } }",
-    );
-    expect(staticLint(doc)).toEqual([]);
-  });
-
-  test("properties the UA sheet sets on a tag are skipped for that tag", () => {
-    // Chrome's UA sheet gives img and hr an overflow, so restating the
-    // initial there is a real reset.
-    expect(staticLint(box("overflow: visible", "img"))).toEqual([]);
-    expect(staticLint(box("overflow: visible", "hr"))).toEqual([]);
-    // The same tags still get the properties the UA leaves alone.
-    expect(staticLint(box("position: static", "img"))).toHaveLength(1);
-  });
-
-  // Every pair below is a claim about Chromium's html.css (decision #57's
-  // audit): none of the table's properties is set on any of these tags,
-  // so each is held to the whole table. Each tag sits in the parent the
-  // HTML parser keeps it in.
-  const NEW_TAGS = [
-    ...["table", "caption", "colgroup", "col", "thead", "tbody", "tfoot"],
-    ...["tr", "td", "th", "dl", "dt", "dd"],
-    ...["address", "hgroup", "menu", "search"],
-    ...["s", "cite", "q", "dfn", "abbr", "time", "var", "samp", "kbd"],
-    ...["sub", "sup", "u", "mark", "bdi", "bdo", "wbr", "ins", "del"],
-    ...["ruby", "rt", "rp"],
-  ];
-  const TABLE = [
-    ["position", "static"],
-    ["float", "none"],
-    ["clear", "none"],
-    ["z-index", "auto"],
-    ["top", "auto"],
-    ["right", "auto"],
-    ["bottom", "auto"],
-    ["left", "auto"],
-    ["inset", "auto"],
-    ["flex-direction", "row"],
-    ["flex-wrap", "nowrap"],
-    ["flex-grow", "0"],
-    ["flex-shrink", "1"],
-    ["flex-basis", "auto"],
-    ["opacity", "1"],
-    ["transform", "none"],
-    ["max-width", "none"],
-    ["max-height", "none"],
-    ["min-width", "auto"],
-    ["min-height", "auto"],
-    ["overflow", "visible"],
-    ["box-shadow", "none"],
-  ] as const;
-
-  /** `tag` carrying `style`, inside the parent the parser keeps it in. */
-  function placed(tag: string, style: string): string {
-    const own = `<${tag} style="${style}">${tag === "wbr" || tag === "col" ? "" : `</${tag}>`}`;
-    if (["caption", "colgroup", "thead", "tbody", "tfoot"].includes(tag)) {
-      return `<table>${own}</table>`;
-    }
-    if (tag === "col") return `<table><colgroup>${own}</colgroup></table>`;
-    if (tag === "tr") return `<table><tbody>${own}</tbody></table>`;
-    if (tag === "td" || tag === "th") return `<table><tbody><tr>${own}</tr></tbody></table>`;
-    if (tag === "dt" || tag === "dd") return `<dl>${own}</dl>`;
-    if (tag === "rt" || tag === "rp") return `<ruby>a${own}</ruby>`;
-    return own;
-  }
-
-  test("the UA sheet leaves every table property alone on every new tag: restating one there is still redundant", () => {
-    for (const tag of NEW_TAGS) {
-      for (const [property, value] of TABLE) {
-        const findings = staticLint(page(placed(tag, `${property}: ${value}`)));
-        expect(
-          findings.map((f) => f.property),
-          `${tag} ${property}`,
-        ).toEqual([property]);
-      }
-    }
-  });
-
-  test("inherited properties are never in the table: a reset under an ancestor is real", () => {
-    const doc = page(
-      '<div style="letter-spacing: 0.1em; text-transform: uppercase; visibility: hidden"><div style="letter-spacing: normal; text-transform: none; visibility: visible"></div></div>',
-    );
-    expect(staticLint(doc)).toEqual([]);
-    // And without any ancestor either — the text cannot tell the two apart.
-    expect(staticLint(box("letter-spacing: normal"))).toEqual([]);
-  });
-
-  test("outline-offset is deliberately not in the table", () => {
-    expect(staticLint(box("outline-offset: 0"))).toEqual([]);
-  });
-
-  test("an !important initial in an element's own style is there to win, and is not judged", () => {
-    expect(staticLint(box("position: static !important"))).toEqual([]);
-  });
-});
-
 describe("staticLint: whole document", () => {
   test("a clean page has no findings, and an empty canvas is clean", () => {
     const clean = page(
@@ -315,14 +170,14 @@ describe("staticLint: whole document", () => {
 
   test("findings come in tree order, one element's together, then the rules'", () => {
     const doc = page(
-      '<div id="outer" style="position: static; gap: 8"><div id="inner" style="width: 100"></div></div>',
+      '<div id="outer" style="padding: 3; gap: 8"><div id="inner" style="width: 100"></div></div>',
       "#outer { top: 5; }",
     );
     expect(
       staticLint(doc).map((f) => [f.elementId ?? f.rule, f.property]),
     ).toEqual([
+      ["#outer", "padding"],
       ["#outer", "gap"],
-      ["#outer", "position"],
       ["#inner", "width"],
       [0, "top"],
     ]);
@@ -452,21 +307,8 @@ describe("staticLint: rule-level findings", () => {
     ]);
   });
 
-  test("a restated initial in a rule is a finding at the rule's index", () => {
-    expect(staticLint(page("", ".card { position: static; }"))).toEqual([
-      {
-        tier: "static",
-        severity: "blocking",
-        rule: 0,
-        property: "position",
-        message:
-          "position: static in rule `.card` of viewport v1 restates the initial value",
-      },
-    ]);
-  });
-
-  test("a rule typed to img is excused overflow: visible, the same exception an element gets", () => {
-    expect(staticLint(page("", "img.hero { overflow: visible; }"))).toEqual([]);
+  test("an explicit initial value is not the text lint's: whether the UA sheet overrides it is measured (matchLint.ts)", () => {
+    expect(staticLint(page('<div style="position: static"></div>', ".card { position: static; }"))).toEqual([]);
   });
 });
 

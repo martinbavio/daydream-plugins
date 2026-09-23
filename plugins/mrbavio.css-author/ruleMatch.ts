@@ -25,7 +25,7 @@
 // asked as `:root`. A selector the browser refuses matches nothing, as in
 // its cascade.
 
-import type { PageScope } from "./pageCss";
+import { replaceScopePseudo, type PageScope } from "./pageCss";
 
 /** Whether `node` matches `selector` — a rule's, or a variant of it (a
  * member, its pseudo-element stripped, its states stripped) — read under
@@ -101,11 +101,11 @@ function inScope(scope: ScopeRoot, found: readonly Element[]): Element[] {
   );
 }
 
-/** `:scope` outside any `@scope` is the document's root. */
+/** `:scope` outside any `@scope` is the document's root — the
+ * pseudo-class only, never the text in a string, an attribute selector
+ * or an escape (pageCss.ts replaceScopePseudo). */
 function unscoped(selector: string): string {
-  return /:scope(?![\w-])/i.test(selector)
-    ? selector.replace(/:scope(?![\w-])/gi, ":root")
-    : selector;
+  return replaceScopePseudo(selector, ":root");
 }
 
 function tryMatches(node: Element, selector: string): boolean {

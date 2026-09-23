@@ -4,17 +4,22 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  closesItsOwnBlocks,
   declarationMap,
   fontFaces,
+  hasScopePseudo,
   mediaPreludes,
   pageRules,
+  replaceScopePseudo,
   resolveNested,
   ruleName,
+  scanCss,
   scanDeclarations,
   selectorForMatching,
   selectorPreludes,
   trailingPseudoElement,
   withoutRanges,
+  type CssBlock,
 } from "./pageCss";
 
 const shape = (css: string) =>
@@ -216,6 +221,79 @@ nav a, .link:hover { color: inherit !important; }
   });
 });
 
+describe("closesItsOwnBlocks, the kernel's guard", () => {
+  // Its answer decides whether a folded <style> goes in as written
+  // (pageDom.ts withMedia), so it must be the kernel's to the letter
+  // (src/render/cssRanges.ts reachProblem).
+  test("a sheet that closes what it opens, brackets in comments, strings, urls and escapes not counted", () => {
+    for (const css of [
+      "",
+      "a { color: red }\n@media print { b { c: d } }",
+      'a::before { content: "}" } /* } */',
+      "a { background: url(x}y.png) }",
+      'a { background: url("}") }',
+      "a\\} { color: red }",
+      "a { width: calc((1px + 2px) * 3) } [data-x] {}",
+      'a { content: "multi\\\nline }" }',
+      "@url(x) {}",
+    ]) {
+      expect(closesItsOwnBlocks(css), css).toBe(true);
+    }
+  });
+
+  test("a stray closer, an unclosed block, comment, string or url, a string a newline ends, and a url in a name", () => {
+    for (const css of [
+      "a {} } b { color: red }",
+      "a { color: red",
+      "a {} /* never closed",
+      'a { content: "never closed',
+      'a { content: "a newline ends it\n} b {}',
+      "a { background: url(x.png }",
+      "a { width: calc(1px } b {}",
+      'a { background: url(a"}) } b {}\n)',
+      'a { background: \\75rl(a"}) } b {}\n)',
+      'a { color: #url(a"b) }',
+      "a { color: red ) }",
+    ]) {
+      expect(closesItsOwnBlocks(css), css).toBe(false);
+    }
+  });
+});
+
+describe("deeply nested css", () => {
+  // Adversarial text: a scan must never exhaust the stack, however deep
+  // the blocks nest.
+  const DEPTH = 50_000;
+
+  test("50,000 nested blocks scan as 50,000 blocks, each the parent of the next", () => {
+    const css = `${".a {".repeat(DEPTH)}color: red${"}".repeat(DEPTH)} .b { gap: 0 }`;
+    const blocks = scanCss(css);
+    expect(blocks.map((b) => b.prelude)).toEqual([".a", ".b"]);
+    let depth = 0;
+    let innermost = blocks[0]!;
+    for (let b: CssBlock | undefined = blocks[0]; b !== undefined; b = b.children[0]) {
+      depth++;
+      innermost = b;
+    }
+    expect(depth).toBe(DEPTH);
+    expect(innermost.declarations.map((d) => d.value)).toEqual(["red"]);
+    expect(blocks[0]!.range).toEqual([0, css.indexOf(" .b")]);
+  });
+
+  test("50,000 unclosed blocks, and 50,000 unclosed at-rules around a rule, are read without a stack overflow", () => {
+    expect(scanCss("{".repeat(DEPTH))).toHaveLength(1);
+    expect(scanDeclarations(`color: red; ${"{".repeat(DEPTH)}`)).toHaveLength(1);
+    const css = `${"@media all {".repeat(DEPTH)}.a { color: red }`;
+    expect(mediaPreludes(css)).toHaveLength(DEPTH);
+    expect(selectorPreludes(css)).toEqual([".a"]);
+    expect(fontFaces(css)).toEqual([]);
+    const rules = pageRules(css);
+    expect(rules.map((rule) => [rule.selector, rule.conditions.length])).toEqual([
+      [".a", DEPTH],
+    ]);
+  });
+});
+
 describe("helpers", () => {
   test("scanDeclarations reads a style attribute", () => {
     expect(
@@ -236,6 +314,32 @@ describe("helpers", () => {
     expect(resolveNested("& + &", "li")).toBe(":is(li) + :is(li)");
     expect(resolveNested("h2, > p", ".a, .b")).toBe(":is(.a, .b) h2, :is(.a, .b) > p");
     expect(resolveNested('[data-x="&"]', ".a")).toBe(':is(.a) [data-x="&"]');
+  });
+
+  test("replaceScopePseudo replaces the pseudo-class alone: never inside a string, an attribute selector or after an escape", () => {
+    expect(replaceScopePseudo(":scope > p, :SCOPE.a", ":root")).toBe(
+      ":root > p, :root.a",
+    );
+    for (const literal of [
+      '[data-value=":scope"]',
+      "[data-value=':scope']",
+      "[data-value=\\:scope]",
+      ".a\\:scope",
+      ":scoped",
+      ":scope-x",
+    ]) {
+      expect(replaceScopePseudo(literal, ":root"), literal).toBe(literal);
+      expect(hasScopePseudo(literal), literal).toBe(false);
+    }
+    expect(replaceScopePseudo('[title="]"]:scope', ":root")).toBe(
+      '[title="]"]:root',
+    );
+    // Inside an @scope, a member naming `:scope` only in an attribute is
+    // still the root's descendant.
+    expect(
+      pageRules('@scope (.card) { [data-value=":scope"] { color: red } }')[0]!
+        .selector,
+    ).toBe(':where(:scope) [data-value=":scope"]');
   });
 
   test("trailing pseudo-elements, both spellings, stripped for matching", () => {

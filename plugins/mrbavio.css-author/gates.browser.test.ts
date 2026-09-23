@@ -181,6 +181,30 @@ describe("css-author gates on at-rules and markers", () => {
     expect(document.querySelectorAll("iframe")).toHaveLength(0);
   });
 
+  test("a preference query and a height query are judged the same way by both gates: a rule under one is judged exactly where the mounted window's matchMedia holds it", async () => {
+    // `.none` matches nothing, so each rule the static gate judges is a
+    // dead rule and each the necessity gate judges a dead declaration.
+    const conditions = [
+      "(prefers-color-scheme: dark)",
+      "(prefers-color-scheme: light)",
+      "(max-height: 1000px)",
+      "(min-height: 2000px)",
+    ];
+    const doc = cardPage(
+      conditions
+        .map((condition) => `@media ${condition} { .none { color: red; } }`)
+        .join("\n"),
+    );
+    const judged = (findings: Finding[]) =>
+      findings.flatMap((f) => (f.rule === undefined ? [] : [f.rule]));
+    const statics = judged(await judge(STATIC_GATE, doc));
+    expect(judged(await judge(NECESSITY_GATE, doc))).toEqual(statics);
+    // One colour scheme holds, whichever the browser prefers; the height
+    // the 600px frame meets holds, and the one it does not never does.
+    expect(statics.filter((rule) => rule < 2)).toHaveLength(1);
+    expect(statics.filter((rule) => rule >= 2)).toEqual([2]);
+  });
+
   test("inside them each lint still judges what applies: a unit-less length, a scoped rule matching nothing, a dead declaration under a height the frame meets", async () => {
     const doc = cardPage(`<!-- .card { padding: 16px; } -->
 @scope (.card) { p { margin: 4; } :scope > .none { color: red; } }
@@ -197,5 +221,117 @@ describe("css-author gates on at-rules and markers", () => {
       [2, "color"],
       [5, "position"],
     ]);
+  });
+});
+
+// An explicit initial value (the static gate's rule 2) is measured, not
+// looked up: where Chromium's UA sheet (html.css) sets the property on an
+// element, restating the initial there is an override the page needs,
+// and removing it changes what the element computes. Format 7 admits any
+// element HTML has, so each pair below is a claim about that sheet,
+// checked against Chromium.
+describe("the static gate on an explicit initial value the UA sheet overrides", () => {
+  /** One 800 × 600 page holding `body`, no css. */
+  function bodyPage(body: string): DreamDocument {
+    const result = documentFrom({
+      version: 7,
+      items: [
+        {
+          id: "v1",
+          kind: "daydream.viewport",
+          frame: { width: 800, height: 600 },
+          payload: {
+            html: `<!doctype html><html><body>${body}</body></html>`,
+            css: "",
+          },
+        },
+      ],
+    });
+    if (!result.ok) throw new Error(result.error);
+    return result.doc;
+  }
+
+  // [the element, `%` its own style; a restated initial the UA overrides]
+  const NEEDED: [string, string][] = [
+    // dialog { position: absolute; inset-inline-start: 0; inset-inline-end: 0 }
+    ['<dialog open style="%">x</dialog>', "position: static"],
+    ['<dialog open style="%">x</dialog>', "left: auto"],
+    ['<dialog open style="%">x</dialog>', "right: auto"],
+    ['<dialog open style="%">x</dialog>', "inset: auto"],
+    ['<dialog style="%">x</dialog>', "position: static"],
+    // [popover] { position: fixed; inset: 0; overflow: auto }, open or not
+    ['<div popover style="%">x</div>', "position: static"],
+    ['<div popover style="%">x</div>', "inset: auto"],
+    ['<div popover style="%">x</div>', "top: auto"],
+    ['<div popover style="%">x</div>', "bottom: auto"],
+    ['<div popover style="%">x</div>', "overflow: visible"],
+    ['<dialog popover style="%">x</dialog>', "top: auto"],
+    // fieldset { min-inline-size: min-content }
+    ['<fieldset style="%"><legend>l</legend></fieldset>', "min-width: auto"],
+    // select's options have a minimum block and inline size
+    ['<select><option style="%">a</option></select>', "min-width: auto"],
+    ['<select><option style="%">a</option></select>', "min-height: auto"],
+    // a list box scrolls; replaced content and a rule clip
+    ['<select multiple style="%"><option>a</option></select>', "overflow: visible"],
+    ['<img style="%" alt="">', "overflow: visible"],
+    ['<video style="%"></video>', "overflow: visible"],
+    ['<video controls style="%"></video>', "overflow: visible"],
+    ['<canvas style="%"></canvas>', "overflow: visible"],
+    ['<svg style="%"></svg>', "overflow: visible"],
+    ['<hr style="%">', "overflow: visible"],
+  ];
+
+  // The rest the review of format 7 named, where Chromium sets none of the
+  // table: restating an initial there is still redundant.
+  const LEFT_ALONE = [
+    '<details open style="%"><summary>s</summary>b</details>',
+    '<details><summary style="%">s</summary>b</details>',
+    '<fieldset><legend style="%">l</legend></fieldset>',
+    '<meter style="%" value="0.5"></meter>',
+    '<progress style="%" value="0.5"></progress>',
+    '<select style="%"><option>a</option></select>',
+    '<input type="text" style="%">',
+    '<input type="checkbox" style="%">',
+    '<input type="range" style="%">',
+    '<input type="file" style="%">',
+    '<input type="date" style="%">',
+    '<textarea style="%"></textarea>',
+    '<button style="%">b</button>',
+    '<iframe style="%"></iframe>',
+    '<audio controls style="%"></audio>',
+    '<marquee style="%">x</marquee>',
+  ];
+
+  test("restating the initial where the UA sets another value is no finding", async () => {
+    const refused: string[] = [];
+    for (const [markup, style] of NEEDED) {
+      const body = markup.replace("%", style);
+      const findings = await judge(STATIC_GATE, bodyPage(body));
+      refused.push(...findings.map((f) => `${body}: ${f.message}`));
+    }
+    expect(refused).toEqual([]);
+  });
+
+  test("on the same elements, a property the UA leaves alone is still a finding", async () => {
+    for (const markup of new Set(NEEDED.map(([m]) => m))) {
+      const findings = await judge(
+        STATIC_GATE,
+        bodyPage(markup.replace("%", "float: none")),
+      );
+      expect(findings.map((f) => f.property), markup).toEqual(["float"]);
+    }
+  });
+
+  test("where the UA sets none of the table, a restated initial is still a finding", async () => {
+    for (const markup of LEFT_ALONE) {
+      const findings = await judge(
+        STATIC_GATE,
+        bodyPage(markup.replace("%", "position: static; overflow: visible")),
+      );
+      expect(findings.map((f) => f.property), markup).toEqual([
+        "position",
+        "overflow",
+      ]);
+    }
   });
 });

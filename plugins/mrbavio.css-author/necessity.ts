@@ -102,7 +102,6 @@
 
 import type {
   CoreApi,
-  DaydreamApi,
   DreamDocument,
   DreamPage,
   Finding,
@@ -119,7 +118,6 @@ import {
   selectorForMatching,
   splitTopLevelCommas,
   trailingPseudoElement,
-  withoutRanges,
   type CssDeclaration,
   type PageRule,
 } from "./pageCss";
@@ -129,12 +127,19 @@ import {
   parsePage,
   storedNames,
 } from "./pageDom";
+import {
+  conditionsHold,
+  readWithout,
+  withMount,
+  type MountHost,
+  type TextRange,
+} from "./pageMount";
 import { ruleMatcher } from "./ruleMatch";
 import { hasStatePseudo } from "./statePseudo";
 
 /** What the lint needs from the API object: the pure helpers and the
- * live mount. A gate hands in its `dd`; a test hands in a test kernel's. */
-export type NecessityHost = Pick<DaydreamApi, "core" | "mountViewport">;
+ * live mount (pageMount.ts). */
+export type NecessityHost = MountHost;
 
 export interface NecessityOptions {
   /** Restrict to these viewports (unknown id → error). Default: all. */
@@ -234,15 +239,14 @@ interface Candidate {
 /** A mounted page prepared for removals. */
 interface Prepared {
   doc: Document;
-  /** The page's `<style>` in the copy, or null when there is none. */
+  /** The page's `<style>` in the copy, or null when there is none. Its
+   * text once prepared is what every removal is cut from and every
+   * restore puts back (pageMount.ts readWithout). */
   style: HTMLStyleElement | null;
-  /** Its text once prepared: what every removal is cut from and every
-   * restore puts back. */
-  base: string;
   rules: PageRule[];
   nodes: Element[];
-  /** Each node's `style` attribute and its declarations. */
-  own: { text: string; declarations: CssDeclaration[] }[];
+  /** Each node's declarations, from its `style` attribute. */
+  own: { declarations: CssDeclaration[] }[];
 }
 
 /** The viewport at its frame, every declaration judged; then the sweep
@@ -306,45 +310,24 @@ async function lintViewport(
   };
 }
 
-/** Whether the conditions of the declaration at `where` hold in the
- * mounted copy (`conditionsHold`); an element's own always do. */
+/**
+ * Whether the conditions of the declaration at `where` hold in the
+ * mounted copy; an element's own always do. The mounted window's answer,
+ * the one the static gate's match lint reads too (pageMount.ts
+ * conditionsHold). A rule under one that holds neither at the frame nor
+ * at any swept width — `@media print`, a height or a preference the
+ * window never has, a feature this browser lacks — is not the page's at
+ * any width the lint can read, so it is not judged (the width sweep can
+ * acquit a rule for a width the frame is not at; it cannot make a window
+ * print). An `@container` is left to the removal itself: its query is a
+ * container's size, which the sweep varies, and a rule no swept width
+ * lets it match is dead. `@starting-style` is never judged
+ * (`isStartingStyle`).
+ */
 function appliesIn(prepared: Prepared, where: At): boolean {
   if (!("rule" in where)) return true;
   const rule = prepared.rules[where.rule];
   return rule === undefined || conditionsHold(prepared.doc, rule.conditions);
-}
-
-/**
- * Whether every condition a rule sits under holds in a mounted copy — the
- * browser's own answer in that window: an `@media` is asked of the
- * iframe's `matchMedia`, so its width, its height, its orientation and
- * its preferences are the copy's; an `@supports` of `CSS.supports`. A
- * rule under one that holds neither at the frame nor at any swept width
- * — `@media print`, a height or a preference the window never has, a
- * feature this browser lacks — is not the page's at any width the lint
- * can read, so it is not judged (the width sweep can acquit a rule for a
- * width the frame is not at; it cannot make a window print). An
- * `@container` is left to the removal itself, as before: its query is a
- * container's size, which the sweep varies, and a rule no swept width
- * lets it match is dead. `@layer` and `@scope` gate nothing by
- * themselves; `@starting-style` is never judged (`isStartingStyle`).
- */
-function conditionsHold(doc: Document, conditions: readonly string[]): boolean {
-  const view = doc.defaultView;
-  if (view === null) return true;
-  return conditions.every((condition) => {
-    const keyword = atKeyword(condition);
-    const text = condition.replace(/^@[\w-]+/, "").trim();
-    if (keyword === "media") return view.matchMedia(text).matches;
-    if (keyword === "supports") {
-      try {
-        return CSS.supports(text);
-      } catch {
-        return false;
-      }
-    }
-    return true;
-  });
 }
 
 /** Whether a rule sits under `@starting-style`: its declarations style an
@@ -356,26 +339,6 @@ function isStartingStyle(rule: Pick<PageRule, "conditions">): boolean {
   return rule.conditions.some(
     (condition) => atKeyword(condition) === "starting-style",
   );
-}
-
-/** Mount (motion pinned off), run, dispose — the one lifecycle every mount
- * of the lint follows, a thrown read included. `width` undefined is the
- * frame's own; a number is the same window at that width (rule 2). */
-async function withMount<T>(
-  dd: NecessityHost,
-  page: DreamPage,
-  width: number | undefined,
-  run: (mounted: MountedViewport) => Promise<T>,
-): Promise<T> {
-  const mounted = await dd.mountViewport(page, {
-    still: true,
-    ...(width === undefined ? {} : { width }),
-  });
-  try {
-    return await run(mounted);
-  } finally {
-    mounted.dispose();
-  }
 }
 
 /** Read the mounted copy once and move its top-level `@font-face` rules
@@ -409,13 +372,11 @@ async function prepare(mounted: MountedViewport): Promise<Prepared> {
   return {
     doc,
     style,
-    base,
     rules: pageRules(base),
     nodes,
-    own: nodes.map((node) => {
-      const text = node.getAttribute("style") ?? "";
-      return { text, declarations: scanDeclarations(text) };
-    }),
+    own: nodes.map((node) => ({
+      declarations: scanDeclarations(node.getAttribute("style") ?? ""),
+    })),
   };
 }
 
@@ -675,43 +636,28 @@ function refused(doc: Document, selector: string): boolean {
   }
 }
 
-/** Remove, read, restore: the declarations cut from the page's css and
- * from their elements' `style` in one write, one read, then everything put
- * back as it was. The read is a single sweep that stops at the first
- * element whose observation left the baseline. */
+/** Remove, read, restore (pageMount.ts readWithout): the declarations
+ * cut from the page's css and from their elements' `style` in one write,
+ * one read, then everything put back as it was. The read is a single
+ * sweep that stops at the first element whose observation left the
+ * baseline. */
 function isDead(prepared: Prepared, probe: Probe, removal: readonly At[]): boolean {
-  const cssRanges: [number, number][] = [];
-  const inline = new Map<number, [number, number][]>();
+  const cssRanges: TextRange[] = [];
+  const inline = new Map<Element, TextRange[]>();
   for (const where of removal) {
     if ("rule" in where) {
       const declaration = prepared.rules[where.rule]?.declarations[where.at];
       if (declaration !== undefined) cssRanges.push(declaration.range);
     } else {
       const declaration = prepared.own[where.node]?.declarations[where.at];
-      if (declaration === undefined) continue;
-      const ranges = inline.get(where.node) ?? [];
+      const node = prepared.nodes[where.node];
+      if (declaration === undefined || node === undefined) continue;
+      const ranges = inline.get(node) ?? [];
       ranges.push(declaration.range);
-      inline.set(where.node, ranges);
+      inline.set(node, ranges);
     }
   }
-  const { style, base } = prepared;
-  try {
-    if (style !== null && cssRanges.length > 0) {
-      style.textContent = withoutRanges(base, cssRanges);
-    }
-    for (const [node, ranges] of inline) {
-      prepared.nodes[node]!.setAttribute(
-        "style",
-        withoutRanges(prepared.own[node]!.text, ranges),
-      );
-    }
-    return unchanged(probe);
-  } finally {
-    if (style !== null && cssRanges.length > 0) style.textContent = base;
-    for (const node of inline.keys()) {
-      prepared.nodes[node]!.setAttribute("style", prepared.own[node]!.text);
-    }
-  }
+  return readWithout(prepared.style, cssRanges, inline, () => unchanged(probe));
 }
 
 /** Rule 3: dead only where dead everywhere the declaration exists. Order

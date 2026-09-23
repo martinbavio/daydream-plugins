@@ -122,46 +122,47 @@ const PROBE_PROPERTY = /^--dream-container-\d+$/;
 // The scanner.
 
 /** Every block of the text, nested. Malformed input never throws: an
- * unclosed block runs to the end, as it does in a browser. */
+ * unclosed block runs to the end, as it does in a browser, and a stray
+ * `}` at the top level closes nothing. */
 export function scanCss(css: string): CssBlock[] {
-  const out: CssBlock[] = [];
-  let i = 0;
-  while (i < css.length) {
-    const scanned = scanBody(css, i, css.length, true);
-    out.push(...scanned.blocks);
-    // A stray `}` at the top level closes nothing; step over it.
-    i = scanned.end + 1;
-  }
-  return out;
+  return scan(css, true).blocks;
 }
 
 /** The declarations of a declaration list with no blocks — a `style`
  * attribute's text. */
 export function scanDeclarations(text: string): CssDeclaration[] {
-  const declarations: CssDeclaration[] = [];
-  let i = 0;
-  while (i < text.length) {
-    const scanned = scanBody(text, i, text.length, false);
-    declarations.push(...scanned.declarations);
-    i = scanned.end + 1;
-  }
-  return declarations;
+  return scan(text, false).declarations;
 }
 
-/** Scan from `from` until the `}` that closes the body (its index is
- * `end`) or `to`. `topLevel` is the stylesheet's own list of rules, where
- * the legacy markers `<!--` and `-->` between rules are skipped, as the
- * CSS tokenizer's CDO and CDC tokens are; inside a block they are part of
- * the next rule's prelude, which they make invalid. */
-function scanBody(
+/** One body being scanned: the sheet's (or the declaration list's) own,
+ * or a block's, whose lists it fills. */
+interface Body {
+  blocks: CssBlock[];
+  declarations: CssDeclaration[];
+  /** The block this is the body of; null for the text's own. */
+  block: CssBlock | null;
+}
+
+/**
+ * The text's own body — its blocks and declarations — with every block's
+ * nested in it. One loop over the text with an explicit stack of the
+ * bodies open, so no nesting, however deep, can exhaust the call stack,
+ * and every turn of the loop moves past at least one character. A `{`
+ * opens a body, the `}` that closes it pops it, and one with none open
+ * closes nothing and is stepped over; a body still open at the end runs
+ * to it. `topLevel` is the stylesheet's own list of rules, where the
+ * legacy markers `<!--` and `-->` between rules are skipped, as the CSS
+ * tokenizer's CDO and CDC tokens are; inside a block they are part of the
+ * next rule's prelude, which they make invalid.
+ */
+function scan(
   css: string,
-  from: number,
-  to: number,
   topLevel: boolean,
-): { blocks: CssBlock[]; declarations: CssDeclaration[]; end: number } {
-  const blocks: CssBlock[] = [];
-  const declarations: CssDeclaration[] = [];
-  let i = from;
+): { blocks: CssBlock[]; declarations: CssDeclaration[] } {
+  const to = css.length;
+  const root: Body = { blocks: [], declarations: [], block: null };
+  const open: Body[] = [root];
+  let body = root;
   let start = -1;
   let depth = 0;
 
@@ -169,7 +170,7 @@ function scanBody(
     if (start === -1) return;
     const text = css.slice(start, end);
     if (text.trimStart().startsWith("@")) {
-      blocks.push({
+      body.blocks.push({
         prelude: withoutComments(text).trim(),
         range: [start, next],
         statement: true,
@@ -178,62 +179,63 @@ function scanBody(
       });
     } else {
       const declaration = parseDeclaration(css, start, end, next);
-      if (declaration !== null) declarations.push(declaration);
+      if (declaration !== null) body.declarations.push(declaration);
     }
     start = -1;
   };
 
+  let i = 0;
   while (i < to) {
     const ch = css[i]!;
+    // Where the next turn starts; every branch moves it past `i`.
+    let next = i + 1;
     if (ch === "/" && css[i + 1] === "*") {
-      i = commentEnd(css, i, to);
-      continue;
-    }
-    if (topLevel && start === -1) {
-      const marker = /^(?:<!--|-->)/.exec(css.slice(i, i + 4));
-      if (marker !== null) {
-        i += marker[0].length;
-        continue;
+      next = commentEnd(css, i, to);
+    } else if (
+      body === root &&
+      topLevel &&
+      start === -1 &&
+      /^(?:<!--|-->)/.test(css.slice(i, i + 4))
+    ) {
+      next = i + (ch === "<" ? 4 : 3);
+    } else {
+      if (start === -1 && !/\s/.test(ch)) start = i;
+      if (ch === '"' || ch === "'") {
+        next = stringEnd(css, i, to);
+      } else if (ch === "\\") {
+        next = i + 2;
+      } else if (ch === "(" || ch === "[") {
+        depth++;
+      } else if (ch === ")" || ch === "]") {
+        depth = Math.max(0, depth - 1);
+      } else if (depth === 0 && ch === ";") {
+        segment(i, i + 1);
+      } else if (depth === 0 && ch === "{") {
+        const blockStart = start === -1 ? i : start;
+        const block: CssBlock = {
+          prelude: withoutComments(css.slice(blockStart, i)).trim(),
+          range: [blockStart, to],
+          statement: false,
+          declarations: [],
+          children: [],
+        };
+        body.blocks.push(block);
+        body = { blocks: block.children, declarations: block.declarations, block };
+        open.push(body);
+        start = -1;
+      } else if (depth === 0 && ch === "}") {
+        segment(i, i);
+        if (body.block !== null) {
+          body.block.range[1] = i + 1;
+          open.pop();
+          body = open[open.length - 1]!;
+        }
       }
     }
-    if (start === -1 && !/\s/.test(ch)) start = i;
-    if (ch === '"' || ch === "'") {
-      i = stringEnd(css, i, to);
-      continue;
-    }
-    if (ch === "\\") {
-      i += 2;
-      continue;
-    }
-    if (ch === "(" || ch === "[") depth++;
-    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
-    else if (depth === 0 && ch === ";") {
-      segment(i, i + 1);
-      i++;
-      continue;
-    } else if (depth === 0 && ch === "{") {
-      const blockStart = start === -1 ? i : start;
-      const prelude = withoutComments(css.slice(blockStart, i)).trim();
-      const inner = scanBody(css, i + 1, to, false);
-      const close = inner.end;
-      blocks.push({
-        prelude,
-        range: [blockStart, Math.min(close + 1, to)],
-        statement: false,
-        declarations: inner.declarations,
-        children: inner.blocks,
-      });
-      start = -1;
-      i = close + 1;
-      continue;
-    } else if (depth === 0 && ch === "}") {
-      segment(i, i);
-      return { blocks, declarations, end: i };
-    }
-    i++;
+    i = Math.max(next, i + 1);
   }
   segment(to, to);
-  return { blocks, declarations, end: to };
+  return { blocks: root.blocks, declarations: root.declarations };
 }
 
 /** A declaration from `[start, end)` (`next` past its `;`), or null for
@@ -300,6 +302,16 @@ function stringEnd(css: string, from: number, to: number): number {
   return to;
 }
 
+// THE KERNEL'S GUARD, copied: whether a sheet closes its own blocks
+// decides how a `<style>` folds into the page's css (pageDom.ts
+// withMedia), and the lints must read the css the page renders, so the
+// answer must be the kernel's to the letter. A plugin may not import the
+// kernel's source, so each declaration below is the kernel's, and says so
+// on the line before it (a `mirrors:` line naming the kernel file and the
+// declaration), so the kernel test can compare it with the kernel the
+// plugins pin.
+
+// mirrors: src/render/cssRanges.ts CLOSER
 /** Each bracket that opens a block in CSS, and the one that closes it. */
 const CLOSER: Readonly<Record<string, string>> = {
   "{": "}",
@@ -307,29 +319,54 @@ const CLOSER: Readonly<Record<string, string>> = {
   "[": "]",
 };
 
+// mirrors: src/render/cssRanges.ts BRACKET
+/** Each closer's bracket, named for a sentence. */
+const BRACKET: Readonly<Record<string, string>> = {
+  "}": "brace",
+  ")": "parenthesis",
+  "]": "bracket",
+};
+
+// mirrors: src/render/cssRanges.ts reachProblem
 /**
- * Whether `css` can be put inside a block as written and the block's own
- * `}` after it still close that block — the kernel's own test, to the
- * letter (src/render/cssRanges.ts closesItsOwnBlocks), which decides how
- * its landing folds a `<style media>` (pageDom.ts withMedia): every `{`,
- * `(` and `[` it opens is closed by its own closer and it closes nothing
- * it did not open, and no comment, string or unquoted `url(…)` runs off
- * its end. Read as the CSS tokenizer reads it: a bracket in a comment, a
- * string, a url or an escape is not one, and a url is known by its name
- * with escapes decoded (`\75rl(` is `url(`). Where it is unsure it
- * answers no — a stray `)` the CSS parser would keep as a token is
- * refused here too.
+ * THE GUARD every write of css text goes through, and the landing's fold
+ * (decision #76): the problem with putting `text` inside a block — or at
+ * the end of a sheet — as written, in words an editor can show, or null
+ * when whatever comes after it is still read as it was. Every `{`, `(`
+ * and `[` it opens must be closed by its own closer and it may close
+ * nothing it did not open, and no comment, string or unquoted `url(…)`
+ * may run off its end: one unclosed bracket is enough for the browser to
+ * drop every rule after it, and the damage is on disk.
+ *
+ * Read as the CSS tokenizer reads it: a bracket in a comment, a string, a
+ * url or an escape is not one, and a url is known by its name with
+ * escapes decoded (`\75rl(` is `url(`). A string a newline ends before
+ * its quote is the tokenizer's bad string, and refused as never closed;
+ * an escaped newline continues it. Where it is unsure it refuses — a
+ * stray `)` the CSS parser would keep as a token is refused here too.
+ *
+ * `visit`, when given, is shown every character outside those tokens and
+ * may refuse one — a selector's `{` or `;` — by answering the problem.
  */
-export function closesItsOwnBlocks(text: string): boolean {
+export function reachProblem(
+  text: string,
+  visit?: (ch: string) => string | null,
+): string | null {
   // The tokenizer's preprocessing: every newline is one `\n`.
   const css = text.replace(/\r\n?|\f/g, "\n");
   const open: string[] = [];
   for (let i = 0; i < css.length; i++) {
     const ch = css[i]!;
-    const name = nameAt(css, i);
+    // `@name` and `#name` are one token each: a `url(` there is a name's.
+    const hashed = ch === "@" || ch === "#";
+    const name = nameAt(css, hashed ? i + 1 : i);
     if (name !== null) {
       i = name.end - 1;
-      if (name.value.toLowerCase() !== "url" || css[name.end] !== "(") {
+      if (
+        hashed ||
+        name.value.toLowerCase() !== "url" ||
+        css[name.end] !== "("
+      ) {
         continue;
       }
       let j = name.end + 1;
@@ -339,30 +376,49 @@ export function closesItsOwnBlocks(text: string): boolean {
       // An unquoted one is one token to its `)`, a bad one included: a
       // quote or a bracket inside it is the url's.
       while (j < css.length && css[j] !== ")") j += css[j] === "\\" ? 2 : 1;
-      if (j >= css.length) return false;
+      if (j >= css.length) return "a url( is never closed";
       i = j;
     } else if (ch === "/" && css[i + 1] === "*") {
       const end = css.indexOf("*/", i + 2);
-      if (end === -1) return false;
+      if (end === -1) return "a comment is never closed";
       i = end + 1;
     } else if (ch === '"' || ch === "'") {
-      // Ends at its quote, or at a newline (the tokenizer's bad string);
-      // an escaped newline continues it.
       let j = i + 1;
       while (j < css.length && css[j] !== ch && css[j] !== "\n") {
         j += css[j] === "\\" ? 2 : 1;
       }
-      if (j >= css.length) return false;
+      if (css[j] !== ch) return "a quote is never closed";
       i = j;
-    } else if (ch in CLOSER) {
-      open.push(CLOSER[ch]!);
-    } else if (ch === "}" || ch === ")" || ch === "]") {
-      if (open.pop() !== ch) return false;
+    } else {
+      const refused = visit?.(ch) ?? null;
+      if (refused !== null) return refused;
+      if (ch in CLOSER) {
+        open.push(CLOSER[ch]!);
+      } else if (ch in BRACKET) {
+        if (open.at(-1) === ch) open.pop();
+        // It closes one opened further out: the one inside, left open,
+        // is what went wrong.
+        else if (open.includes(ch)) return neverClosed(open.at(-1)!);
+        else return `a closing ${BRACKET[ch]} has no opening one`;
+      }
     }
   }
-  return open.length === 0;
+  return open.length === 0 ? null : neverClosed(open.at(-1)!);
 }
 
+// mirrors: src/render/cssRanges.ts neverClosed
+function neverClosed(closer: string): string {
+  return `an opening ${BRACKET[closer]} is never closed`;
+}
+
+// mirrors: src/render/cssRanges.ts closesItsOwnBlocks
+/** Whether `text` passes the guard (reachProblem): the landing's question
+ * of a sheet it folds under a `@media`. */
+export function closesItsOwnBlocks(text: string): boolean {
+  return reachProblem(text) === null;
+}
+
+// mirrors: src/render/cssRanges.ts nameAt
 /** The run of name characters starting at `i` — letters, digits, `_`,
  * `-`, anything non-ASCII, and escapes, decoded — or null when none
  * starts there. What the tokenizer reads as one name (a number's unit
@@ -405,79 +461,154 @@ export function atKeyword(prelude: string): string | null {
   return match === null ? null : (match[1] as string).toLowerCase();
 }
 
-/** Every style rule of the text, in source order (see PageRule). */
+/** Every style rule of the text, in source order (see PageRule). The
+ * blocks are walked with an explicit stack, as they were scanned, so no
+ * nesting exhausts the call stack; a rule's lists of parents, conditions
+ * and scopes are built only for a rule the walk keeps (`Chain`). */
 export function pageRules(css: string): PageRule[] {
   const rules: PageRule[] = [];
-  const visit = (
-    blocks: readonly CssBlock[],
-    conditions: string[],
-    parents: string[],
-    parentSelector: string | null,
-    scopes: PageScope[],
-  ): void => {
-    blocks.forEach((block, at) => {
-      if (block.statement) return;
-      if (isProbeCopy(blocks, at)) return;
-      const keyword = atKeyword(block.prelude);
-      if (keyword === null) {
-        const selector =
-          parentSelector !== null
-            ? resolveNested(block.prelude, parentSelector)
-            : scopes.length > 0
-              ? relativeToScope(block.prelude)
-              : block.prelude;
-        rules.push({
-          index: rules.length,
-          prelude: block.prelude,
-          parents,
-          conditions,
-          selector,
-          scopes,
-          declarations: ownDeclarations(block),
-        });
-        visit(
-          block.children,
-          conditions,
-          [...parents, block.prelude],
-          selector,
-          scopes,
-        );
-        return;
-      }
-      if (!GROUP_RULES.has(keyword)) return;
-      const inner = [...conditions, block.prelude];
-      // An `@scope` starts afresh: the rules in it are relative to its
-      // root, not nested in the style rule around it (whose selector its
-      // roots' resolve against instead).
-      const scoped = keyword === "scope";
-      const innerScopes = scoped
-        ? [...scopes, scopeOf(block.prelude, parentSelector, scopes.length > 0)]
-        : scopes;
-      const innerParent = scoped ? null : parentSelector;
-      // The block's own declarations style the style rule's subject — or,
-      // an `@scope`'s own, the scope's root, named `:scope` (Chromium
-      // applies none written in another at-rule directly inside one).
-      const own = ownDeclarations(block);
-      if (own.length > 0 && (innerParent !== null || scoped)) {
-        rules.push({
-          index: rules.length,
-          ...(innerParent !== null
-            ? {
-                prelude: parents[parents.length - 1] as string,
-                parents: parents.slice(0, -1),
-                selector: innerParent,
-              }
-            : { prelude: ":scope", parents, selector: SCOPE_ROOT }),
-          conditions: inner,
-          scopes: innerScopes,
-          declarations: own,
-        });
-      }
-      visit(block.children, inner, parents, innerParent, innerScopes);
+  /** A list of sibling blocks being walked, and what they sit inside. */
+  interface Level {
+    blocks: readonly CssBlock[];
+    at: number;
+    conditions: Chain<string>;
+    parents: Chain<string>;
+    parentSelector: string | null;
+    scopes: Chain<PageScope>;
+  }
+  const levels: Level[] = [
+    {
+      blocks: scanCss(css),
+      at: 0,
+      conditions: null,
+      parents: null,
+      parentSelector: null,
+      scopes: null,
+    },
+  ];
+  while (levels.length > 0) {
+    const level = levels[levels.length - 1]!;
+    if (level.at >= level.blocks.length) {
+      levels.pop();
+      continue;
+    }
+    const at = level.at++;
+    const block = level.blocks[at]!;
+    const { conditions, parents, parentSelector, scopes } = level;
+    if (block.statement) continue;
+    if (isProbeCopy(level.blocks, at)) continue;
+    const keyword = atKeyword(block.prelude);
+    if (keyword === null) {
+      const selector =
+        parentSelector !== null
+          ? resolveNested(block.prelude, parentSelector)
+          : scopes !== null
+            ? relativeToScope(block.prelude)
+            : block.prelude;
+      rules.push({
+        index: rules.length,
+        prelude: block.prelude,
+        parents: listOf(parents),
+        conditions: listOf(conditions),
+        selector,
+        scopes: listOf(scopes),
+        declarations: ownDeclarations(block),
+      });
+      levels.push({
+        blocks: block.children,
+        at: 0,
+        conditions,
+        parents: link(parents, block.prelude),
+        parentSelector: selector,
+        scopes,
+      });
+      continue;
+    }
+    if (!GROUP_RULES.has(keyword)) continue;
+    const inner = link(conditions, block.prelude);
+    // An `@scope` starts afresh: the rules in it are relative to its
+    // root, not nested in the style rule around it (whose selector its
+    // roots' resolve against instead).
+    const scoped = keyword === "scope";
+    const innerScopes = scoped
+      ? link(scopes, scopeOf(block.prelude, parentSelector, scopes !== null))
+      : scopes;
+    const innerParent = scoped ? null : parentSelector;
+    // The block's own declarations style the style rule's subject — or,
+    // an `@scope`'s own, the scope's root, named `:scope` (Chromium
+    // applies none written in another at-rule directly inside one).
+    const own = ownDeclarations(block);
+    if (own.length > 0 && (innerParent !== null || scoped)) {
+      rules.push({
+        index: rules.length,
+        // A parent selector is a style rule's, so `parents` holds it.
+        ...(innerParent !== null
+          ? {
+              prelude: parents!.value,
+              parents: listOf(parents!.up),
+              selector: innerParent,
+            }
+          : { prelude: ":scope", parents: listOf(parents), selector: SCOPE_ROOT }),
+        conditions: listOf(inner),
+        scopes: listOf(innerScopes),
+        declarations: own,
+      });
+    }
+    levels.push({
+      blocks: block.children,
+      at: 0,
+      conditions: inner,
+      parents,
+      parentSelector: innerParent,
+      scopes: innerScopes,
     });
-  };
-  visit(scanCss(css), [], [], null, []);
+  }
   return rules;
+}
+
+/** A list grown one item per level of nesting, shared by everything
+ * below that level: growing it costs the same at any depth, and its items
+ * are written out (`listOf`) only for a rule that needs them — so text
+ * nested deep but holding few rules is read in time linear in its
+ * length. Null is the empty list. */
+type Chain<T> = { value: T; up: Chain<T>; list?: T[] } | null;
+
+function link<T>(up: Chain<T>, value: T): Chain<T> {
+  return { value, up };
+}
+
+/** The chain's items, outermost first, written out once per link. */
+function listOf<T>(chain: Chain<T>): T[] {
+  if (chain === null) return [];
+  if (chain.list === undefined) {
+    const out: T[] = [];
+    for (let c: Chain<T> = chain; c !== null; c = c.up) out.push(c.value);
+    chain.list = out.reverse();
+  }
+  return chain.list;
+}
+
+/** Each of `blocks` and every block nested in it, in source order — a
+ * block before those inside it — walked with an explicit stack; `enter`
+ * answers whether to look inside the block. */
+function walkBlocks(
+  blocks: readonly CssBlock[],
+  enter: (block: CssBlock) => boolean,
+): void {
+  const levels: { blocks: readonly CssBlock[]; at: number }[] = [
+    { blocks, at: 0 },
+  ];
+  while (levels.length > 0) {
+    const level = levels[levels.length - 1]!;
+    const block = level.blocks[level.at++];
+    if (block === undefined) {
+      levels.pop();
+      continue;
+    }
+    if (enter(block) && block.children.length > 0) {
+      levels.push({ blocks: block.children, at: 0 });
+    }
+  }
 }
 
 /** What `&`, and the implicit start of a member naming no root, is
@@ -496,7 +627,7 @@ function relativeToScope(selector: string): string {
       const trimmed = member.trim();
       if (/^[>+~]/.test(trimmed)) return `${SCOPE_ROOT} ${trimmed}`;
       const rooted = replaceNestingSelector(trimmed, SCOPE_ROOT);
-      return /:scope(?![\w-])/i.test(unquoted(rooted))
+      return hasScopePseudo(rooted)
         ? rooted
         : `${SCOPE_ROOT} ${trimmed}`;
     })
@@ -572,21 +703,27 @@ function closingParen(text: string): number {
   return -1;
 }
 
-/** The selector with each string's contents blanked, so a pattern read
- * over it never matches inside one. */
-function unquoted(selector: string): string {
+/** Whether the selector names the `:scope` pseudo-class
+ * (`replaceScopePseudo`). */
+export function hasScopePseudo(selector: string): boolean {
+  return replaceScopePseudo(selector, "\u0000").includes("\u0000");
+}
+
+/** The selector with each `:scope` pseudo-class replaced by `by` — a real
+ * one only, as the selector parser reads it: never text inside a string
+ * or an attribute selector's brackets (`[data-value=":scope"]`), and
+ * never after an escape (`.a\:scope` is a class). Checked against
+ * Chromium. */
+export function replaceScopePseudo(selector: string, by: string): string {
   let out = "";
   let quote: string | null = null;
+  let bracket = false;
   for (let i = 0; i < selector.length; i++) {
     const ch = selector[i] as string;
     if (quote !== null) {
-      if (ch === "\\") {
-        out += "  ";
-        i++;
-      } else if (ch === quote) {
-        quote = null;
-        out += ch;
-      } else out += " ";
+      out += ch;
+      if (ch === "\\") out += selector[++i] ?? "";
+      else if (ch === quote) quote = null;
       continue;
     }
     if (ch === "\\") {
@@ -594,41 +731,47 @@ function unquoted(selector: string): string {
       continue;
     }
     if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === "[") bracket = true;
+    else if (ch === "]") bracket = false;
+    else if (!bracket && ch === ":" && SCOPE_PSEUDO.test(selector.slice(i, i + 7))) {
+      out += by;
+      i += ":scope".length - 1;
+      continue;
+    }
     out += ch;
   }
   return out;
 }
 
+/** `:scope` at the start of the text, and not the start of a longer
+ * name. */
+const SCOPE_PSEUDO = /^:scope(?![\w\\-]|[^\x00-\x7f])/i;
+
 /** Every `@font-face` block of the text, wherever a group rule holds it,
  * with its declarations. */
 export function fontFaces(css: string): CssBlock[] {
   const out: CssBlock[] = [];
-  const visit = (blocks: readonly CssBlock[]): void => {
-    for (const block of blocks) {
-      if (block.statement) continue;
-      const keyword = atKeyword(block.prelude);
-      if (keyword === "font-face") out.push(block);
-      else if (keyword === null || GROUP_RULES.has(keyword)) {
-        visit(block.children);
-      }
+  walkBlocks(scanCss(css), (block) => {
+    if (block.statement) return false;
+    const keyword = atKeyword(block.prelude);
+    if (keyword === "font-face") {
+      out.push(block);
+      return false;
     }
-  };
-  visit(scanCss(css));
+    return keyword === null || GROUP_RULES.has(keyword);
+  });
   return out;
 }
 
 /** Every `@media` prelude of the text, nested ones included, as written. */
 export function mediaPreludes(css: string): string[] {
   const out: string[] = [];
-  const visit = (blocks: readonly CssBlock[]): void => {
-    for (const block of blocks) {
-      if (block.statement) continue;
-      const keyword = atKeyword(block.prelude);
-      if (keyword === "media") out.push(block.prelude);
-      if (keyword === null || GROUP_RULES.has(keyword)) visit(block.children);
-    }
-  };
-  visit(scanCss(css));
+  walkBlocks(scanCss(css), (block) => {
+    if (block.statement) return false;
+    const keyword = atKeyword(block.prelude);
+    if (keyword === "media") out.push(block.prelude);
+    return keyword === null || GROUP_RULES.has(keyword);
+  });
   return out;
 }
 
@@ -637,15 +780,12 @@ export function mediaPreludes(css: string): string[] {
  * the unreferenced-class rule reads for names (staticLint.ts). */
 export function selectorPreludes(css: string): string[] {
   const out: string[] = [];
-  const visit = (blocks: readonly CssBlock[]): void => {
-    for (const block of blocks) {
-      if (block.statement) continue;
-      const keyword = atKeyword(block.prelude);
-      if (keyword === null || keyword === "scope") out.push(block.prelude);
-      if (keyword === null || GROUP_RULES.has(keyword)) visit(block.children);
-    }
-  };
-  visit(scanCss(css));
+  walkBlocks(scanCss(css), (block) => {
+    if (block.statement) return false;
+    const keyword = atKeyword(block.prelude);
+    if (keyword === null || keyword === "scope") out.push(block.prelude);
+    return keyword === null || GROUP_RULES.has(keyword);
+  });
   return out;
 }
 
@@ -659,18 +799,21 @@ function ownDeclarations(block: CssBlock): CssDeclaration[] {
 function isProbeCopy(blocks: readonly CssBlock[], at: number): boolean {
   const block = blocks[at] as CssBlock;
   if (block.prelude.toLowerCase() !== "@media all") return false;
-  const next = blocks.slice(at + 1).find((b) => !b.statement);
-  if (next === undefined || atKeyword(next.prelude) !== "container") {
+  let next = at + 1;
+  while (next < blocks.length && blocks[next]!.statement) next++;
+  if (next >= blocks.length || atKeyword(blocks[next]!.prelude) !== "container") {
     return false;
   }
   let probes = 0;
-  const onlyProbes = (b: CssBlock): boolean =>
-    b.declarations.every((d) => {
-      if (!PROBE_PROPERTY.test(d.property)) return false;
-      probes++;
-      return true;
-    }) && b.children.every(onlyProbes);
-  return onlyProbes(block) && probes > 0;
+  let onlyProbes = true;
+  walkBlocks([block], (b) => {
+    for (const d of b.declarations) {
+      if (!PROBE_PROPERTY.test(d.property)) onlyProbes = false;
+      else probes++;
+    }
+    return onlyProbes;
+  });
+  return onlyProbes && probes > 0;
 }
 
 /** A nested rule's selector resolved against its parent's, the way the

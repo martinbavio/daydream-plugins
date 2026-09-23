@@ -228,6 +228,21 @@ describe("matchLint", () => {
     ]);
   });
 
+  test("outside @scope only a real `:scope` pseudo-class is the root: the text `:scope` in a string, an attribute or an escape is not one", async () => {
+    expect(
+      await matchLint(
+        page(
+          `[data-value=":scope"] { color: red; }
+[data-value=\\:scope] { padding: 1px; }
+.a\\:scope { margin: 1px; }
+[title=':scope x'] > p { color: blue; }
+:scope > body { margin: 0; }`,
+          '<div data-value=":scope" class="a:scope" title=":scope x"><p>x</p></div>',
+        ),
+      ),
+    ).toEqual([]);
+  });
+
   test("a rule under an @media condition inactive at the frame is never called dead on that evidence alone", async () => {
     expect(
       await matchLint(page("@media (min-width: 2000px) { .card { color: red; } }")),
@@ -340,6 +355,172 @@ describe("matchLint", () => {
 // static lint's rule 1, asked of an element's `@container` layer; on a
 // page every query is in a rule, and which elements it reaches — and so
 // whose ancestors to ask — is a match.
+// An explicit initial value (the static gate's rule 2, initialValues.ts):
+// a candidate is a finding only once cutting it leaves the page computing
+// what it did. The UA-sheet overrides are pinned at the gate
+// (gates.browser.test.ts).
+describe("matchLint: an explicit initial value", () => {
+  /** One element, `#box`, with the given own style, and the css. */
+  const box = (style: string, css = "", tag = "div"): DreamDocument =>
+    page(css, `<${tag} id="box" style="${style}"></${tag}>`);
+
+  test("an initial value in an element's own style is a finding, and pays for a mount with no css", async () => {
+    expect(await matchLint(box("position: static"))).toEqual([
+      {
+        tier: "static",
+        severity: "blocking",
+        elementId: "#box",
+        property: "position",
+        message: "position: static on `#box` restates the initial value",
+      },
+    ]);
+  });
+
+  test("representative initials across the table are findings, in the element's order", async () => {
+    const findings = await matchLint(
+      box(
+        "float: none; inset: auto; flex-shrink: 1; flex-basis: auto; opacity: 1; transform: none; max-width: none; min-height: auto; overflow: visible; box-shadow: none",
+      ),
+    );
+    expect(findings.map((f) => f.property)).toEqual([
+      "float",
+      "inset",
+      "flex-shrink",
+      "flex-basis",
+      "opacity",
+      "transform",
+      "max-width",
+      "min-height",
+      "overflow",
+      "box-shadow",
+    ]);
+  });
+
+  test("an initial that overrides a rule's value is the override, not a restatement", async () => {
+    expect(
+      await matchLint(
+        box("position: static", "#box { position: absolute; }"),
+      ),
+    ).toEqual([]);
+  });
+
+  test("an initial a rule at another width or in another state could override is not judged at the frame", async () => {
+    for (const css of [
+      "@media (width >= 2000px) { #box { position: absolute; } }",
+      "#box:hover { position: absolute; }",
+    ]) {
+      expect(await matchLint(box("position: static", css)), css).toEqual([]);
+    }
+  });
+
+  test("a rule under a condition resetting to the initial is a legitimate override", async () => {
+    expect(
+      await matchLint(
+        box(
+          "position: absolute",
+          "@media (width >= 600px) { #box { position: static; max-width: none } }",
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a restated initial in a rule is a finding at the rule's index", async () => {
+    expect(await matchLint(page(".card { position: static; }"))).toEqual([
+      {
+        tier: "static",
+        severity: "blocking",
+        rule: 0,
+        property: "position",
+        message:
+          "position: static in rule `.card` of viewport v1 restates the initial value",
+      },
+    ]);
+  });
+
+  test("a rule's initial that an element it reaches needs is no finding; on elements that do not need it, it is", async () => {
+    // Chromium clips an img's overflow; a div's is visible anyway.
+    expect(
+      await matchLint(
+        page(".thumb { overflow: visible; }", '<img class="thumb" alt=""><div class="thumb"></div>'),
+      ),
+    ).toEqual([]);
+    expect(
+      await messages(
+        page(".thumb { overflow: visible; }", '<div class="thumb"></div>'),
+      ),
+    ).toEqual([
+      "overflow: visible in rule `.thumb` of viewport v1 restates the initial value",
+    ]);
+  });
+
+  // Decision #57's audit, now measured: Chromium's html.css sets none of
+  // the table's properties on these tags, so a restated initial on any of
+  // them changes nothing. Each tag sits in the parent the HTML parser
+  // keeps it in.
+  const NEW_TAGS = [
+    ...["table", "caption", "colgroup", "col", "thead", "tbody", "tfoot"],
+    ...["tr", "td", "th", "dl", "dt", "dd"],
+    ...["address", "hgroup", "menu", "search"],
+    ...["s", "cite", "q", "dfn", "abbr", "time", "var", "samp", "kbd"],
+    ...["sub", "sup", "u", "mark", "bdi", "bdo", "wbr", "ins", "del"],
+    ...["ruby", "rt", "rp"],
+  ];
+  const TABLE = [
+    ["position", "static"],
+    ["float", "none"],
+    ["clear", "none"],
+    ["z-index", "auto"],
+    ["top", "auto"],
+    ["right", "auto"],
+    ["bottom", "auto"],
+    ["left", "auto"],
+    ["inset", "auto"],
+    ["flex-direction", "row"],
+    ["flex-wrap", "nowrap"],
+    ["flex-grow", "0"],
+    ["flex-shrink", "1"],
+    ["flex-basis", "auto"],
+    ["opacity", "1"],
+    ["transform", "none"],
+    ["max-width", "none"],
+    ["max-height", "none"],
+    ["min-width", "auto"],
+    ["min-height", "auto"],
+    ["overflow", "visible"],
+    ["box-shadow", "none"],
+  ] as const;
+
+  /** `tag` as `#t-<tag>` carrying `style`, inside the parent the parser
+   * keeps it in. */
+  function placed(tag: string, style: string): string {
+    const own = `<${tag} id="t-${tag}" style="${style}">${tag === "wbr" || tag === "col" ? "" : `</${tag}>`}`;
+    if (["caption", "colgroup", "thead", "tbody", "tfoot"].includes(tag)) {
+      return `<table>${own}</table>`;
+    }
+    if (tag === "col") return `<table><colgroup>${own}</colgroup></table>`;
+    if (tag === "tr") return `<table><tbody>${own}</tbody></table>`;
+    if (tag === "td" || tag === "th") return `<table><tbody><tr>${own}</tr></tbody></table>`;
+    if (tag === "dt" || tag === "dd") return `<dl>${own}</dl>`;
+    if (tag === "rt" || tag === "rp") return `<ruby>a${own}</ruby>`;
+    return own;
+  }
+
+  test("the UA sheet leaves every table property alone on every new tag: restating one there is measured redundant", async () => {
+    const style = TABLE.map(([property, value]) => `${property}: ${value}`).join("; ");
+    const findings = await matchLint(
+      page("", NEW_TAGS.map((tag) => placed(tag, style)).join("")),
+    );
+    for (const tag of NEW_TAGS) {
+      expect(
+        findings
+          .filter((f) => f.elementId === `#t-${tag}`)
+          .map((f) => f.property),
+        tag,
+      ).toEqual(TABLE.map(([property]) => property));
+    }
+  });
+});
+
 describe("matchLint: a container query with no container", () => {
   const QUERY = "@container (width > 400px)";
   const NAMED = "@container card (width > 400px)";

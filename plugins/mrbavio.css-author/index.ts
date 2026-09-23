@@ -7,9 +7,10 @@
 // (pageCss.ts), every match and every computed value the browser's.
 // The browser part registers the two lints as gates on every landing path
 // — the static lint (staticLint.ts's facts from the texts, plus
-// matchLint.ts's match-dependent ones: redundancy — an element's own
-// style against a rule, and a rule's against the rule beneath it — dead
-// rules, and a container query no ancestor can answer — judged by
+// matchLint.ts's match-dependent ones: an explicit initial value the page
+// computes without, redundancy — an element's own style against a rule,
+// and a rule's against the rule beneath it — dead rules, and a container
+// query no ancestor can answer — judged by
 // MOUNTING the incoming page, never by reading canvas match facts, since
 // a gate's document is not on the canvas; see matchLint.ts's header) and
 // the necessity lint (necessity.ts, each declaration — an element's own or
@@ -40,8 +41,9 @@ export default function activate(dd: DaydreamApi): void {
   dd.registerGate({
     id: STATIC_GATE,
     title: "Static lint",
-    // matchLint mounts the document (necessity.ts's own live-strategy
-    // seam), so the static gate's run is async here too.
+    // matchLint mounts the document (the live-strategy seam it shares
+    // with necessity.ts, pageMount.ts), so the static gate's run is async
+    // here too.
     run: async (doc) => [
       ...staticLint(dd.core, doc as DreamDocument),
       ...(await matchLint(dd, doc as DreamDocument)),

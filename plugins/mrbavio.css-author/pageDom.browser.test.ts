@@ -7,6 +7,7 @@ import { afterAll, describe, expect, test } from "vitest";
 
 import { createPageItem, createTestKernel } from "@daydream/plugin-testing";
 
+import { pageRules } from "./pageCss";
 import { parsePage, storedNames } from "./pageDom";
 
 const kernel = createTestKernel();
@@ -118,6 +119,32 @@ describe("parsePage", () => {
       expect(parsePage(page).css).toBe(
         (await kernel.dd.cleanPage(page)).css,
       );
+    }
+  });
+
+  test("a <style> with no media whose sheet does not close its own blocks folds as the browser reads it too, and swallows no block after it", async () => {
+    // Each sheet is parsed on its own on the page, so `.b` applies there;
+    // folded raw, the open block, comment or string would run over it.
+    for (const sheet of [
+      ".a { color: red",
+      ".a { color: red } /* open",
+      '.a { content: "open }',
+      ".a { color: red } } .z { color: blue }",
+      // A newline ends a string before its quote: the kernel's guard
+      // refuses it as never closed.
+      '.a { content: "open\n} .z { color: blue }',
+      '.a { color: #url(a"b) }',
+    ]) {
+      const page = {
+        html: `<!doctype html><html><head><style>${sheet}</style><style>.b { color: green }</style></head><body></body></html>`,
+        css: ".page { margin: 0 }",
+      };
+      const { css } = parsePage(page);
+      expect(css, sheet).toBe((await kernel.dd.cleanPage(page)).css);
+      expect(
+        pageRules(css).map((rule) => rule.selector),
+        sheet,
+      ).toContain(".b");
     }
   });
 });
