@@ -42,4 +42,23 @@ describe("the export's urls stand alone", () => {
       absoluteCssUrls('a { b: image-set("x).png" type("image/avif"), "//cdn.test/c.png" 2x, "/d.png" 3x); content: "/e"; }', O),
     ).toBe(`a { b: image-set("x).png" type("image/avif"), "//cdn.test/c.png" 2x, "${O}/d.png" 3x); content: "/e"; }`);
   });
+
+  test("only a real url token or an image-set() string is rewritten: text in an ordinary string or a comment is the page's own", () => {
+    // Generated text the page shows, and a family name, stay as written.
+    const text = `a::before { content: "url(/logo.svg)"; font-family: 'url(/x) Sans', "image-set(\\"/y.png\\" 1x)"; }`;
+    expect(absoluteCssUrls(text, O)).toBe(text);
+    expect(absoluteCssUrls('a { content: "a\\"url(/x)"; }', O)).toBe('a { content: "a\\"url(/x)"; }');
+    expect(absoluteCssUrls("/* background: url(/old.png); */ a { b: 1 }", O)).toBe("/* background: url(/old.png); */ a { b: 1 }");
+    // The same text beside a real url: that one is.
+    expect(absoluteCssUrls('a::before { content: "url(/logo.svg)"; background: url( "/logo.svg" ); }', O)).toBe(
+      `a::before { content: "url(/logo.svg)"; background: url( "${O}/logo.svg" ); }`,
+    );
+    // A url is a url whatever its case; a function whose name ends in
+    // "url" is not one.
+    expect(absoluteCssUrls("a { b: URL(/a.png); c: myurl(/b.png); }", O)).toBe(`a { b: URL(${O}/a.png); c: myurl(/b.png); }`);
+    // The origin goes where the url starts, past any leading space.
+    expect(absoluteCssUrls('a { b: url(" /a.png"); }', O)).toBe(`a { b: url(" ${O}/a.png"); }`);
+    // A url() inside another function (a var() fallback) is still one.
+    expect(absoluteCssUrls("a { b: var(--x, url(/a.png)); }", O)).toBe(`a { b: var(--x, url(${O}/a.png)); }`);
+  });
 });

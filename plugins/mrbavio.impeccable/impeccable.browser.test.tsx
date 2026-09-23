@@ -716,6 +716,8 @@ describe("mrbavio.impeccable in the shell", () => {
       '<div class="footer"><img src="assets/logo.png" srcset="assets/logo.png 1x, https://cdn.test/w_200,h_100/logo.png 2x" alt=""></div>',
     );
     source.payload.css += ".aside { background-image: url(assets/bg.png); }\n";
+    // Text the page shows, which spells a url: not one.
+    source.payload.css += '.aside::before { content: "url(/logo.svg)"; }\n';
     const { host } = fakeHost();
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
     const reply = (await tool(HTML_TOOL).run({ viewport: source.id })) as { viewportId: string; html: string; bytes: number };
@@ -727,6 +729,7 @@ describe("mrbavio.impeccable in the shell", () => {
     const origin = window.location.origin;
     expect(reply.html).toMatch(new RegExp(`src="${origin}/[^"]*logo\\.png"`));
     expect(reply.html).toMatch(new RegExp(`url\\(["']?${origin}/[^)]*bg\\.png`));
+    expect(reply.html).toContain('content: "url(/logo.svg)"');
     // Each srcset candidate; a url holding a comma is one url, kept whole.
     const srcset = new DOMParser().parseFromString(reply.html, "text/html").querySelector("img")!.getAttribute("srcset")!;
     expect(srcset).toMatch(new RegExp(`^${origin}/\\S*logo\\.png 1x, https://cdn\\.test/w_200,h_100/logo\\.png 2x$`));
