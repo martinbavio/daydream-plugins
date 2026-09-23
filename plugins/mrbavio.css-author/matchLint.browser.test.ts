@@ -207,6 +207,17 @@ describe("matchLint", () => {
     ).toEqual([]);
   });
 
+  test("the legacy comment markers `<!--` and `-->` between rules are no part of the next rule's selector", async () => {
+    expect(
+      await matchLint(
+        page(
+          '<!--\n.card { color: red; }\n-->\n<!-- .note { color: blue; } -->',
+          '<div class="card"></div><p class="note"></p>',
+        ),
+      ),
+    ).toEqual([]);
+  });
+
   test("a clean page is clean, and a page with no css pays no mount", async () => {
     expect(await matchLint(page(".card { color: red; }"))).toEqual([]);
     expect(await matchLint(page(""))).toEqual([]);

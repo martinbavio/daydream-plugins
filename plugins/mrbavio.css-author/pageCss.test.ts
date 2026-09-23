@@ -133,6 +133,15 @@ nav a, .link:hover { color: inherit !important; }
     ]);
   });
 
+  test("the legacy markers `<!--` and `-->` between top-level rules are skipped, as the tokenizer skips them; inside a block they stay", () => {
+    expect(
+      shape(`<!--
+.a { color: red }
+--> <!-- .b { color: blue } -->
+@media print { <!-- .c { color: green } }`).map((r) => r.prelude),
+    ).toEqual([".a", ".b", "<!-- .c"]);
+  });
+
   test("a custom property keeps its case; every other property is lower-cased", () => {
     expect(shape(".a { --Brand: red; COLOR: var(--Brand) }")[0]!.declarations).toEqual([
       "--Brand: red",

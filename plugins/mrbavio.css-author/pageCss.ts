@@ -104,7 +104,7 @@ export function scanCss(css: string): CssBlock[] {
   const out: CssBlock[] = [];
   let i = 0;
   while (i < css.length) {
-    const scanned = scanBody(css, i, css.length);
+    const scanned = scanBody(css, i, css.length, true);
     out.push(...scanned.blocks);
     // A stray `}` at the top level closes nothing; step over it.
     i = scanned.end + 1;
@@ -118,7 +118,7 @@ export function scanDeclarations(text: string): CssDeclaration[] {
   const declarations: CssDeclaration[] = [];
   let i = 0;
   while (i < text.length) {
-    const scanned = scanBody(text, i, text.length);
+    const scanned = scanBody(text, i, text.length, false);
     declarations.push(...scanned.declarations);
     i = scanned.end + 1;
   }
@@ -126,11 +126,15 @@ export function scanDeclarations(text: string): CssDeclaration[] {
 }
 
 /** Scan from `from` until the `}` that closes the body (its index is
- * `end`) or `to`. */
+ * `end`) or `to`. `topLevel` is the stylesheet's own list of rules, where
+ * the legacy markers `<!--` and `-->` between rules are skipped, as the
+ * CSS tokenizer's CDO and CDC tokens are; inside a block they are part of
+ * the next rule's prelude, which they make invalid. */
 function scanBody(
   css: string,
   from: number,
   to: number,
+  topLevel: boolean,
 ): { blocks: CssBlock[]; declarations: CssDeclaration[]; end: number } {
   const blocks: CssBlock[] = [];
   const declarations: CssDeclaration[] = [];
@@ -162,6 +166,13 @@ function scanBody(
       i = commentEnd(css, i, to);
       continue;
     }
+    if (topLevel && start === -1) {
+      const marker = /^(?:<!--|-->)/.exec(css.slice(i, i + 4));
+      if (marker !== null) {
+        i += marker[0].length;
+        continue;
+      }
+    }
     if (start === -1 && !/\s/.test(ch)) start = i;
     if (ch === '"' || ch === "'") {
       i = stringEnd(css, i, to);
@@ -180,7 +191,7 @@ function scanBody(
     } else if (depth === 0 && ch === "{") {
       const blockStart = start === -1 ? i : start;
       const prelude = withoutComments(css.slice(blockStart, i)).trim();
-      const inner = scanBody(css, i + 1, to);
+      const inner = scanBody(css, i + 1, to, false);
       const close = inner.end;
       blocks.push({
         prelude,

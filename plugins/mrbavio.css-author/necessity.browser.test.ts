@@ -559,6 +559,15 @@ describe("necessity on rules", () => {
     ]);
   });
 
+  test("a rule after the legacy marker `<!--` is judged and named by its own selector, the marker no part of it", async () => {
+    const findings = await necessityLint(
+      makeDocument(FRAME, '<div class="a">hi</div>', "<!--\n.a { --unused: 1px; }\n-->"),
+    );
+    expect(findings.map((f) => f.message)).toEqual([
+      `--unused: 1px in rule \`.a\` of viewport v1 changes nothing at ${sweptAt(400)}`,
+    ]);
+  });
+
   test("a pseudo-element rule's declaration is necessary when nothing else sets it: the baseline reads getComputedStyle(node, '::before') too", async () => {
     expect(
       await necessityLint(
