@@ -12,11 +12,13 @@ import {
   replaceScopePseudo,
   resolveNested,
   ruleName,
+  scanCss,
   scanDeclarations,
   selectorForMatching,
   selectorPreludes,
   trailingPseudoElement,
   withoutRanges,
+  type CssBlock,
 } from "./pageCss";
 
 const shape = (css: string) =>
@@ -215,6 +217,40 @@ nav a, .link:hover { color: inherit !important; }
     expect(withoutRanges(css, [color!.range])).toBe(".a {  /* keep */ margin: 0 }");
     expect(withoutRanges(css, [margin!.range])).toBe(".a { color: red; /* keep */ }");
     expect(withoutRanges(css, [color!.range, margin!.range])).toBe(".a {  /* keep */ }");
+  });
+});
+
+describe("deeply nested css", () => {
+  // Adversarial text: a scan must never exhaust the stack, however deep
+  // the blocks nest.
+  const DEPTH = 50_000;
+
+  test("50,000 nested blocks scan as 50,000 blocks, each the parent of the next", () => {
+    const css = `${".a {".repeat(DEPTH)}color: red${"}".repeat(DEPTH)} .b { gap: 0 }`;
+    const blocks = scanCss(css);
+    expect(blocks.map((b) => b.prelude)).toEqual([".a", ".b"]);
+    let depth = 0;
+    let innermost = blocks[0]!;
+    for (let b: CssBlock | undefined = blocks[0]; b !== undefined; b = b.children[0]) {
+      depth++;
+      innermost = b;
+    }
+    expect(depth).toBe(DEPTH);
+    expect(innermost.declarations.map((d) => d.value)).toEqual(["red"]);
+    expect(blocks[0]!.range).toEqual([0, css.indexOf(" .b")]);
+  });
+
+  test("50,000 unclosed blocks, and 50,000 unclosed at-rules around a rule, are read without a stack overflow", () => {
+    expect(scanCss("{".repeat(DEPTH))).toHaveLength(1);
+    expect(scanDeclarations(`color: red; ${"{".repeat(DEPTH)}`)).toHaveLength(1);
+    const css = `${"@media all {".repeat(DEPTH)}.a { color: red }`;
+    expect(mediaPreludes(css)).toHaveLength(DEPTH);
+    expect(selectorPreludes(css)).toEqual([".a"]);
+    expect(fontFaces(css)).toEqual([]);
+    const rules = pageRules(css);
+    expect(rules.map((rule) => [rule.selector, rule.conditions.length])).toEqual([
+      [".a", DEPTH],
+    ]);
   });
 });
 
