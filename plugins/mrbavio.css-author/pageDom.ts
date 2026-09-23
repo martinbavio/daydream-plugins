@@ -70,18 +70,20 @@ export function parsePage(page: Pick<PagePayload, "html" | "css">): ParsedPage {
 }
 
 /** A `<style>`'s text under its `media`, as the kernel's safety walk
- * folds it (render/sanitize.ts withMedia), to the letter: wrapped in
- * `@media` unless the media applies everywhere, the query the browser's
- * own reading of the list. The sheet goes in as written when it closes
- * its own blocks (pageCss.ts closesItsOwnBlocks, the kernel's test);
- * otherwise as the browser reads it, each rule written out whole — a
- * stray `}` would close the `@media` early, and an unclosed block,
- * comment or string would swallow its end. */
+ * folds it (render/sanitize.ts withMedia), to the letter. The sheet goes
+ * in as written when it closes its own blocks (pageCss.ts
+ * closesItsOwnBlocks, the kernel's test); otherwise as the browser reads
+ * it, each rule written out whole — with a media or without, since on the
+ * page each sheet is parsed on its own: folded, a stray `}` would close
+ * the `@media` early, and an unclosed block, comment or string would
+ * swallow every rule folded after it, the next sheet's included. Then
+ * wrapped in `@media` unless the media applies everywhere, the query the
+ * browser's own reading of the list. */
 function withMedia(css: string, media: string): string {
-  if (media.trim() === "") return css;
-  const query = new CSSStyleSheet({ media }).media.mediaText;
-  if (query === "" || query.toLowerCase() === "all") return css;
   const body = closesItsOwnBlocks(css) ? css : asTheBrowserReadsIt(css);
+  if (media.trim() === "") return body;
+  const query = new CSSStyleSheet({ media }).media.mediaText;
+  if (query === "" || query.toLowerCase() === "all") return body;
   return `@media ${query} {\n${body}\n}`;
 }
 
