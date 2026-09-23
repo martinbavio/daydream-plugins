@@ -13,14 +13,22 @@ import { createHtmlEditor, type HtmlEditorHandle } from "./htmlEditor";
 import { rebase } from "./rebase";
 import { classPrefix } from "./styles";
 
+/** Why typed text is not the page's: the page changed where it was typed
+ * (only then does ⌘S save it over the page), the kernel refused it, or
+ * the page is gone from the canvas. */
+export type RefusalReason = "changed-underneath" | "refused" | "gone";
+
+/** A save's refusal: its reason, and the sentence shown under the text. */
+export interface Refusal {
+  reason: RefusalReason;
+  message: string;
+}
+
 /** Text a save refused, held on screen and kept per page, so a refusal,
  * a page that changed underneath, another page's selection or a hidden
  * dock never loses what was typed. Panel memory, never the document. */
-export interface Draft {
+export interface Draft extends Refusal {
   text: string;
-  /** Why it is not the page's: the refusal's sentence, or
-   * CHANGED_UNDERNEATH. */
-  problem: string;
   /** The page's html the typing started from. The next edit of the
    * draft is saved as the change from it, carried onto the page as it is
    * then when the page changed elsewhere (`rebase`). */
@@ -41,6 +49,11 @@ export interface PanelState {
    * and the key goes no further. False otherwise, so the key falls
    * through to core's undo. Set by the panel once mounted. */
   undo: () => boolean;
+  /** ⇧⌘Z while typing: what is pending is saved first, never dropped by
+   * the restore — a new edit, so core's redo then finds nothing to redo.
+   * Never handles the key (false), so it goes on to core's redo. Set by
+   * the panel once mounted. */
+  redo: () => boolean;
   /** ⌘S while typing: what is pending is saved first, then a draft held
    * because the page changed where it was typed is saved over the page as
    * it is now. Never handles the key (false), so it goes on to core's
@@ -73,6 +86,11 @@ export const CHANGED_UNDERNEATH =
 
 /** The sentence for a page gone from the canvas mid-save. */
 const PAGE_GONE = "The page is no longer on the canvas.";
+
+/** The sentence for text held while its page was gone, once the page is
+ * back on the canvas (an undo, a redo). */
+export const PAGE_BACK =
+  "The page left the canvas while you were typing, so nothing was saved. Your text is kept here: ⌘S saves it over the page as it is now, and ⌘Z drops it.";
 
 /** What the selection points at: the page it is in, and the element
  * (null when the page itself is selected). */
@@ -116,7 +134,7 @@ const sentence = (problem: string): string =>
 
 /** A save's verdict. Saved: `text` is what the page holds now — the
  * typed text, or the typing carried onto a page that changed elsewhere. */
-type Saved = { ok: true; text: string } | { ok: false; problem: string };
+type Saved = { ok: true; text: string } | ({ ok: false } & Refusal);
 
 /**
  * The HTML pane (decision #76): the page's `html` AS TEXT, the way the
@@ -240,11 +258,20 @@ export default function createHtmlPanel(state: PanelState) {
    */
   const saveText = (id: string, text: string): Saved => {
     const current = stored(id);
-    if (current === null) return { ok: false, problem: PAGE_GONE };
-    if (current === text) return { ok: true, text };
+    if (current === null) {
+      return { ok: false, reason: "gone", message: PAGE_GONE };
+    }
     const base = synced;
-    const next = current === base ? text : rebase(base, text, current);
-    if (next === null) return { ok: false, problem: CHANGED_UNDERNEATH };
+    // Text that is the page's already comes back as the page's: written as
+    // nothing, but synced, so the typing that follows starts from it.
+    const next = rebase(base, text, current);
+    if (next === null) {
+      return {
+        ok: false,
+        reason: "changed-underneath",
+        message: CHANGED_UNDERNEATH,
+      };
+    }
     return write(id, current, next, base);
   };
 
@@ -273,14 +300,15 @@ export default function createHtmlPanel(state: PanelState) {
     });
     if (problem === null) return { ok: true, text: next };
     synced = base;
-    return { ok: false, problem: sentence(problem) };
+    return { ok: false, reason: "refused", message: sentence(problem) };
   };
 
   /** The draft a refused save of `text` leaves, held against the text the
    * typing started from. */
-  const draftOf = (text: string, refused: Saved): Draft => ({
+  const draftOf = (text: string, refused: Refusal): Draft => ({
     text,
-    problem: refused.ok ? "" : refused.problem,
+    reason: refused.reason,
+    message: refused.message,
     base: synced,
   });
 
@@ -308,7 +336,7 @@ export default function createHtmlPanel(state: PanelState) {
     if (!result.ok) {
       const draft = draftOf(text, result);
       drafts().set(id, draft);
-      setMessage(draft.problem);
+      setMessage(draft.message);
       return;
     }
     drafts().delete(id);
@@ -326,7 +354,7 @@ export default function createHtmlPanel(state: PanelState) {
     if (!drafts().has(id)) return false;
     // Text the page never held: undoing it is dropping it.
     drafts().delete(id);
-    showPage(ed, id, stored(id) ?? "");
+    showPage(ed, id);
     mark(ed, false);
     return true;
   };
@@ -339,10 +367,18 @@ export default function createHtmlPanel(state: PanelState) {
     saveEditor(id);
     const draft = drafts().get(id);
     const current = stored(id);
-    if (draft?.problem !== CHANGED_UNDERNEATH || current === null) return false;
+    if (draft?.reason !== "changed-underneath" || current === null) {
+      return false;
+    }
     // Asked for: the typed text over the page as it is now. The kernel's
     // verdict on the text still holds; a refusal keeps the draft.
     settle(ed, id, draft.text, write(id, current, draft.text, draft.base));
+    return false;
+  };
+
+  state.redo = (): boolean => {
+    const id = untrack(pageId);
+    if (id !== null) leave(id);
     return false;
   };
 
@@ -353,13 +389,37 @@ export default function createHtmlPanel(state: PanelState) {
     saveEditor(id);
   };
 
-  /** Show page `id`: its draft when it has one, else its text. */
-  function showPage(ed: HtmlEditorHandle, id: string, text: string): void {
+  /** Page `id`'s draft, re-evaluated against the page as it is now. One
+   * held because the page had left the canvas is shown only once the page
+   * is back — an undo or a redo brought it — so it is gone no longer:
+   * dropped when the page holds its text, else held as text the page
+   * changed under while it was away, which ⌘S saves over it. */
+  const heldDraft = (id: string): Draft | undefined => {
     const draft = drafts().get(id);
+    const current = stored(id);
+    if (draft?.reason !== "gone" || current === null) return draft;
+    if (current === draft.text) {
+      drafts().delete(id);
+      return undefined;
+    }
+    const back: Draft = {
+      ...draft,
+      reason: "changed-underneath",
+      message: PAGE_BACK,
+    };
+    drafts().set(id, back);
+    return back;
+  };
+
+  /** Show page `id` in the editor, nothing typed pending: its draft with
+   * its sentence when it has one, else its text as stored. */
+  function showPage(ed: HtmlEditorHandle, id: string): void {
+    const draft = heldDraft(id);
+    const text = stored(id) ?? "";
     dirty = false;
     synced = draft?.base ?? text;
     ed.setText(draft?.text ?? text);
-    setMessage(draft?.problem ?? null);
+    setMessage(draft?.message ?? null);
   }
 
   /**
@@ -406,28 +466,25 @@ export default function createHtmlPanel(state: PanelState) {
   // even mid-focus — through historyVersion, which only undo, redo and a
   // load bump; a restore drops what was pending (the edit belonged to the
   // state just reverted) and keeps a draft (it was never part of any
-  // state). Otherwise the text follows the page whenever nothing typed is
-  // pending or held.
-  let lastPage: string | null | undefined;
-  let lastElement: string | null | undefined;
-  let lastHistory: number | undefined;
-
+  // state), re-evaluated against the page restored (heldDraft).
+  // Otherwise the text follows the page whenever nothing typed is
+  // pending or held. `last` is what the previous run applied (none on the
+  // first).
   createEffect(
     () => ({
       t: target(),
       text: html(),
       history: dd.historyVersion(),
     }),
-    ({ t, text, history }) => {
+    ({ t, text, history }, last) => {
       const page = t?.pageId ?? null;
       const element = t?.elementId ?? null;
-      const pageChanged = lastPage !== undefined && page !== lastPage;
-      const selectionChanged = element !== lastElement;
-      const restored = lastHistory !== undefined && history !== lastHistory;
-      const previous = lastPage;
-      lastPage = page;
-      lastElement = element;
-      lastHistory = history;
+      const previous =
+        last === undefined ? undefined : (last.t?.pageId ?? null);
+      const pageChanged = previous !== undefined && page !== previous;
+      const selectionChanged =
+        last === undefined || element !== (last.t?.elementId ?? null);
+      const restored = last !== undefined && history !== last.history;
 
       untrack(() => {
         const ed = editor();
@@ -444,11 +501,12 @@ export default function createHtmlPanel(state: PanelState) {
           return;
         }
         if (ed === undefined) return;
-        if (restored || pageChanged) {
-          showPage(ed, page, text);
-        } else if (!dirty && !drafts().has(page) && text !== synced) {
-          synced = text;
-          ed.setText(text);
+        if (
+          restored ||
+          pageChanged ||
+          (!dirty && !drafts().has(page) && text !== synced)
+        ) {
+          showPage(ed, page);
         }
         mark(ed, selectionChanged || pageChanged || restored);
       });
@@ -495,7 +553,7 @@ export default function createHtmlPanel(state: PanelState) {
     if (ed === undefined || id === null) return;
     leave(id);
     if (!drafts().has(id)) {
-      showPage(ed, id, stored(id) ?? "");
+      showPage(ed, id);
       mark(ed, false);
     }
   };
@@ -503,20 +561,16 @@ export default function createHtmlPanel(state: PanelState) {
   const attachEditor = (el: HTMLDivElement): void => {
     host = el;
     editor()?.destroy();
-    const id = untrack(pageId);
-    const text = id === null ? "" : (stored(id) ?? "");
-    const draft = id === null ? undefined : drafts().get(id);
-    synced = draft?.base ?? text;
-    dirty = false;
-    if (draft !== undefined) setMessage(draft.problem);
     const handle = createHtmlEditor({
       parent: el,
-      doc: draft?.text ?? text,
+      doc: "",
       onDocChanged: handleDocChanged,
       onCaret: handleCaret,
       onBlur: handleBlur,
     });
     setEditor(handle);
+    const id = untrack(pageId);
+    if (id !== null) showPage(handle, id);
     // The selected element's place is read after the render, never
     // inside it (decision #33).
     queueMicrotask(() => {

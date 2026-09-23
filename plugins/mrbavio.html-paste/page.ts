@@ -2,8 +2,9 @@
 // page's markup and its stylesheet as text, `{ html, css }`, rendered in a
 // shadow root. So a paste converts nothing: it hands the pasted text to
 // the kernel's cleaning (`dd.cleanPage`, the function every landing runs)
-// and stores what comes back — the author's text with whatever could run
-// cut out where it was written, every `<style>` block and linked
+// and stores what comes back — the author's text with what the cleaning
+// removes cut out where it was written (an `<iframe>` stays, under the
+// renderer's forced sandbox), every `<style>` block and linked
 // stylesheet folded into the css in document order — with the cleaning's
 // own findings for the report. The browser is the vocabulary: every
 // element, attribute, selector and at-rule the cleaning keeps lands as
@@ -33,27 +34,47 @@ export function hasElements(doc: Document): boolean {
   return doc.body.firstElementChild !== null;
 }
 
-/** A `data:` URL an `img` names as its `src`: a page stores no `data:`
- * url, so the paste vendors the bytes and names the stored copy in its
- * place. `url` is the `src` as the parser read it; `file` is null when
- * the URL is not an image. */
+/** A `data:` URL an `img` names as its `src`, or a css `url()` names in a
+ * `style` attribute or a `<style>`. The cleaning takes a `data:` url out
+ * of an `img`'s `src` and keeps one in css as written; the paste vendors
+ * the bytes of an image and names the stored copy in its place, so the
+ * page stores neither. `url` is the URL as the parser read it; `file` is
+ * null when it is not an image; `inCss` is true when a css `url()` names
+ * it. */
 export interface DataImage {
   url: string;
   file: File | null;
+  inCss: boolean;
 }
 
-/** Each distinct `data:` URL an `img` names as its `src`, in document
- * order: the same image twice is one file. */
+/** Each distinct `data:` URL an `img` names as its `src`, or a css `url()`
+ * in a `style` attribute or a `<style>`, in document order: the same
+ * image twice is one file. */
 export function dataImages(doc: Document): DataImage[] {
-  const urls = new Set(
-    Array.from(
-      doc.querySelectorAll("img[src]"),
-      (img) => img.getAttribute("src") ?? "",
-    ).filter((src) => /^\s*data:/i.test(src)),
-  );
-  return Array.from(urls, (url) => ({
+  const found = new Map<string, boolean>();
+  const add = (url: string, inCss: boolean): void => {
+    if (/^\s*data:/i.test(url))
+      found.set(url, inCss || found.get(url) === true);
+  };
+  const cssUrls = (css: string): void => {
+    for (const { start, end } of cssUrlSpans(css, 0, css.length)) {
+      add(css.slice(start, end), true);
+    }
+  };
+  for (const element of Array.from(
+    doc.querySelectorAll("img[src], [style], style"),
+  )) {
+    const src =
+      element.localName === "img" ? element.getAttribute("src") : null;
+    if (src !== null) add(src, false);
+    const style = element.getAttribute("style");
+    if (style !== null) cssUrls(style);
+    if (element.localName === "style") cssUrls(element.textContent ?? "");
+  }
+  return Array.from(found, ([url, inCss]) => ({
     url,
     file: fileFromDataUrl(url.trim()),
+    inCss,
   }));
 }
 
@@ -85,15 +106,62 @@ const ATTRIBUTE = /[^\s/>][^\s/>=]*/y;
 const EQUALS = /\s*=\s*/y;
 const UNQUOTED = /[^\s>]*/y;
 
+/** A css `url()` token read in place (sticky): its url quoted, either
+ * way, or bare. */
+const URL_TOKEN = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s"'()]+))\s*\)/iy;
+
 /**
- * Where each `img`'s `src` value is written in `text`, `[start, end)`
- * inside its quotes, in document order: the first `src` of a tag, as the
- * parser keeps the first of a repeated attribute. A tokenizer of start
- * tags alone — comments, doctypes, end tags and the content of raw-text
- * elements are stepped over — so a URL in text content, in css or in any
- * other attribute is never one of these.
+ * Where each `url()` token's url is written in the css `text` holds in
+ * `[from, to)`, `[start, end)` inside its quotes, in order. Comments and
+ * strings are stepped over, so a url in either is not one, and so is a
+ * name that only ends in `url(`.
  */
-function imageSourceSpans(text: string): Span[] {
+function cssUrlSpans(text: string, from: number, to: number): Span[] {
+  const spans: Span[] = [];
+  let i = from;
+  while (i < to) {
+    const char = text[i]!;
+    if (text.startsWith("/*", i)) {
+      const close = text.indexOf("*/", i + 2);
+      i = close === -1 || close >= to ? to : close + 2;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      let end = i + 1;
+      while (end < to && text[end] !== char) end += text[end] === "\\" ? 2 : 1;
+      i = end + 1;
+      continue;
+    }
+    URL_TOKEN.lastIndex = i;
+    const token =
+      (char === "u" || char === "U") && !/[\w-]/.test(text[i - 1] ?? "")
+        ? URL_TOKEN.exec(text)
+        : null;
+    if (token === null || i + token[0].length > to) {
+      i++;
+      continue;
+    }
+    const url = token[1] ?? token[2] ?? token[3]!;
+    // The url is where the token ends, less its close and any quote.
+    const close = /["']?\s*\)$/.exec(token[0])![0].length;
+    const end = i + token[0].length - close;
+    spans.push({ start: end - url.length, end });
+    i += token[0].length;
+  }
+  return spans;
+}
+
+/**
+ * Where each url a stored image may replace is written in `text`,
+ * `[start, end)` inside its quotes, in document order: each `img`'s `src`
+ * — the first `src` of a tag, as the parser keeps the first of a repeated
+ * attribute — and each css `url()` in a `style` attribute (the first of a
+ * tag's) or a `<style>`'s text. A tokenizer of start tags alone —
+ * comments, doctypes, end tags and the content of other raw-text elements
+ * are stepped over — so a URL in text content or in any other attribute
+ * is never one of these.
+ */
+function imageUrlSpans(text: string): Span[] {
   const spans: Span[] = [];
   // Sticky, so each read starts where the last ended: a paste may be
   // millions of characters, and no read copies the rest of the text.
@@ -101,12 +169,17 @@ function imageSourceSpans(text: string): Span[] {
     pattern.lastIndex = at;
     return pattern.exec(text)?.[0] ?? "";
   };
-  const past = (from: number, token: string): number => {
+  // Where `token` next is from `from`, any case: the text's end when it
+  // is nowhere.
+  const seek = (from: number, token: string): Span => {
     const pattern = new RegExp(token, "gi");
     pattern.lastIndex = from;
     const found = pattern.exec(text);
-    return found === null ? text.length : found.index + found[0].length;
+    return found === null
+      ? { start: text.length, end: text.length }
+      : { start: found.index, end: found.index + found[0].length };
   };
+  const past = (from: number, token: string): number => seek(from, token).end;
   let i = 0;
   while (i < text.length) {
     const open = text.indexOf("<", i);
@@ -124,6 +197,7 @@ function imageSourceSpans(text: string): Span[] {
     const name = read(TAG_NAME, open + 1);
     let at = open + 1 + name.length;
     let src: Span | null = null;
+    let style: Span | null = null;
     for (;;) {
       at += read(GAP, at).length;
       if (at >= text.length || text[at] === ">") break;
@@ -142,29 +216,41 @@ function imageSourceSpans(text: string): Span[] {
         value = { start: at, end: at + read(UNQUOTED, at).length };
         at = value.end;
       }
-      if (src === null && attribute.toLowerCase() === "src") src = value;
+      const lower = attribute.toLowerCase();
+      if (src === null && lower === "src") src = value;
+      if (style === null && lower === "style") style = value;
     }
     i = at + 1;
     const tag = name.toLowerCase();
     if (tag === "img" && src !== null) spans.push(src);
-    if (RAW_TEXT.has(tag)) i = past(i, `</${tag}`);
+    if (style !== null)
+      spans.push(...cssUrlSpans(text, style.start, style.end));
+    if (RAW_TEXT.has(tag)) {
+      const close = seek(i, `</${tag}`);
+      if (tag === "style") spans.push(...cssUrlSpans(text, i, close.start));
+      i = close.end;
+    }
   }
-  return spans;
+  // A tag's `style` may come before its `src`.
+  return spans.sort((a, b) => a.start - b.start);
 }
 
-/** Each `img`'s `src` as it is written in `text`. A `data:` URL the
- * parser reads (`dataImages`) that is not among them was written with a
- * character reference, and cannot be replaced where it was written. */
-export function writtenImageSources(text: string): Set<string> {
+/** Each url a stored image may replace (`withStoredImages`) as it is
+ * written in `text`. A `data:` URL the parser reads (`dataImages`) that
+ * is not among them was written with a character reference, and cannot be
+ * replaced where it was written. */
+export function writtenImageUrls(text: string): Set<string> {
   return new Set(
-    imageSourceSpans(text).map(({ start, end }) => text.slice(start, end)),
+    imageUrlSpans(text).map(({ start, end }) => text.slice(start, end)),
   );
 }
 
-/** The pasted text with each `img` `src` that is a stored image's `data:`
- * URL, whole, replaced by the page's name for its copy, where the author
- * wrote it: nothing else in the text moves — not the same URL in text,
- * in css or in another attribute, and not a longer URL it begins. */
+/** The pasted text with each `img` `src`, and each css `url()`'s url in a
+ * `style` attribute or a `<style>`, that is a stored image's `data:` URL,
+ * whole, replaced by the page's name for its copy, where the author wrote
+ * it: nothing else in the text moves — not the same URL in text, in a
+ * comment, in a css string or in another attribute, and not a longer URL
+ * it begins. */
 export function withStoredImages(
   text: string,
   stored: ReadonlyMap<string, string>,
@@ -172,7 +258,7 @@ export function withStoredImages(
   if (stored.size === 0) return text;
   let out = "";
   let from = 0;
-  for (const { start, end } of imageSourceSpans(text)) {
+  for (const { start, end } of imageUrlSpans(text)) {
     const src = stored.get(text.slice(start, end));
     if (src === undefined) continue;
     out += text.slice(from, start) + src;

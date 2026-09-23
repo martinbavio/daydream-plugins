@@ -605,6 +605,37 @@ describe("data: images", () => {
     ]);
   });
 
+  test("a data: image a css url() names is vendored too, its copy's name written inside the url(); a data: url in css that is no image is said", async () => {
+    info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const vendorFile = vi.fn(async (file: File) => ({
+      src: `/assets/media-${file.name}`,
+      pageSrc: `assets/page-${file.name}`,
+    }));
+    const shell = await mount({
+      storage: { vendorFile } as unknown as HostStorage,
+    });
+    const png = /src="(data:[^"]*)"/.exec(dataImage)![1]!;
+    const font = "data:font/woff2;base64,d09G";
+    const source = [
+      `<div class="hero" style="border-image: url(${png}) 1">Hero</div>`,
+      `<style>.hero { background: url("${png}") } @font-face { font-family: F; src: url(${font}) }</style>`,
+      `<p>Copy</p>`,
+    ].join("\n");
+    paste(document.body, { "text/html": source });
+    const { html, css } = await landedPage(shell);
+    // One file for the one image, named in both places.
+    expect(vendorFile).toHaveBeenCalledTimes(1);
+    expect(html).toContain(
+      'style="border-image: url(assets/page-pasted-image.png) 1"',
+    );
+    expect(css).toBe(
+      `.hero { background: url("assets/page-pasted-image.png") } @font-face { font-family: F; src: url(${font}) }`,
+    );
+    expect(infoLines(info).at(-1)).toContain(
+      "; a data: url in css that is not an image was left as written;",
+    );
+  });
+
   test("a document loaded while vendoring abandons the paste; without storage the img lands with its alt and the removed src is said", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
     type Stored = { src: string; pageSrc: string };

@@ -18,7 +18,7 @@
 // editor above it are the dock's own chrome (decision #59).
 //
 // Everything it knows about the app arrives through `dd`; the entry
-// registers its four commands and the panel.
+// registers its five commands and the panel.
 
 import { untrack } from "solid-js";
 
@@ -29,6 +29,7 @@ import { classPrefix, css } from "./styles";
 
 export const BLUR_COMMAND = "mrbavio.html-editor.blur";
 export const UNDO_COMMAND = "mrbavio.html-editor.undo";
+export const REDO_COMMAND = "mrbavio.html-editor.redo";
 export const DELETE_COMMAND = "mrbavio.html-editor.delete-element";
 export const SAVE_OVER_COMMAND = "mrbavio.html-editor.save-over";
 
@@ -53,6 +54,7 @@ export default function activate(dd: DaydreamApi): void {
     dd,
     editor: undefined,
     undo: () => false,
+    redo: () => false,
     saveOver: () => false,
     // Drafts outlive a panel mount: the dock unmounts its panels while
     // hidden (⌘\), and typed text must come back with it.
@@ -90,6 +92,17 @@ export default function activate(dd: DaydreamApi): void {
     run: () => state.undo(),
   });
   dd.bindShortcut(UNDO_COMMAND, "Mod+Z");
+  // ⇧⌘Z while typing: what is pending is saved first, so the restore
+  // never drops it — a new edit, which leaves core's redo, the key's next
+  // stop, nothing to redo. Always declines.
+  dd.registerCommand({
+    id: REDO_COMMAND,
+    title: "Save the typing before a redo",
+    scope: "editor",
+    when: editorFocused,
+    run: () => state.redo(),
+  });
+  dd.bindShortcut(REDO_COMMAND, "Shift+Mod+Z");
   // ⌘S while typing: what is pending is saved first, and a draft held
   // because the page changed where it was typed is saved over the page as
   // it is now — the one way to write over that change, asked for. ⌘S is

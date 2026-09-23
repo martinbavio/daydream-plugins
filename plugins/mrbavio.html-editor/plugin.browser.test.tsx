@@ -24,10 +24,11 @@ import {
   type MountedPlugin,
 } from "@daydream/plugin-testing";
 
-import { APPLY_DEBOUNCE_MS, CHANGED_UNDERNEATH } from "./HtmlPanel";
+import { APPLY_DEBOUNCE_MS, CHANGED_UNDERNEATH, PAGE_BACK } from "./HtmlPanel";
 import activate, {
   BLUR_COMMAND,
   DELETE_COMMAND,
+  REDO_COMMAND,
   SAVE_OVER_COMMAND,
   UNDO_COMMAND,
 } from "./index";
@@ -222,12 +223,14 @@ describe("mrbavio.html-editor", () => {
     expect(manifest.contributes?.commands).toEqual([
       BLUR_COMMAND,
       UNDO_COMMAND,
+      REDO_COMMAND,
       DELETE_COMMAND,
       SAVE_OVER_COMMAND,
     ]);
     expect(manifest.contributes?.shortcuts).toEqual({
       Escape: BLUR_COMMAND,
       "Mod+Z": UNDO_COMMAND,
+      "Shift+Mod+Z": REDO_COMMAND,
       "Mod+S": SAVE_OVER_COMMAND,
       Delete: DELETE_COMMAND,
       Backspace: DELETE_COMMAND,
@@ -457,6 +460,25 @@ describe("mrbavio.html-editor", () => {
     expect(stored()).toBe(HTML);
     expect(text()).toBe(HTML);
     expect(m.store.canUndo()).toBe(false);
+  });
+
+  test("⇧⌘Z while typing saves what is pending first: a redo never drops typing", async () => {
+    const m = await mountPage();
+    select(itemId);
+    content().focus();
+    await type(edited("Old headline", "Undone"));
+    key(content(), { key: "z", metaKey: true });
+    expect(stored()).toBe(HTML);
+    expect(m.store.canRedo()).toBe(true);
+
+    // Typed, still inside the debounce, then ⇧⌘Z: the typing is saved,
+    // a new edit, so there is nothing left to redo, and nothing is lost.
+    const typed = edited("Body copy", "Pending copy");
+    await typeAll(typed);
+    key(content(), { key: "Z", metaKey: true, shiftKey: true });
+    expect(stored()).toBe(typed);
+    expect(text()).toBe(typed);
+    expect(m.store.canRedo()).toBe(false);
   });
 
   test("a save the kernel refuses shows its sentence as you type and writes nothing", async () => {
@@ -712,6 +734,29 @@ describe("mrbavio.html-editor", () => {
     expect(stored(one.id)).toBe(theirs);
   });
 
+  test("a draft typed back to the page's text goes, and the typing after it saves", async () => {
+    await mountPage();
+    select(itemId);
+    content().focus();
+    await typeAll(edited("Old headline", "Mine"));
+    const theirs = edited("Old headline", "Their headline");
+    outsideEdit(theirs);
+    await settled();
+    expect(message()).toBe(CHANGED_UNDERNEATH);
+
+    // Typed until it is what the page holds: nothing to write, the draft
+    // and its note go.
+    await type(theirs);
+    expect(stored()).toBe(theirs);
+    expect(message()).toBeNull();
+
+    // The next keystroke is typing over the page as it is now, and saves.
+    const next = edited("Body copy", "More copy", theirs);
+    await type(next);
+    expect(message()).toBeNull();
+    expect(stored()).toBe(next);
+  });
+
   test("⌘S in the editor with nothing held saves what is pending and is the document's save", async () => {
     await mountPage();
     select(itemId);
@@ -842,5 +887,36 @@ describe("mrbavio.html-editor", () => {
     expect(panel().querySelector(".cm-content")).toBeNull();
     expect(panel().textContent).toContain("Select a page");
     expect(m.store.document.items).toHaveLength(0);
+  });
+
+  test("text held because its page left the canvas is told apart once an undo brings the page back", async () => {
+    const m = await mountPage();
+    select(itemId);
+    content().focus();
+    const typed = edited("Old headline", "Typing");
+    await typeAll(typed);
+    const kernel = createTestKernel();
+    kernel.dd.mutateItems((items) => {
+      items.splice(0, 1);
+    });
+    kernel.dispose();
+    flush();
+    expect(panel().querySelector(".cm-content")).toBeNull();
+
+    // The page is back: the typing with it, and a note that says so —
+    // not that the page is gone.
+    m.store.undo();
+    flush();
+    await waitMounted(itemId, "h1");
+    select(itemId);
+    expect(stored()).toBe(HTML);
+    expect(text()).toBe(typed);
+    expect(message()).toBe(PAGE_BACK);
+
+    // ⌘S saves it over the page, as the note says.
+    content().focus();
+    key(content(), { key: "s", metaKey: true });
+    expect(stored()).toBe(typed);
+    expect(message()).toBeNull();
   });
 });

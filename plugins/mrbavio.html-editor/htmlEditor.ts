@@ -50,6 +50,8 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 
+import { diffSpan } from "./rebase";
+
 export interface HtmlEditorOptions {
   parent: HTMLElement;
   doc: string;
@@ -112,31 +114,6 @@ const markField = StateField.define<DecorationSet>({
 /** defaultKeymap bindings the pane's model cannot honour: Escape is the
  * router's blur. */
 const DROPPED_BINDINGS = new Set(["Escape"]);
-
-/** The change that turns `from` into `to`, as one span: the longest common
- * prefix and suffix stay put. Null when equal. */
-export function diffSpan(
-  from: string,
-  to: string,
-): { from: number; to: number; insert: string } | null {
-  if (from === to) return null;
-  let start = 0;
-  const max = Math.min(from.length, to.length);
-  while (start < max && from.charCodeAt(start) === to.charCodeAt(start)) {
-    start++;
-  }
-  let endFrom = from.length;
-  let endTo = to.length;
-  while (
-    endFrom > start &&
-    endTo > start &&
-    from.charCodeAt(endFrom - 1) === to.charCodeAt(endTo - 1)
-  ) {
-    endFrom--;
-    endTo--;
-  }
-  return { from: start, to: endFrom, insert: to.slice(start, endTo) };
-}
 
 // Quiet dark theme over the panel's --panel-* tokens (styles.ts defines
 // them on the panel root; the editor inherits them as a descendant).
