@@ -464,28 +464,39 @@ describe("mrbavio.impeccable in the shell", () => {
     }
   });
 
-  test("a variant is titled from its marker and the source's title, whatever the agent called it", async () => {
-    const { doc, source } = sourceDocument("Pricing");
-    mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
-    await settle();
-    // The agent gave a stale base title.
-    const v = variantOf(source, "bolder", 2, 3);
-    v.payload.meta!.title = "Pricing · delight 1/3 · bolder 2/3";
-    mounted.store.landItems([v]);
-    await settle();
-    const landed = mounted.store.document.items.find((i) => i.id === v.id) as DreamPage;
-    expect(landed.payload.meta?.title).toBe("Pricing · bolder 2/3");
-    expect(landed.payload.meta?.notes).toBe(v.payload.meta!.notes); // the marker stays
-    expect(landed.payload.html).toBe(v.payload.html); // the page is not touched
-    const bars = Array.from(mounted.host.querySelectorAll("[class*='bar'] span")).map((s) => s.textContent);
-    expect(bars).toContain("Pricing · bolder 2/3");
-    // A variant of a variant chains from its own source's title.
-    const ok = variantOf(landed, "layout", 1, 1);
-    mounted.store.landItems([ok]);
-    await settle();
-    expect((mounted.store.document.items.find((i) => i.id === ok.id) as DreamPage).payload.meta?.title).toBe(
-      "Pricing · bolder 2/3 · layout 1/1",
-    );
+  test("a variant is titled from its marker and the source's title, whatever the agent called it — written after the landing's effects, never inside one", async () => {
+    // A write from inside an effect callback flushes there, which Solid
+    // warns is a no-op.
+    const flushes: string[] = [];
+    const warn = vi.spyOn(console, "warn").mockImplementation((message: unknown) => {
+      if (String(message).includes("FLUSH_IN_EFFECT_CALLBACK")) flushes.push(String(message));
+    });
+    try {
+      const { doc, source } = sourceDocument("Pricing");
+      mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
+      await settle();
+      // The agent gave a stale base title.
+      const v = variantOf(source, "bolder", 2, 3);
+      v.payload.meta!.title = "Pricing · delight 1/3 · bolder 2/3";
+      mounted.store.landItems([v]);
+      await settle();
+      const landed = mounted.store.document.items.find((i) => i.id === v.id) as DreamPage;
+      expect(landed.payload.meta?.title).toBe("Pricing · bolder 2/3");
+      expect(landed.payload.meta?.notes).toBe(v.payload.meta!.notes); // the marker stays
+      expect(landed.payload.html).toBe(v.payload.html); // the page is not touched
+      const bars = Array.from(mounted.host.querySelectorAll("[class*='bar'] span")).map((s) => s.textContent);
+      expect(bars).toContain("Pricing · bolder 2/3");
+      // A variant of a variant chains from its own source's title.
+      const ok = variantOf(landed, "layout", 1, 1);
+      mounted.store.landItems([ok]);
+      await settle();
+      expect((mounted.store.document.items.find((i) => i.id === ok.id) as DreamPage).payload.meta?.title).toBe(
+        "Pricing · bolder 2/3 · layout 1/1",
+      );
+      expect(flushes).toEqual([]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("impeccable_html renders the page as one standalone file, a selector's element marked in it, and the page without it on request; a report verb captions as reviewing", async () => {

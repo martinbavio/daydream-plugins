@@ -284,12 +284,12 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     }
   };
   // A hook handler runs in an effect's apply phase: the document is read
-  // there as a snapshot, never tracked.
+  // there as a snapshot, never tracked. The titles are written after it,
+  // in a microtask: dd.updateItem flushes, and a flush from inside an
+  // effect callback is a no-op Solid warns about (FLUSH_IN_EFFECT_CALLBACK).
   dd.on("items", ({ added }) => {
-    untrack(() => {
-      titleVariants(added);
-      trackBuilding();
-    });
+    untrack(trackBuilding);
+    if (added.length > 0) queueMicrotask(() => titleVariants(added));
   });
   dd.on("document", ({ restored }) => {
     if (!restored) untrack(trackBuilding);
