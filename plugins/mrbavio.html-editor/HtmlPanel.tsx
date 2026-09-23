@@ -49,6 +49,11 @@ export interface PanelState {
    * and the key goes no further. False otherwise, so the key falls
    * through to core's undo. Set by the panel once mounted. */
   undo: () => boolean;
+  /** ⇧⌘Z while typing: what is pending is saved first, never dropped by
+   * the restore — a new edit, so core's redo then finds nothing to redo.
+   * Never handles the key (false), so it goes on to core's redo. Set by
+   * the panel once mounted. */
+  redo: () => boolean;
   /** ⌘S while typing: what is pending is saved first, then a draft held
    * because the page changed where it was typed is saved over the page as
    * it is now. Never handles the key (false), so it goes on to core's
@@ -363,6 +368,12 @@ export default function createHtmlPanel(state: PanelState) {
     // Asked for: the typed text over the page as it is now. The kernel's
     // verdict on the text still holds; a refusal keeps the draft.
     settle(ed, id, draft.text, write(id, current, draft.text, draft.base));
+    return false;
+  };
+
+  state.redo = (): boolean => {
+    const id = untrack(pageId);
+    if (id !== null) leave(id);
     return false;
   };
 

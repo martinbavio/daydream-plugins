@@ -28,6 +28,7 @@ import { APPLY_DEBOUNCE_MS, CHANGED_UNDERNEATH } from "./HtmlPanel";
 import activate, {
   BLUR_COMMAND,
   DELETE_COMMAND,
+  REDO_COMMAND,
   SAVE_OVER_COMMAND,
   UNDO_COMMAND,
 } from "./index";
@@ -222,12 +223,14 @@ describe("mrbavio.html-editor", () => {
     expect(manifest.contributes?.commands).toEqual([
       BLUR_COMMAND,
       UNDO_COMMAND,
+      REDO_COMMAND,
       DELETE_COMMAND,
       SAVE_OVER_COMMAND,
     ]);
     expect(manifest.contributes?.shortcuts).toEqual({
       Escape: BLUR_COMMAND,
       "Mod+Z": UNDO_COMMAND,
+      "Shift+Mod+Z": REDO_COMMAND,
       "Mod+S": SAVE_OVER_COMMAND,
       Delete: DELETE_COMMAND,
       Backspace: DELETE_COMMAND,
@@ -457,6 +460,25 @@ describe("mrbavio.html-editor", () => {
     expect(stored()).toBe(HTML);
     expect(text()).toBe(HTML);
     expect(m.store.canUndo()).toBe(false);
+  });
+
+  test("⇧⌘Z while typing saves what is pending first: a redo never drops typing", async () => {
+    const m = await mountPage();
+    select(itemId);
+    content().focus();
+    await type(edited("Old headline", "Undone"));
+    key(content(), { key: "z", metaKey: true });
+    expect(stored()).toBe(HTML);
+    expect(m.store.canRedo()).toBe(true);
+
+    // Typed, still inside the debounce, then ⇧⌘Z: the typing is saved,
+    // a new edit, so there is nothing left to redo, and nothing is lost.
+    const typed = edited("Body copy", "Pending copy");
+    await typeAll(typed);
+    key(content(), { key: "Z", metaKey: true, shiftKey: true });
+    expect(stored()).toBe(typed);
+    expect(text()).toBe(typed);
+    expect(m.store.canRedo()).toBe(false);
   });
 
   test("a save the kernel refuses shows its sentence as you type and writes nothing", async () => {
