@@ -40,6 +40,16 @@
 // `@starting-style`, or a state pseudo-class, could win without the line
 // at another width or in another state.
 //
+// AN EXPLICIT INITIAL VALUE (rule 2 of the static gate): a declaration
+// restating its property's initial value (initialValues.ts) — an
+// element's own, or a top-level unconditional rule's — MEASURED the same
+// way: the line cut, the element (or every element the rule reaches)
+// read, and a finding only when nothing changed. So an initial the UA
+// sheet overrides (`<dialog open>`'s `position: absolute`, a popover's
+// `inset: 0`, an `img`'s clipped overflow) or a rule sets is an override
+// the page needs, never a redundant line; what the frame cannot show is
+// refused the same way as a redundancy.
+//
 // DEAD RULE: no element of the mounted page matches the rule's selector —
 // with state pseudo-classes given a second chance, state-stripped, since
 // nobody hovers a lint run (statePseudo.ts). A rule under an `@media` or
@@ -101,6 +111,7 @@ import {
   type CssDeclaration,
   type PageRule,
 } from "./pageCss";
+import { restatesInitial, ruleInitialCandidates } from "./initialValues";
 import {
   lintElements,
   mountedStyle,
@@ -144,23 +155,27 @@ interface MountedPage {
   match: RuleMatcher;
 }
 
-/** Every match-dependent static finding for the document: redundancy (an
- * element's, and a rule's against the rule beneath it), dead rules, and a
- * rule's container query with no container. Each page is mounted once —
- * the ranked matches are read once for every node and answer every
- * question here — and disposed before the next. Empty when nothing in the
- * mounted page disagrees with the css. */
+/** Every match-dependent static finding for the document: explicit
+ * initial values (the elements' own in tree order, then the rules'),
+ * redundancy (an element's, and a rule's against the rule beneath it),
+ * dead rules, and a rule's container query with no container. Each page
+ * is mounted once — the ranked matches are read once for every node and
+ * answer every question here — and disposed before the next. Empty when
+ * nothing in the mounted page disagrees with the css. */
 export async function matchLint(
   dd: MatchHost,
   doc: DreamDocument,
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
   for (const page of dd.core.viewportItems(doc) as DreamPage[]) {
-    // Every question here is about a rule, so a page without one has
-    // nothing to ask and pays for no mount.
+    // Every question here is about a rule or a restated initial, so a
+    // page with neither has nothing to ask and pays for no mount.
     const stored = parsePage(page.payload);
     const authored = pageRules(stored.css);
-    if (authored.length === 0) continue;
+    const restated = lintElements(stored.doc).some((el) =>
+      scanDeclarations(el.getAttribute("style") ?? "").some(restatesInitial),
+    );
+    if (authored.length === 0 && !restated) continue;
     await withMount(dd, page, undefined, async (mounted) => {
       const mdoc = mounted.document();
       const nodes = lintElements(mdoc);
@@ -185,6 +200,7 @@ export async function matchLint(
         match: ruleMatcher(mdoc),
       };
       const ranked = rankedMatches(dd.core, read);
+      lintRestatedInitials(read, ranked, findings);
       lintRedundancy(read, ranked, findings);
       lintRuleRestatements(read, ranked, findings);
       lintDeadRules(read, findings);
@@ -299,6 +315,86 @@ function rankedMatches(core: CoreApi, read: MountedPage): Map<Element, RuleMatch
 }
 
 // ---------------------------------------------------------------------------
+// What a measured line is weighed against: the rules styling the element.
+
+/** The rules matching `node` that style the element itself, winner
+ * first: a pseudo-element match styles a box the element's own style
+ * never reaches. */
+function boxMatches(
+  ranked: ReadonlyMap<Element, readonly RuleMatch[]>,
+  node: Element,
+): RuleMatch[] {
+  return (ranked.get(node) ?? []).filter((match) => match.pseudo === undefined);
+}
+
+/** Whether one of `matched` could win without a line of `property` at
+ * another width or in another state (`varies`) and touches the property:
+ * the frame cannot say the line changes nothing there. */
+function contested(
+  read: MountedPage,
+  matched: readonly RuleMatch[],
+  property: string,
+): boolean {
+  return matched.some((match) => {
+    const rule = read.rules[match.index];
+    return (
+      rule !== undefined &&
+      varies(rule) &&
+      rule.declarations.some((d) => relatedProperties(property, d.property))
+    );
+  });
+}
+
+// ---------------------------------------------------------------------------
+// An explicit initial value — a line the page would compute without.
+
+function lintRestatedInitials(
+  read: MountedPage,
+  ranked: ReadonlyMap<Element, readonly RuleMatch[]>,
+  findings: Finding[],
+): void {
+  for (const node of read.nodes) {
+    const matched = boxMatches(ranked, node);
+    for (const declaration of read.own.get(node) ?? []) {
+      if (!restatesInitial(declaration)) continue;
+      if (contested(read, matched, declaration.property)) continue;
+      const cut = new Map([[node, [declaration.range]]]);
+      if (!unchangedWithout(read, [], cut, [node])) continue;
+      const selector = read.nameOf(node);
+      findings.push({
+        tier: "static",
+        severity: "blocking",
+        elementId: selector,
+        property: declaration.property,
+        message: `${declaration.property}: ${declaration.value} on \`${selector}\` restates the initial value`,
+      });
+    }
+  }
+  for (const { rule, declaration } of ruleInitialCandidates(read.rules)) {
+    const reached = read.nodes.filter((node) =>
+      boxMatches(ranked, node).some((match) => match.index === rule.index),
+    );
+    if (
+      reached.some((node) =>
+        contested(read, boxMatches(ranked, node), declaration.property),
+      )
+    ) {
+      continue;
+    }
+    if (!unchangedWithout(read, [declaration.range], new Map(), reached)) {
+      continue;
+    }
+    findings.push({
+      tier: "static",
+      severity: "blocking",
+      rule: rule.index,
+      property: declaration.property,
+      message: `${declaration.property}: ${declaration.value} in rule ${ruleName(rule)} of viewport ${read.page.id} restates the initial value`,
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Redundancy — an element's own declaration a matched rule already makes.
 
 function lintRedundancy(
@@ -309,26 +405,12 @@ function lintRedundancy(
   const maps = read.rules.map((rule) => declarationMap(rule.declarations));
   for (const node of read.nodes) {
     const own = read.own.get(node) ?? [];
-    // A pseudo-element match styles a box the element's own style never
-    // reaches.
-    const matched = (ranked.get(node) ?? []).filter(
-      (match) => match.pseudo === undefined,
-    );
+    const matched = boxMatches(ranked, node);
     if (own.length === 0 || matched.length === 0) continue;
     for (const [property, value] of Object.entries(declarationMap(own))) {
       // A rule that could win without the line at another width or in
       // another state: the frame cannot say the line is redundant there.
-      const contested = matched.some((match) => {
-        const rule = read.rules[match.index];
-        return (
-          rule !== undefined &&
-          varies(rule) &&
-          Object.keys(maps[rule.index] ?? {}).some((name) =>
-            relatedProperties(property, name),
-          )
-        );
-      });
-      if (contested) continue;
+      if (contested(read, matched, property)) continue;
       // Winner first: the first matching rule that restates the
       // declaration is the one worth naming.
       for (const match of matched) {

@@ -1,11 +1,9 @@
 // The static lint's rule-level checks, in the node project, over a page's
 // css text scanned into rules (pageCss.ts) — no DOM, no `dd.core`:
-// unit-less lengths and restated initials read a rule's declarations
-// exactly like an element's own, and the `img`/`hr` overflow exception is
-// approximated from the selector text alone (staticLint.ts). The full
-// staticLint() over a page — the markup parsed by the browser, the font
-// faces, the classes — is staticLint.browser.test.ts's, run from a
-// Daydream checkout (README.md).
+// unit-less lengths read a rule's declarations exactly like an element's
+// own (staticLint.ts). The full staticLint() over a page — the markup
+// parsed by the browser, the font faces, the classes — is
+// staticLint.browser.test.ts's, run from a Daydream checkout (README.md).
 import { describe, expect, test } from "vitest";
 
 import type { Finding } from "@daydream/plugin-api";
@@ -13,7 +11,6 @@ import type { Finding } from "@daydream/plugin-api";
 import { pageRules } from "./pageCss";
 import {
   classNamer,
-  lintRestatedInitialsOnRules,
   lintUnitlessLengthsOnRules,
   referencedClasses,
 } from "./staticLint";
@@ -21,12 +18,6 @@ import {
 function unitless(css: string): Finding[] {
   const out: Finding[] = [];
   lintUnitlessLengthsOnRules(pageRules(css), "v1", out);
-  return out;
-}
-
-function restated(css: string): Finding[] {
-  const out: Finding[] = [];
-  lintRestatedInitialsOnRules(pageRules(css), "v1", out);
   return out;
 }
 
@@ -73,75 +64,6 @@ describe("lintUnitlessLengthsOnRules", () => {
   test("a comment in the value is not part of it, and !important is not a unit", () => {
     expect(unitless(".a { width: 100 /* px */ !important; }")).toHaveLength(1);
     expect(unitless(".a { width: /* 100 */ 100px; }")).toEqual([]);
-  });
-});
-
-describe("lintRestatedInitialsOnRules", () => {
-  test("a restated initial on a rule with no type selector is a finding — the img/hr exception does not apply to properties outside the overflow table", () => {
-    expect(restated(".card { position: static; }")).toEqual([
-      {
-        tier: "static",
-        severity: "blocking",
-        rule: 0,
-        property: "position",
-        message:
-          "position: static in rule `.card` of viewport v1 restates the initial value",
-      },
-    ]);
-  });
-
-  test("overflow: visible on a rule with no type selector is excused — the compound could reach img or hr", () => {
-    expect(restated(".card { overflow: visible; }")).toEqual([]);
-  });
-
-  test("overflow: visible on a rule typed to img or hr is excused, case-insensitively", () => {
-    for (const selector of ["img", "IMG.thumb", "hr.rule", "* .x img"]) {
-      expect(restated(`${selector} { overflow: visible; }`), selector).toEqual([]);
-    }
-  });
-
-  test("overflow: visible on a rule typed to a different tag is a finding: it can never reach img or hr", () => {
-    expect(restated("div.card { overflow: visible; }")).toHaveLength(1);
-  });
-
-  test("a selector list is excused if ANY member could reach img or hr", () => {
-    expect(restated("div.card, img.thumb { overflow: visible; }")).toEqual([]);
-  });
-
-  test("an explicit universal selector is excused, same as no type", () => {
-    expect(restated("*.card { overflow: visible; }")).toEqual([]);
-  });
-
-  test("a non-initial value is never a finding", () => {
-    expect(restated(".card { position: relative; }")).toEqual([]);
-  });
-
-  test("a rule under a combinator is judged by its rightmost compound", () => {
-    // `.list > img` can reach an img at its rightmost compound even though
-    // the list itself is a div.
-    expect(restated(".list > img { overflow: visible; }")).toEqual([]);
-  });
-
-  test("value comparison ignores case", () => {
-    expect(restated(".a { position: Static; float: NONE; }")).toHaveLength(2);
-  });
-
-  test("a rule under a condition, or nested in another, resets under that condition — the override a conditional layer was — and is never a finding", () => {
-    expect(
-      restated(
-        "@media (width >= 600px) { .card { position: static; max-width: none; } }",
-      ),
-    ).toEqual([]);
-    expect(
-      restated(".card { position: absolute; &.open { position: static; } }"),
-    ).toEqual([]);
-    expect(
-      restated(".card { position: absolute; @media (width >= 600px) { position: static; } }"),
-    ).toEqual([]);
-  });
-
-  test("an !important initial is there to win, and is not judged", () => {
-    expect(restated(".a { position: static !important; }")).toEqual([]);
   });
 });
 

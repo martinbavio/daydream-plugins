@@ -7,9 +7,10 @@
 // (pageCss.ts), every match and every computed value the browser's.
 // The browser part registers the two lints as gates on every landing path
 // — the static lint (staticLint.ts's facts from the texts, plus
-// matchLint.ts's match-dependent ones: redundancy — an element's own
-// style against a rule, and a rule's against the rule beneath it — dead
-// rules, and a container query no ancestor can answer — judged by
+// matchLint.ts's match-dependent ones: an explicit initial value the page
+// computes without, redundancy — an element's own style against a rule,
+// and a rule's against the rule beneath it — dead rules, and a container
+// query no ancestor can answer — judged by
 // MOUNTING the incoming page, never by reading canvas match facts, since
 // a gate's document is not on the canvas; see matchLint.ts's header) and
 // the necessity lint (necessity.ts, each declaration — an element's own or
