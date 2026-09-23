@@ -1,6 +1,6 @@
 // The rebase of typed text onto a page that changed underneath: the
-// typing as one hunk over the text it started from, carried onto the page
-// as it is now when the other change left that hunk's place alone.
+// typing as one span over the text it started from, carried onto the page
+// as it is now when the other change left that span's place alone.
 import { describe, expect, test } from "vitest";
 
 import { rebase } from "./rebase";
@@ -62,5 +62,15 @@ describe("rebase", () => {
   test("text typed back to where it started is the page as it is now", () => {
     const current = BASE.replace("Body copy", "An agent's copy");
     expect(rebase(BASE, BASE, current)).toBe(current);
+  });
+
+  test("a page that did not change takes the typing as it is", () => {
+    const typed = BASE + "<p>More</p>\n";
+    expect(rebase(BASE, typed, BASE)).toBe(typed);
+  });
+
+  test("typing that makes the other change's text is the page as it is now", () => {
+    const current = BASE.replace("Old headline", "Theirs");
+    expect(rebase(BASE, current, current)).toBe(current);
   });
 });

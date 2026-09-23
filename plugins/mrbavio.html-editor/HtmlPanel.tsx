@@ -252,10 +252,9 @@ export default function createHtmlPanel(state: PanelState) {
       return { ok: false, reason: "gone", message: PAGE_GONE };
     }
     const base = synced;
-    // Text that is the page's already is written as nothing, but still
-    // syncs: the typing that follows starts from it.
-    const next =
-      current === text || current === base ? text : rebase(base, text, current);
+    // Text that is the page's already comes back as the page's: written as
+    // nothing, but synced, so the typing that follows starts from it.
+    const next = rebase(base, text, current);
     if (next === null) {
       return {
         ok: false,
