@@ -21,6 +21,7 @@ const script = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
   "kernel-test.mjs",
 );
+const repo = path.join(path.dirname(script), "..");
 
 const LOCK = [
   "lockfileVersion: '9.0'",
@@ -115,5 +116,17 @@ describe("kernel-test --clean", () => {
     const r = run(k, notes);
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("--clean");
+  });
+});
+
+describe("kernel-test's plugin paths", () => {
+  test("a path with no manifest.json stops the run before anything is installed, and names the path", () => {
+    const k = scratchKernel();
+    const mistyped = path.join(repo, "plugins", "mrbavio.htmleditor");
+    const r = run(k, mistyped, path.join(repo, "plugins", "mrbavio.notes"));
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("mrbavio.htmleditor");
+    expect(r.stdout).not.toContain("pnpm install");
+    expect(existsSync(path.join(k, "plugins", "mrbavio.notes"))).toBe(false);
   });
 });

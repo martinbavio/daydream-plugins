@@ -141,13 +141,28 @@ if (pinSha !== undefined && !head.startsWith(pinSha)) {
   );
 }
 
+const isPlugin = (dir) => existsSync(path.join(dir, "manifest.json"));
+// A folder named on the command line is a plugin or a mistake: dropping it
+// quietly would run whatever is left — or, with nothing left, the kernel's
+// own suite — and report a pass for tests that never ran.
+const notPlugins = given.map((d) => path.resolve(d)).filter((d) => !isPlugin(d));
+if (notPlugins.length > 0) {
+  console.error(
+    `not a plugin folder (no manifest.json): ${notPlugins.join(", ")}`,
+  );
+  process.exit(2);
+}
 const folders = (
   given.length > 0
     ? given.map((d) => path.resolve(d))
     : readdirSync(path.join(root, "plugins")).map((n) =>
         path.join(root, "plugins", n),
       )
-).filter((dir) => existsSync(path.join(dir, "manifest.json")));
+).filter(isPlugin);
+if (folders.length === 0) {
+  console.error(`no plugin folders under ${path.join(root, "plugins")}`);
+  process.exit(2);
+}
 const ids = folders.map((dir) => path.basename(dir));
 for (const id of ids) {
   if (existsSync(path.join(kernel, "plugins", id))) {
