@@ -228,6 +228,21 @@ describe("matchLint", () => {
     ]);
   });
 
+  test("outside @scope only a real `:scope` pseudo-class is the root: the text `:scope` in a string, an attribute or an escape is not one", async () => {
+    expect(
+      await matchLint(
+        page(
+          `[data-value=":scope"] { color: red; }
+[data-value=\\:scope] { padding: 1px; }
+.a\\:scope { margin: 1px; }
+[title=':scope x'] > p { color: blue; }
+:scope > body { margin: 0; }`,
+          '<div data-value=":scope" class="a:scope" title=":scope x"><p>x</p></div>',
+        ),
+      ),
+    ).toEqual([]);
+  });
+
   test("a rule under an @media condition inactive at the frame is never called dead on that evidence alone", async () => {
     expect(
       await matchLint(page("@media (min-width: 2000px) { .card { color: red; } }")),

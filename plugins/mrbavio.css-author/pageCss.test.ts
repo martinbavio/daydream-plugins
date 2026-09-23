@@ -6,8 +6,10 @@ import { describe, expect, test } from "vitest";
 import {
   declarationMap,
   fontFaces,
+  hasScopePseudo,
   mediaPreludes,
   pageRules,
+  replaceScopePseudo,
   resolveNested,
   ruleName,
   scanDeclarations,
@@ -236,6 +238,32 @@ describe("helpers", () => {
     expect(resolveNested("& + &", "li")).toBe(":is(li) + :is(li)");
     expect(resolveNested("h2, > p", ".a, .b")).toBe(":is(.a, .b) h2, :is(.a, .b) > p");
     expect(resolveNested('[data-x="&"]', ".a")).toBe(':is(.a) [data-x="&"]');
+  });
+
+  test("replaceScopePseudo replaces the pseudo-class alone: never inside a string, an attribute selector or after an escape", () => {
+    expect(replaceScopePseudo(":scope > p, :SCOPE.a", ":root")).toBe(
+      ":root > p, :root.a",
+    );
+    for (const literal of [
+      '[data-value=":scope"]',
+      "[data-value=':scope']",
+      "[data-value=\\:scope]",
+      ".a\\:scope",
+      ":scoped",
+      ":scope-x",
+    ]) {
+      expect(replaceScopePseudo(literal, ":root"), literal).toBe(literal);
+      expect(hasScopePseudo(literal), literal).toBe(false);
+    }
+    expect(replaceScopePseudo('[title="]"]:scope', ":root")).toBe(
+      '[title="]"]:root',
+    );
+    // Inside an @scope, a member naming `:scope` only in an attribute is
+    // still the root's descendant.
+    expect(
+      pageRules('@scope (.card) { [data-value=":scope"] { color: red } }')[0]!
+        .selector,
+    ).toBe(':where(:scope) [data-value=":scope"]');
   });
 
   test("trailing pseudo-elements, both spellings, stripped for matching", () => {

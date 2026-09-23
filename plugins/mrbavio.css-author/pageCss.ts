@@ -496,7 +496,7 @@ function relativeToScope(selector: string): string {
       const trimmed = member.trim();
       if (/^[>+~]/.test(trimmed)) return `${SCOPE_ROOT} ${trimmed}`;
       const rooted = replaceNestingSelector(trimmed, SCOPE_ROOT);
-      return /:scope(?![\w-])/i.test(unquoted(rooted))
+      return hasScopePseudo(rooted)
         ? rooted
         : `${SCOPE_ROOT} ${trimmed}`;
     })
@@ -572,21 +572,27 @@ function closingParen(text: string): number {
   return -1;
 }
 
-/** The selector with each string's contents blanked, so a pattern read
- * over it never matches inside one. */
-function unquoted(selector: string): string {
+/** Whether the selector names the `:scope` pseudo-class
+ * (`replaceScopePseudo`). */
+export function hasScopePseudo(selector: string): boolean {
+  return replaceScopePseudo(selector, "\u0000").includes("\u0000");
+}
+
+/** The selector with each `:scope` pseudo-class replaced by `by` — a real
+ * one only, as the selector parser reads it: never text inside a string
+ * or an attribute selector's brackets (`[data-value=":scope"]`), and
+ * never after an escape (`.a\:scope` is a class). Checked against
+ * Chromium. */
+export function replaceScopePseudo(selector: string, by: string): string {
   let out = "";
   let quote: string | null = null;
+  let bracket = false;
   for (let i = 0; i < selector.length; i++) {
     const ch = selector[i] as string;
     if (quote !== null) {
-      if (ch === "\\") {
-        out += "  ";
-        i++;
-      } else if (ch === quote) {
-        quote = null;
-        out += ch;
-      } else out += " ";
+      out += ch;
+      if (ch === "\\") out += selector[++i] ?? "";
+      else if (ch === quote) quote = null;
       continue;
     }
     if (ch === "\\") {
@@ -594,10 +600,21 @@ function unquoted(selector: string): string {
       continue;
     }
     if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === "[") bracket = true;
+    else if (ch === "]") bracket = false;
+    else if (!bracket && ch === ":" && SCOPE_PSEUDO.test(selector.slice(i, i + 7))) {
+      out += by;
+      i += ":scope".length - 1;
+      continue;
+    }
     out += ch;
   }
   return out;
 }
+
+/** `:scope` at the start of the text, and not the start of a longer
+ * name. */
+const SCOPE_PSEUDO = /^:scope(?![\w\\-]|[^\x00-\x7f])/i;
 
 /** Every `@font-face` block of the text, wherever a group rule holds it,
  * with its declarations. */
