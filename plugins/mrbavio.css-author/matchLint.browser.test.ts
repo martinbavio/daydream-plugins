@@ -175,6 +175,33 @@ describe("matchLint", () => {
     ).toEqual([]);
   });
 
+  test("an element's own declaration a matched rule restates is not redundancy when the cascade without it picks another rule", async () => {
+    // Without the element's `color: red !important`, the later
+    // `.special`'s important blue wins, not `.card`'s red.
+    expect(
+      await matchLint(
+        page(
+          ".card { color: red !important; }\n.special { color: blue !important; }",
+          '<div class="card special" style="color: red !important"></div>',
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("an element's own declaration is not redundancy when a rule that applies at another width or in another state could win without it", async () => {
+    for (const other of [
+      "@media (width >= 2000px) { .card.x { color: blue; } }",
+      ".card:hover { color: blue; }",
+    ]) {
+      expect(
+        await matchLint(
+          page(`.card { color: red; }\n${other}`, '<div class="card x" style="color: red"></div>'),
+        ),
+        other,
+      ).toEqual([]);
+    }
+  });
+
   test("a pseudo-element rule matches its element (not dead) but is never compared for redundancy against the element's own style", async () => {
     expect(
       await matchLint(
@@ -266,6 +293,20 @@ describe("matchLint", () => {
         page(
           ".card { color: #333; }\n.featured { color: #333; }",
           '<div class="card featured"></div><div class="featured"></div>',
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a rule declaration is not redundancy when a state rule between it and the rule beneath would win without it", async () => {
+    // Hovered, `.a.a.a`'s red holds off `.a:hover`'s blue; without it the
+    // card turns blue. The rule beneath restates it only while nobody
+    // hovers.
+    expect(
+      await matchLint(
+        page(
+          ".a.a.a { color: red; }\n.a:hover { color: blue; }\n.a { color: red; }",
+          '<div class="a"></div>',
         ),
       ),
     ).toEqual([]);
