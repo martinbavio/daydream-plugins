@@ -4,7 +4,7 @@ import type { DaydreamApi, OverlayRect } from "@daydream/plugin-api";
 
 import type { Session } from "./session";
 import { classPrefix } from "./styles";
-import { targetBox } from "./target";
+import { createTargetBox } from "./target";
 
 /** The one line the canvas says about a pick: `bolder · waiting for an
  * agent`, then `bolder · building` once an agent took it — `bolder · 1 of
@@ -23,6 +23,7 @@ export default function createCaption(
   working: (verb: string) => string = () => "building",
 ) {
   const [box, setBox] = createSignal<{ rect: OverlayRect; whole: boolean } | null>(null);
+  const targetBox = createTargetBox(dd);
 
   createEffect(
     () => {
@@ -35,7 +36,7 @@ export default function createCaption(
         return;
       }
       const { viewportId, element } = phase.pick;
-      setBox(untrack(() => targetBox(dd, { viewportId, element, anchor: phase.anchor })));
+      setBox(untrack(() => targetBox({ viewportId, element, anchor: phase.anchor })));
     },
   );
 
