@@ -181,6 +181,30 @@ describe("css-author gates on at-rules and markers", () => {
     expect(document.querySelectorAll("iframe")).toHaveLength(0);
   });
 
+  test("a preference query and a height query are judged the same way by both gates: a rule under one is judged exactly where the mounted window's matchMedia holds it", async () => {
+    // `.none` matches nothing, so each rule the static gate judges is a
+    // dead rule and each the necessity gate judges a dead declaration.
+    const conditions = [
+      "(prefers-color-scheme: dark)",
+      "(prefers-color-scheme: light)",
+      "(max-height: 1000px)",
+      "(min-height: 2000px)",
+    ];
+    const doc = cardPage(
+      conditions
+        .map((condition) => `@media ${condition} { .none { color: red; } }`)
+        .join("\n"),
+    );
+    const judged = (findings: Finding[]) =>
+      findings.flatMap((f) => (f.rule === undefined ? [] : [f.rule]));
+    const statics = judged(await judge(STATIC_GATE, doc));
+    expect(judged(await judge(NECESSITY_GATE, doc))).toEqual(statics);
+    // One colour scheme holds, whichever the browser prefers; the height
+    // the 600px frame meets holds, and the one it does not never does.
+    expect(statics.filter((rule) => rule < 2)).toHaveLength(1);
+    expect(statics.filter((rule) => rule >= 2)).toEqual([2]);
+  });
+
   test("inside them each lint still judges what applies: a unit-less length, a scoped rule matching nothing, a dead declaration under a height the frame meets", async () => {
     const doc = cardPage(`<!-- .card { padding: 16px; } -->
 @scope (.card) { p { margin: 4; } :scope > .none { color: red; } }

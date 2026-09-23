@@ -40,8 +40,9 @@ export default function activate(dd: DaydreamApi): void {
   dd.registerGate({
     id: STATIC_GATE,
     title: "Static lint",
-    // matchLint mounts the document (necessity.ts's own live-strategy
-    // seam), so the static gate's run is async here too.
+    // matchLint mounts the document (the live-strategy seam it shares
+    // with necessity.ts, pageMount.ts), so the static gate's run is async
+    // here too.
     run: async (doc) => [
       ...staticLint(dd.core, doc as DreamDocument),
       ...(await matchLint(dd, doc as DreamDocument)),

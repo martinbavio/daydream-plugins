@@ -42,10 +42,13 @@
 //
 // DEAD RULE: no element of the mounted page matches the rule's selector —
 // with state pseudo-classes given a second chance, state-stripped, since
-// nobody hovers a lint run (statePseudo.ts). A rule under an `@media` not
-// active at the viewport's own frame is left alone: this lint has no width
-// sweep to tell a responsive rule apart from a dead one — the necessity
-// lint's sweep judges a responsive rule's declarations (necessity.ts).
+// nobody hovers a lint run (statePseudo.ts). A rule under an `@media` or
+// `@supports` that does not hold in the mounted window is left alone: this
+// lint has no width sweep to tell a responsive rule apart from a dead one
+// — the necessity lint's sweep judges a responsive rule's declarations
+// (necessity.ts). Whether a condition holds is the one answer both gates
+// read (pageMount.ts conditionsHold): the window's own `matchMedia`, so a
+// preference or a height query is judged the same way by both.
 //
 // A CONTAINER QUERY WITH NO CONTAINER: a rule under `@container` whose
 // every matched element lacks an ancestor that is a container for what the
@@ -73,7 +76,6 @@
 
 import type {
   CoreApi,
-  DaydreamApi,
   DreamDocument,
   DreamPage,
   Finding,
@@ -96,7 +98,6 @@ import {
   selectorForMatching,
   splitTopLevelCommas,
   trailingPseudoElement,
-  withoutRanges,
   type CssDeclaration,
   type PageRule,
 } from "./pageCss";
@@ -106,6 +107,13 @@ import {
   parsePage,
   storedNames,
 } from "./pageDom";
+import {
+  conditionsHold,
+  readWithout,
+  withMount,
+  type MountHost,
+  type TextRange,
+} from "./pageMount";
 import { ruleMatcher, type RuleMatcher } from "./ruleMatch";
 import {
   relatedProperties,
@@ -118,12 +126,13 @@ import { hasStatePseudo, stripStatePseudo } from "./statePseudo";
  * live mount. A gate hands in its `dd`; a test hands in a test kernel's —
  * both mount the page handed to `matchLint`, never read a fact about
  * whatever (if anything) is on the canvas. */
-export type MatchHost = Pick<DaydreamApi, "core" | "mountViewport">;
+export type MatchHost = MountHost;
 
 /** One page mounted, read once: its elements in tree order, each one's
  * own declarations and unique selector, and the rules. */
 interface MountedPage {
   page: DreamPage;
+  doc: Document;
   /** The page's `<style>` in the copy, which a measurement cuts from and
    * restores (`unchangedWithout`), or null when there is none. */
   style: HTMLStyleElement | null;
@@ -152,10 +161,7 @@ export async function matchLint(
     const stored = parsePage(page.payload);
     const authored = pageRules(stored.css);
     if (authored.length === 0) continue;
-    // Still: a redundancy is measured by a synchronous remove, read and
-    // restore, which a transition would answer with its start value.
-    const mounted = await dd.mountViewport(page, { still: true });
-    try {
+    await withMount(dd, page, undefined, async (mounted) => {
       const mdoc = mounted.document();
       const nodes = lintElements(mdoc);
       // The copy's own css, so a rule's values and an element's `style`
@@ -165,6 +171,7 @@ export async function matchLint(
       const copied = style?.textContent;
       const read: MountedPage = {
         page,
+        doc: mdoc,
         style,
         rules: copied == null ? authored : pageRules(copied),
         nodes,
@@ -180,11 +187,9 @@ export async function matchLint(
       const ranked = rankedMatches(dd.core, read);
       lintRedundancy(read, ranked, findings);
       lintRuleRestatements(read, ranked, findings);
-      lintDeadRules(dd.core, read, findings);
+      lintDeadRules(read, findings);
       lintContainerQueries(read, findings);
-    } finally {
-      mounted.dispose();
-    }
+    });
   }
   return findings;
 }
@@ -412,40 +417,25 @@ function allOf(
 }
 
 /**
- * Remove, read, restore — the necessity lint's measurement (necessity.ts
- * isDead), asked of the elements a redundancy is about: `css` ranges cut
- * from the copy's `<style>` and `inline` ranges from each node's `style`
- * in one write, then whether every one of `nodes` computes exactly what
- * it did, then everything put back as it was. The computed style decides
- * an element's box and everything that inherits from it, so an element
- * computing the same is a page unchanged by the cut. With no `<style>` to
- * cut from, a css range reads as a change.
+ * Remove, read, restore — the necessity lint's measurement, through the
+ * same helper (pageMount.ts readWithout), asked of the elements a
+ * redundancy is about: whether every one of `nodes` computes exactly what
+ * it did with the `css` and `inline` ranges cut. The computed style
+ * decides an element's box and everything that inherits from it, so an
+ * element computing the same is a page unchanged by the cut. With no
+ * `<style>` to cut from, a css range reads as a change.
  */
 function unchangedWithout(
   read: MountedPage,
-  css: readonly (readonly [number, number])[],
-  inline: ReadonlyMap<Element, readonly (readonly [number, number])[]>,
+  css: readonly TextRange[],
+  inline: ReadonlyMap<Element, readonly TextRange[]>,
   nodes: readonly Element[],
 ): boolean {
-  const { style } = read;
-  if (css.length > 0 && style === null) return false;
+  if (css.length > 0 && read.style === null) return false;
   const before = nodes.map(computedOf);
-  const sheet = style?.textContent ?? "";
-  const attributes = new Map(
-    Array.from(inline.keys(), (node) => [node, node.getAttribute("style") ?? ""]),
+  return readWithout(read.style, css, inline, () =>
+    nodes.every((node, i) => computedOf(node) === before[i]),
   );
-  try {
-    if (style !== null && css.length > 0) {
-      style.textContent = withoutRanges(sheet, css);
-    }
-    for (const [node, ranges] of inline) {
-      node.setAttribute("style", withoutRanges(attributes.get(node)!, ranges));
-    }
-    return nodes.every((node, i) => computedOf(node) === before[i]);
-  } finally {
-    if (style !== null && css.length > 0) style.textContent = sheet;
-    for (const [node, text] of attributes) node.setAttribute("style", text);
-  }
 }
 
 /** Every computed value of the element, custom properties included (a
@@ -464,13 +454,9 @@ function computedOf(node: Element): string {
 // ---------------------------------------------------------------------------
 // Dead rule — no element of the mounted page matches the selector.
 
-function lintDeadRules(
-  core: CoreApi,
-  read: MountedPage,
-  findings: Finding[],
-): void {
+function lintDeadRules(read: MountedPage, findings: Finding[]): void {
   for (const rule of read.rules) {
-    if (hasInactiveMediaCondition(core, read.page, rule)) continue;
+    if (!conditionsHold(read.doc, rule.conditions)) continue;
     let dead = !matchesAny(read, rule, selectorForMatching(rule.selector));
     if (dead && hasStatePseudo(rule.selector)) {
       // A second chance, state-stripped: a `.card:hover` that matches
@@ -490,24 +476,6 @@ function lintDeadRules(
       message: `rule ${ruleName(rule)} in viewport ${read.page.id} matches no element`,
     });
   }
-}
-
-/** Whether one of the rule's `@media` conditions is definitely false at
- * the viewport's frame — core's evaluator, the one the canvas renders
- * with; "unknown" (a preference, no frame) is not false. */
-function hasInactiveMediaCondition(
-  core: CoreApi,
-  page: DreamPage,
-  rule: Pick<PageRule, "conditions">,
-): boolean {
-  if (rule.conditions.length === 0) return false;
-  const env = core.viewportMediaEnvironment(page);
-  return rule.conditions.some((condition) => {
-    if (atKeyword(condition) !== "media") return false;
-    const result =
-      env === null ? "unknown" : core.evaluateMediaCondition(condition, env);
-    return result === false;
-  });
 }
 
 // ---------------------------------------------------------------------------
