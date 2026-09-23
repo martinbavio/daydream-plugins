@@ -175,20 +175,24 @@ describe("kernel-test --clean", () => {
   });
 });
 
-/** A `pnpm` that logs each call and does nothing — but hangs in `exec
- * vitest`, as a long test run does, and with `failReinstall` fails the
- * clean-up's reinstall — first on PATH. */
-function fakePnpm({ failReinstall = false } = {}): { env: NodeJS.ProcessEnv; calls: () => string[] } {
+/** A `pnpm` that logs each call and does nothing — but `exec vitest`
+ * hangs, as a long test run does, or with `vitest` prints that and
+ * passes; and with `failReinstall` the clean-up's reinstall fails — first
+ * on PATH. */
+function fakePnpm({ failReinstall = false, vitest = "" } = {}): { env: NodeJS.ProcessEnv; calls: () => string[] } {
   const bin = path.join(kernel, ".bin-fake");
   const log = path.join(kernel, ".pnpm-calls");
   mkdirSync(bin);
+  writeFileSync(path.join(kernel, ".vitest-out"), vitest);
   writeFileSync(
     path.join(bin, "pnpm"),
     [
       "#!/bin/sh",
       'echo "$*" >> "$FAKE_PNPM_LOG"',
       'case "$*" in',
-      '  "exec vitest"*) exec sleep 5 ;;',
+      vitest === ""
+        ? '  "exec vitest"*) exec sleep 5 ;;'
+        : `  "exec vitest"*) cat "${path.join(kernel, ".vitest-out")}"; exit 0 ;;`,
       `  "install --frozen-lockfile --silent") exit ${failReinstall ? 1 : 0} ;;`,
       "esac",
       "exit 0",
@@ -231,6 +235,23 @@ describe("kernel-test stopped by a signal", () => {
     expect(existsSync(path.join(k, "plugins", "mrbavio.notes"))).toBe(false);
     expect(readFileSync(path.join(k, "pnpm-lock.yaml"), "utf8")).toBe(LOCK);
   }, 15000);
+});
+
+describe("kernel-test's Solid warnings", () => {
+  test.each(["STRICT_READ_UNTRACKED", "FLUSH_IN_EFFECT_CALLBACK"])("a %s warning in the browser tests fails the run, counted once each", (code) => {
+    const k = scratchKernel();
+    const warning = `[vite] (client) [console.warn] [${code}] the message`;
+    const pnpm = fakePnpm({
+      vitest: [warning, warning, `[${code}] repair guide: node_modules/solid-js/skills/…`, " Tests  3 passed (3)", ""].join("\n"),
+    });
+    const r = spawnSync("node", [script, k, path.join(repo, "plugins", "mrbavio.notes")], {
+      encoding: "utf8",
+      env: pnpm.env,
+    });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(new RegExp(`FAIL ${code} warnings \\(2\\)`));
+    expect(r.stdout).toMatch(/ok {3}vitest/);
+  });
 });
 
 describe("kernel-test's plugin paths", () => {

@@ -357,14 +357,18 @@ try {
   const tests = await step("pnpm", ["exec", "vitest", "run", ...targets], {
     capture: true,
   });
-  const untracked = tests.output
-    .split("\n")
-    .filter((l) => l.includes("STRICT_READ_UNTRACKED"));
   results.push(["vitest", tests.status]);
-  results.push([
-    "STRICT_READ_UNTRACKED warnings",
-    untracked.length === 0 ? 0 : `${untracked.length} line(s)`,
-  ]);
+  // Solid's dev warnings pass the tests but name a real fault: a read
+  // that will not update, a flush that does nothing. The kernel's own
+  // suite raises neither, so a plugin's run fails on each. One line per
+  // warning; Solid adds one "repair guide" line per code, not counted.
+  const lines = tests.output.split("\n");
+  for (const code of ["STRICT_READ_UNTRACKED", "FLUSH_IN_EFFECT_CALLBACK"]) {
+    const count = lines.filter(
+      (l) => l.includes(`[${code}]`) && !l.includes("repair guide"),
+    ).length;
+    results.push([`${code} warnings`, count]);
+  }
 
   if (!flags.has("--no-lint"))
     results.push([
