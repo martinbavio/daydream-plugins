@@ -13,15 +13,16 @@ import { createHtmlEditor, type HtmlEditorHandle } from "./htmlEditor";
 import { classPrefix } from "./styles";
 
 /** Text a save refused, held on screen and kept per page, so a refusal,
- * another page's selection or a hidden dock never loses what was typed.
- * Panel memory, never the document. */
+ * a page that changed underneath, another page's selection or a hidden
+ * dock never loses what was typed. Panel memory, never the document. */
 export interface Draft {
   text: string;
-  /** The refusal's sentence. */
+  /** Why it is not the page's: the refusal's sentence, or
+   * CHANGED_UNDERNEATH. */
   problem: string;
   /** The page's html the draft is held against. The next edit of the
    * draft saves over it; a page whose html is something else by then
-   * changed underneath, and the save is refused. */
+   * changed underneath again, and the save is refused. */
   base: string;
 }
 
@@ -48,9 +49,9 @@ export const APPLY_DEBOUNCE_MS = 150;
 
 /** The sentence for text typed over a page that changed on the canvas
  * meanwhile (an agent, the CSS editor, a draft finalizing): nothing is
- * written, and the page's own text is shown again. */
+ * written, and the typed text is kept as the page's draft. */
 export const CHANGED_UNDERNEATH =
-  "The page's HTML changed on the canvas while you were editing; nothing was saved, and it is shown again.";
+  "The page's HTML changed on the canvas while you were editing, so nothing was saved. Your text is kept here: your next edit saves it over the page as it is now, and ⌘Z drops it.";
 
 /** The sentence for a page gone from the canvas mid-save. */
 const PAGE_GONE = "The page is no longer on the canvas.";
@@ -114,9 +115,10 @@ type Saved = { ok: true } | { ok: false; problem: string; stale: boolean };
  *
  * A REFUSED text is never lost: it stays on screen as the page's DRAFT
  * with the sentence under it, and comes back with the page when another
- * one was selected in between; ⌘Z drops it. Text typed over a page that
- * changed on the canvas meanwhile is never written, and the page's own
- * text is shown again.
+ * one was selected in between. Text typed over a page that changed on
+ * the canvas meanwhile is kept the same way, with a note that it changed
+ * underneath: the next edit saves it over the page as it is then, and ⌘Z
+ * drops it.
  *
  * Each save rewrites the markup, so the page REMOUNTS and its elements
  * get new ids; the canvas carries the selection by its place. The pane
@@ -232,17 +234,17 @@ export default function createHtmlPanel(state: PanelState) {
     return { ok: false, problem: sentence(problem), stale: false };
   };
 
-  /** The draft a refused save of `text` leaves. */
-  const draftOf = (text: string, refused: Saved): Draft => ({
+  /** The draft a refused save of `text` leaves. A stale one is held
+   * against the page as it is now: the note has said it changed. */
+  const draftOf = (id: string, text: string, refused: Saved): Draft => ({
     text,
     problem: refused.ok ? "" : refused.problem,
-    base: synced,
+    base: !refused.ok && refused.stale ? (stored(id) ?? "") : synced,
   });
 
   /** Save the editor's dirty text to page `id` now. Saved: the text is
-   * the page's. Refused: it stays on screen, held as the page's draft,
-   * the sentence under it. Stale: the sentence, and the page's own text
-   * shown again. */
+   * the page's. Refused or stale: it stays on screen, held as the page's
+   * draft, the sentence under it. */
   const saveEditor = (id: string): Saved => {
     const ed = editor();
     if (ed === undefined || !dirty) return { ok: true };
@@ -253,14 +255,8 @@ export default function createHtmlPanel(state: PanelState) {
       drafts.delete(id);
       setMessage(null);
       mark(ed, false);
-    } else if (result.stale) {
-      drafts.delete(id);
-      synced = stored(id) ?? "";
-      ed.setText(synced);
-      setMessage(result.problem);
-      mark(ed, false);
     } else {
-      const draft = draftOf(text, result);
+      const draft = draftOf(id, text, result);
       drafts.set(id, draft);
       synced = draft.base;
       setMessage(draft.problem);
@@ -330,9 +326,7 @@ export default function createHtmlPanel(state: PanelState) {
       const text = ed.text();
       queueMicrotask(() => {
         const result = saveText(id, text);
-        if (!result.ok && !result.stale) {
-          drafts.set(id, draftOf(text, result));
-        }
+        if (!result.ok) drafts.set(id, draftOf(id, text, result));
       });
     }
     ed?.destroy();

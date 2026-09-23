@@ -4,10 +4,10 @@
 // API — what a person sees. The pane shows the page's html as its text
 // and marks the selected element in it, and the caret selects the element
 // it is in; typing saves live, verbatim, through the kernel's writePage,
-// and quick saves join one undo step; a save the kernel refuses is kept
-// as the page's draft, and one over a page that changed underneath is
-// refused as stale; Delete on an inner element cuts it out of the text
-// and never removes the viewport.
+// and quick saves join one undo step; a save the kernel refuses, or one
+// over a page that changed underneath, is kept as the page's draft;
+// Delete on an inner element cuts it out of the text and never removes
+// the viewport.
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -626,24 +626,68 @@ describe("mrbavio.html-editor", () => {
     expect(text()).toBe(edited("Old headline", "Kept"));
   });
 
-  test("a page changed on the canvas while unsaved text is pending is refused as stale and shown again", async () => {
+  test("text typed over a page that changed on the canvas is kept as its draft, with a note", async () => {
+    const one = createPageItem(
+      { html: HTML, css: CSS },
+      { frame: { width: 600 } },
+    );
+    const other = "<!doctype html>\n<body>\n  <h1>Other</h1>\n</body>";
+    const two = createPageItem(
+      { html: other, css: "" },
+      { frame: { width: 600 }, position: { x: 800, y: 0 } },
+    );
+    await mountPage({ version: 7, items: [one, two] });
+    await waitMounted(two.id, "h1");
+    select(one.id);
+    content().focus();
+    const mine = edited("Old headline", "Mine");
+    await typeAll(mine);
+    // An agent writes the page before the debounce saves.
+    const theirs = edited("Body copy", "An agent's copy");
+    outsideEdit(theirs, one.id);
+    // Uncontrolled while typing: the typed text is still there.
+    expect(text()).toBe(mine);
+    await settled();
+    // Nothing written over theirs, and nothing typed thrown away.
+    expect(stored(one.id)).toBe(theirs);
+    expect(text()).toBe(mine);
+    expect(message()).toBe(CHANGED_UNDERNEATH);
+
+    // Held while the page is left: blur writes nothing, another page
+    // shows clean, and the draft comes back with its note.
+    blur();
+    expect(stored(one.id)).toBe(theirs);
+    expect(text()).toBe(mine);
+    select(two.id);
+    expect(text()).toBe(other);
+    expect(message()).toBeNull();
+    select(one.id);
+    expect(text()).toBe(mine);
+    expect(message()).toBe(CHANGED_UNDERNEATH);
+
+    // The next edit saves it over the page as it is now, as the note said.
+    content().focus();
+    const more = edited("Mine", "Mine, kept", mine);
+    await type(more);
+    expect(message()).toBeNull();
+    expect(stored(one.id)).toBe(more);
+  });
+
+  test("⌘Z drops a draft the page never held and shows the page as it is", async () => {
     await mountPage();
     select(itemId);
     content().focus();
     await typeAll(edited("Old headline", "Mine"));
-    // An agent writes the page before the debounce saves.
     const theirs = edited("Body copy", "An agent's copy");
     outsideEdit(theirs);
-    // Uncontrolled while typing: the typed text is still there.
-    expect(text()).toBe(edited("Old headline", "Mine"));
     await settled();
     expect(message()).toBe(CHANGED_UNDERNEATH);
+
+    key(content(), { key: "z", metaKey: true });
+    // The agent's edit is not undone: only the typed text goes.
     expect(stored()).toBe(theirs);
     expect(text()).toBe(theirs);
-    // The next edit is made over what is there now, and saves.
-    await type(edited("Old headline", "Mine", theirs));
     expect(message()).toBeNull();
-    expect(stored()).toBe(edited("Old headline", "Mine", theirs));
   });
 
   test("a page changed on the canvas with nothing pending is shown as it is now", async () => {

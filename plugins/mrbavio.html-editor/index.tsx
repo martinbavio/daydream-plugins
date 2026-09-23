@@ -4,13 +4,13 @@
 // span marked, and the element the caret is in selected on the canvas.
 // Saved live as you type through `dd.writePage`, whose verdict is the
 // kernel's: what a landing would take out is refused by name, and so is
-// a save over a page that changed underneath. With it, a person can
-// change a page's structure — edit a headline, add an element, change a
-// tag or an attribute — the way they would in a file. Delete and
-// Backspace on an inner element remove that element alone, cut out of
-// the text where it was written (core's own Delete removes the whole item
-// when the page is selected; the `html`, `head` and `body` stay, since a
-// page has them).
+// a save over a page that changed underneath — the typed text is kept as
+// the page's draft either way. With it, a person can change a page's
+// structure — edit a headline, add an element, change a tag or an
+// attribute — the way they would in a file. Delete and Backspace on an
+// inner element remove that element alone, cut out of the text where it
+// was written (core's own Delete removes the whole item when the page is
+// selected; the `html`, `head` and `body` stay, since a page has them).
 //
 // NOT here, on purpose: in-place text editing on the canvas. Nor a
 // resizer: the dock's width and the split between this pane and the CSS
@@ -75,8 +75,8 @@ export default function activate(dd: DaydreamApi): void {
   dd.bindShortcut(BLUR_COMMAND, "Escape");
   // ⌘Z while typing: what is pending is saved first, so core's undo takes
   // it with the rest of its edit burst — the command declines and the key
-  // reaches core's undo. Text the page never held (a refused draft) is
-  // dropped instead, and the pane shows the page as it is.
+  // reaches core's undo. Text the page never held (a refused or stale
+  // draft) is dropped instead, and the pane shows the page as it is.
   dd.registerCommand({
     id: UNDO_COMMAND,
     title: "Undo the typing",
