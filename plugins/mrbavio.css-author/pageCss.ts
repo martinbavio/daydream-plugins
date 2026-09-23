@@ -266,6 +266,101 @@ function stringEnd(css: string, from: number, to: number): number {
   return to;
 }
 
+/** Each bracket that opens a block in CSS, and the one that closes it. */
+const CLOSER: Readonly<Record<string, string>> = {
+  "{": "}",
+  "(": ")",
+  "[": "]",
+};
+
+/**
+ * Whether `css` can be put inside a block as written and the block's own
+ * `}` after it still close that block — the kernel's own test, to the
+ * letter (src/render/cssRanges.ts closesItsOwnBlocks), which decides how
+ * its landing folds a `<style media>` (pageDom.ts withMedia): every `{`,
+ * `(` and `[` it opens is closed by its own closer and it closes nothing
+ * it did not open, and no comment, string or unquoted `url(…)` runs off
+ * its end. Read as the CSS tokenizer reads it: a bracket in a comment, a
+ * string, a url or an escape is not one, and a url is known by its name
+ * with escapes decoded (`\75rl(` is `url(`). Where it is unsure it
+ * answers no — a stray `)` the CSS parser would keep as a token is
+ * refused here too.
+ */
+export function closesItsOwnBlocks(text: string): boolean {
+  // The tokenizer's preprocessing: every newline is one `\n`.
+  const css = text.replace(/\r\n?|\f/g, "\n");
+  const open: string[] = [];
+  for (let i = 0; i < css.length; i++) {
+    const ch = css[i]!;
+    const name = nameAt(css, i);
+    if (name !== null) {
+      i = name.end - 1;
+      if (name.value.toLowerCase() !== "url" || css[name.end] !== "(") {
+        continue;
+      }
+      let j = name.end + 1;
+      while (j < css.length && /[\t\n ]/.test(css[j]!)) j++;
+      // A quoted url is an ordinary function around a string.
+      if (css[j] === '"' || css[j] === "'") continue;
+      // An unquoted one is one token to its `)`, a bad one included: a
+      // quote or a bracket inside it is the url's.
+      while (j < css.length && css[j] !== ")") j += css[j] === "\\" ? 2 : 1;
+      if (j >= css.length) return false;
+      i = j;
+    } else if (ch === "/" && css[i + 1] === "*") {
+      const end = css.indexOf("*/", i + 2);
+      if (end === -1) return false;
+      i = end + 1;
+    } else if (ch === '"' || ch === "'") {
+      // Ends at its quote, or at a newline (the tokenizer's bad string);
+      // an escaped newline continues it.
+      let j = i + 1;
+      while (j < css.length && css[j] !== ch && css[j] !== "\n") {
+        j += css[j] === "\\" ? 2 : 1;
+      }
+      if (j >= css.length) return false;
+      i = j;
+    } else if (ch in CLOSER) {
+      open.push(CLOSER[ch]!);
+    } else if (ch === "}" || ch === ")" || ch === "]") {
+      if (open.pop() !== ch) return false;
+    }
+  }
+  return open.length === 0;
+}
+
+/** The run of name characters starting at `i` — letters, digits, `_`,
+ * `-`, anything non-ASCII, and escapes, decoded — or null when none
+ * starts there. What the tokenizer reads as one name (a number's unit
+ * included), so no part of it is taken for anything else. A `\` before a
+ * newline is no escape, and starts no name. */
+function nameAt(css: string, i: number): { value: string; end: number } | null {
+  let value = "";
+  let j = i;
+  while (j < css.length) {
+    const ch = css[j]!;
+    if (/[\w-]/.test(ch) || ch.charCodeAt(0) >= 0x80) {
+      value += ch;
+      j++;
+    } else if (ch === "\\" && j + 1 < css.length && css[j + 1] !== "\n") {
+      const hex = /^[\dA-Fa-f]{1,6}/.exec(css.slice(j + 1, j + 7))?.[0];
+      if (hex === undefined) {
+        value += css[j + 1];
+        j += 2;
+        continue;
+      }
+      const code = parseInt(hex, 16);
+      value +=
+        code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)
+          ? "�"
+          : String.fromCodePoint(code);
+      j += 1 + hex.length;
+      if (/[\t\n ]/.test(css[j] ?? "")) j++;
+    } else break;
+  }
+  return j === i ? null : { value, end: j };
+}
+
 // ---------------------------------------------------------------------------
 // The rules.
 
