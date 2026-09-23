@@ -228,13 +228,9 @@ describe("what the cleaning takes out, and says", () => {
 
   test("a hostile fragment: nothing that could run is stored, its style block is folded like any other, its link is removed, and each is said", async () => {
     const { item, said } = await paste(hostile);
-    // A `<template>`'s content is inert, and the pinned kernel's walk
-    // does not enter it yet (the kernel's next commit does): what it
-    // holds is not judged here.
-    const html = item.payload.html.replace(
-      /<template>[\s\S]*?<\/template>/,
-      "",
-    );
+    // The walk enters a `<template>`'s content too: its script goes like
+    // any other.
+    const html = item.payload.html;
     expect(item.payload.css).toBe(
       "@import url(https://evil.example/x.css); body { display: none }",
     );

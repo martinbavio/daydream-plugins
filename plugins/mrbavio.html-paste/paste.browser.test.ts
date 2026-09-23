@@ -506,9 +506,8 @@ describe("the page renders what the tree could not hold", () => {
   test("a hostile paste lands inert: nothing that runs is stored or reaches the canvas, and the unfetched link is said", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
     const { shadow, html } = await land(hostile);
-    // Outside the inert `<template>`, whose content the pinned kernel's
-    // walk does not enter yet (page.browser.test.ts says so too).
-    const stored = html.replace(/<template>[\s\S]*?<\/template>/, "");
+    // A `<template>`'s content included: the walk enters it.
+    const stored = html;
     for (const gone of ["<script", "<object", "<embed", "<base", "onclick"])
       expect(stored, gone).not.toContain(gone);
     expect(stored).not.toMatch(/javascript:/i);
