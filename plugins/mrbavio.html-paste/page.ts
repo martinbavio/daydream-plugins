@@ -2,8 +2,9 @@
 // page's markup and its stylesheet as text, `{ html, css }`, rendered in a
 // shadow root. So a paste converts nothing: it hands the pasted text to
 // the kernel's cleaning (`dd.cleanPage`, the function every landing runs)
-// and stores what comes back — the author's text with whatever could run
-// cut out where it was written, every `<style>` block and linked
+// and stores what comes back — the author's text with what the cleaning
+// removes cut out where it was written (an `<iframe>` stays, under the
+// renderer's forced sandbox), every `<style>` block and linked
 // stylesheet folded into the css in document order — with the cleaning's
 // own findings for the report. The browser is the vocabulary: every
 // element, attribute, selector and at-rule the cleaning keeps lands as
