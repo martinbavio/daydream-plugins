@@ -241,9 +241,13 @@ export default function createHtmlPanel(state: PanelState) {
   const saveText = (id: string, text: string): Saved => {
     const current = stored(id);
     if (current === null) return { ok: false, problem: PAGE_GONE };
-    if (current === text) return { ok: true, text };
     const base = synced;
-    const next = current === base ? text : rebase(base, text, current);
+    // Text that is the page's already is written as nothing, but still
+    // syncs: the typing that follows starts from it.
+    const next =
+      current === text || current === base
+        ? text
+        : rebase(base, text, current);
     if (next === null) return { ok: false, problem: CHANGED_UNDERNEATH };
     return write(id, current, next, base);
   };

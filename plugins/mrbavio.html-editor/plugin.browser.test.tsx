@@ -712,6 +712,29 @@ describe("mrbavio.html-editor", () => {
     expect(stored(one.id)).toBe(theirs);
   });
 
+  test("a draft typed back to the page's text goes, and the typing after it saves", async () => {
+    await mountPage();
+    select(itemId);
+    content().focus();
+    await typeAll(edited("Old headline", "Mine"));
+    const theirs = edited("Old headline", "Their headline");
+    outsideEdit(theirs);
+    await settled();
+    expect(message()).toBe(CHANGED_UNDERNEATH);
+
+    // Typed until it is what the page holds: nothing to write, the draft
+    // and its note go.
+    await type(theirs);
+    expect(stored()).toBe(theirs);
+    expect(message()).toBeNull();
+
+    // The next keystroke is typing over the page as it is now, and saves.
+    const next = edited("Body copy", "More copy", theirs);
+    await type(next);
+    expect(message()).toBeNull();
+    expect(stored()).toBe(next);
+  });
+
   test("⌘S in the editor with nothing held saves what is pending and is the document's save", async () => {
     await mountPage();
     select(itemId);
