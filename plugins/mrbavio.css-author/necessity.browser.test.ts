@@ -667,6 +667,20 @@ describe("necessity on rules", () => {
     ).toEqual([]);
   });
 
+  test("@scope and @layer gate nothing by themselves: a dead declaration in either is found", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div class="card"><p class="a">hi</p></div>',
+        "@scope (.card) { :scope > .a { position: static; } }\n@layer base { .a { float: none; } }",
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([
+      [0, "position"],
+      [1, "float"],
+    ]);
+  });
+
   test("a rule under a state pseudo-class is never judged — in a rule, :hover belongs to the selector", async () => {
     expect(
       await necessityLint(makeDocument(FRAME, '<div class="a"></div>', ".a:hover { color: red; }")),

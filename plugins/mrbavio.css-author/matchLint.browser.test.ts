@@ -252,6 +252,19 @@ describe("matchLint", () => {
     ]);
   });
 
+  test("a rule under @media print or a height query the frame fails is never called dead; one under @starting-style is matched like any other", async () => {
+    const doc = page(
+      `@starting-style { .card { opacity: 0; } }
+@media print { .nope { color: red; } }
+@media (min-height: 2000px) { .nope { color: red; } }
+@starting-style { .nope { opacity: 0; } }`,
+    );
+    doc.items[0]!.frame = { width: 960, height: 600 };
+    expect(await messages(doc)).toEqual([
+      "rule `.nope` in `@starting-style` in viewport v1 matches no element",
+    ]);
+  });
+
   test("the legacy comment markers `<!--` and `-->` between rules are no part of the next rule's selector", async () => {
     expect(
       await matchLint(
