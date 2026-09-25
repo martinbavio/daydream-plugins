@@ -19,7 +19,7 @@ import type { DaydreamApi } from "@daydream/plugin-api";
 import { adoptInto, isViewport, markerOf, roundOf } from "./adopt";
 import { VERBS as VERB_SPECS } from "./bridge/verbs";
 import createCaption from "./Caption";
-import { absoluteUrls, markTarget, soleMatch, takeOut } from "./pageExport";
+import { absoluteUrls, markTarget, soleMatch, takeOut, withoutMountMarks } from "./pageExport";
 import createPicker, { type PickerEntry } from "./Picker";
 import { createSession, SESSION_KEY } from "./session";
 import { captionCss, pickerCss } from "./styles";
@@ -140,8 +140,10 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   // The viewport as one standalone HTML page, for a judge that reads
   // HTML — Impeccable's detector (the critique and audit verbs). The
   // kernel renders it: a live mount — the page's own text made safe, its
-  // css one <style> (decision #76) — its document read once, disposed.
-  // Root-relative urls (a page's `assets/<file>` pointed at this host's
+  // css one <style> (decision #76) — its document read once, disposed,
+  // with what the mount adds for its own reads taken back out (the
+  // measuring ids, the container probes), so the detector judges the
+  // page and nothing else. Root-relative urls (a page's `assets/<file>` pointed at this host's
   // route for its document) are made absolute so the file stands alone.
   dd.registerTool({
     name: HTML_TOOL,
@@ -171,9 +173,10 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
       const withBaseline = input["baseline"] === true;
       const viewport = dd.core.viewportItems(dd.document()).find((v) => v.id === id);
       if (viewport === undefined) throw new Error(`no viewport with id "${id}"`);
-      const mounted = await dd.mountViewport(viewport, { still: true });
+      const mounted = await dd.mountViewport(viewport);
       try {
         const doc = mounted.document();
+        withoutMountMarks(doc);
         const node = element === undefined ? null : soleMatch(doc, element, id);
         const target = node === null ? undefined : { selector: element!, kept: markTarget(node) };
         absoluteUrls(doc, window.location.origin);
@@ -223,7 +226,9 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     annotations: { idempotentHint: false, destructiveHint: false },
     run: () => {
       const taken = session.take();
-      sourceBefore = taken.pick === null ? null : pageText(taken.pick.viewportId);
+      // The round's baseline, taken with its pick and only then: a call
+      // with nothing waiting leaves the round being built as it is.
+      if (taken.pick !== null) sourceBefore = pageText(taken.pick.viewportId);
       return taken;
     },
   });

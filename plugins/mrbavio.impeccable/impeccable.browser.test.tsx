@@ -638,6 +638,62 @@ describe("mrbavio.impeccable in the shell", () => {
     expect(await stored(files, 4)).toMatchObject({ exit: false });
   });
 
+  test("impeccable_pick with nothing waiting is a no-op: nothing is written, and the round being built still ends when its source changes", async () => {
+    const { doc, source } = sourceDocument();
+    const { host, files } = fakeHost();
+    mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
+    await mountedId(source.id, ".grid");
+
+    // Nothing ever picked: nothing to write.
+    expect((await pickTool().run({})) as unknown).toEqual({ pick: null, exit: false });
+    await settle();
+    expect(files[manifest.id]).toBeUndefined();
+
+    select(source.id);
+    await pickVerb("polish");
+    await pickTool().run({});
+    expect(await stored(files, 2)).toMatchObject({ pick: null });
+    const saves = vi.mocked(host.storage!.savePluginData).mock.calls.length;
+    // A second call mid-round — an agent checking again — takes nothing.
+    expect((await pickTool().run({})) as unknown).toEqual({ pick: null, exit: false });
+    await settle();
+    expect(vi.mocked(host.storage!.savePluginData).mock.calls.length).toBe(saves);
+    expect((files[manifest.id]![SESSION_KEY] as { seq: number }).seq).toBe(2);
+    expect(caption()!.textContent).toBe("polish · building");
+    // The round's baseline is the one taken with the pick: the rework
+    // landing still ends it.
+    mounted.store.setDocument((d) => {
+      (d.items[0] as DreamPage).payload.css += "body { background: papayawhip; }\n";
+    });
+    await settle();
+    expect(caption()).toBeNull();
+  });
+
+  test("a pick the storage file refuses is said, and not left waiting for an agent who cannot see it", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { doc, source } = sourceDocument();
+      const { host } = fakeHost();
+      vi.mocked(host.storage!.savePluginData).mockRejectedValue(new Error("disk full"));
+      mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
+      await mountedId(source.id, ".grid");
+
+      select(source.id);
+      await pickVerb("polish");
+      await vi.waitFor(() =>
+        expect(error).toHaveBeenCalledWith(
+          expect.stringMatching(/^\[mrbavio\.impeccable\] the polish pick could not be saved.*: disk full$/),
+        ),
+      );
+      await settle();
+      expect(caption()).toBeNull();
+      // Nor does an agent's call take it: there is no pick.
+      expect((await pickTool().run({})) as unknown).toEqual({ pick: null, exit: false });
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   test("a waiting pick survives a reload, captioned above its element, found by selector; exit does not", async () => {
     const { doc, source } = sourceDocument();
     const { host } = fakeHost({
@@ -788,6 +844,35 @@ describe("mrbavio.impeccable in the shell", () => {
     await tool(DONE_TOOL).run({});
     await settle();
     expect(caption()).toBeNull();
+  });
+
+  test("impeccable_html answers the page's own markup and css: nothing the mount put in for its reads — no motion pin, no container probes, no measuring ids", async () => {
+    const css = [
+      "main { container-type: inline-size; transition: color 200ms; }",
+      '.t::before { content: "{ @media all { }"; }',
+      "@container (width > 100px) { .t { color: rgb(1, 2, 3); } @media (width > 1px) { .t { font-size: 31px; } } }",
+      ".lead { & .x { @container (width > 5px) { color: red; } } }",
+      "",
+    ].join("\n");
+    const item = createPageItem(
+      {
+        html: '<!doctype html><html><head></head><body><main><p class="lead">a</p><p class="t">b</p></main></body></html>',
+        css,
+      },
+      { frame: { width: 640 } },
+    );
+    mounted = await mountPlugin({ entry: activate, manifest, document: { version: 7, items: [item] }, host: fakeHost().host });
+    const reply = (await tool(HTML_TOOL).run({ viewport: item.id, element: ".t", baseline: true })) as {
+      html: string;
+      baseline: string;
+    };
+    for (const html of [reply.html, reply.baseline]) {
+      expect(html).not.toContain("--dream-container");
+      expect(html).not.toContain("data-dream-");
+      expect(html).not.toContain("!important");
+      const page = new DOMParser().parseFromString(html, "text/html");
+      expect(Array.from(page.querySelectorAll("style"), (s) => s.textContent)).toEqual([css]);
+    }
   });
 
   test("impeccable_html keeps the target as the page styles it: a rule that reaches it through a sibling still does", async () => {
