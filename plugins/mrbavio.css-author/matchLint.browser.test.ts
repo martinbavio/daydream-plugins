@@ -400,6 +400,34 @@ describe("matchLint", () => {
   });
 });
 
+describe("matchLint: a pseudo-element's declarations are measured on the pseudo-element", () => {
+  test("a reset to the initial that overrides a pseudo-element's value is the override, not a restatement", async () => {
+    expect(
+      await matchLint(
+        page(
+          '.card::before { content: ""; opacity: 0.2; }\n.card.on::before { opacity: 1; }',
+          '<div class="card on"></div>',
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a pseudo-element's restated initial nothing overrides is a finding", async () => {
+    const findings = await matchLint(
+      page('.card::before { content: ""; opacity: 1; }'),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([[0, "opacity"]]);
+  });
+
+  test("a pseudo-element the browser's computed style cannot read is never called a restatement", async () => {
+    expect(
+      await matchLint(
+        page(".card::placeholder { opacity: 1; }", '<input class="card">'),
+      ),
+    ).toEqual([]);
+  });
+});
+
 // A container query with no container to ask. On a tree this was the
 // static lint's rule 1, asked of an element's `@container` layer; on a
 // page every query is in a rule, and which elements it reaches — and so
