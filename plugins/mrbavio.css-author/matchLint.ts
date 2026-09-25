@@ -170,9 +170,9 @@ export async function matchLint(
   for (const page of dd.core.viewportItems(doc) as DreamPage[]) {
     // Every question here is about a rule or a restated initial, so a
     // page with neither has nothing to ask and pays for no mount.
-    const stored = parsePage(page.payload);
-    const authored = pageRules(stored.css);
-    const restated = lintElements(stored.doc).some((el) =>
+    const stored = parsePage(page.payload.html);
+    const authored = pageRules(page.payload.css);
+    const restated = lintElements(stored).some((el) =>
       scanDeclarations(el.getAttribute("style") ?? "").some(restatesInitial),
     );
     if (authored.length === 0 && !restated) continue;
@@ -196,7 +196,7 @@ export async function matchLint(
             scanDeclarations(node.getAttribute("style") ?? ""),
           ]),
         ),
-        nameOf: storedNames(stored.doc, mdoc),
+        nameOf: storedNames(stored, mdoc),
         match: ruleMatcher(mdoc),
       };
       const ranked = rankedMatches(dd.core, read);

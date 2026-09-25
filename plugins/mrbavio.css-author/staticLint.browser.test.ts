@@ -211,9 +211,19 @@ describe("staticLint: whole document", () => {
     expect(staticLint(doc).map((f) => f.elementId)).toEqual(["div.a"]);
   });
 
-  test("a `<style>` block the markup still carries is read with the css, after it, as the renderer folds it", () => {
-    const doc = page('<div class="late"></div><style>.late { width: 100 }</style>');
-    expect(staticLint(doc).map((f) => [f.rule, f.property])).toEqual([[0, "width"]]);
+  test("a `<style>` the markup keeps in a noscript is not the page's css: its rules are never read, nor take an index", () => {
+    // The kernel's clean folds every other `<style>` into the css before
+    // a gate runs; a noscript's stays where it was written, for the
+    // script-free reader, and the canvas renders none of it.
+    const doc = page(
+      '<noscript><style>.late { width: 100 }</style></noscript><div class="card"></div>',
+      ".card { height: 20 }",
+    );
+    expect(
+      staticLint(doc)
+        .filter((f) => f.rule !== undefined)
+        .map((f) => [f.rule, f.property]),
+    ).toEqual([[0, "height"]]);
   });
 });
 

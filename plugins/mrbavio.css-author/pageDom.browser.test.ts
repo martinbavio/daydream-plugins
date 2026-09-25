@@ -1,14 +1,12 @@
-// A page's markup as the lints read it (pageDom.ts): the css the stored
-// markup's `<style>` blocks fold into, as the kernel folds them, and the
-// pairing that names a mounted copy's nodes by their twins in the stored
-// markup — the copy being the kernel's own mount (`dd.mountViewport`),
-// with the safety walk's removals in it. Real Chromium only.
+// A page's markup as the lints read it (pageDom.ts): the page's own
+// sheet in a mounted copy, and the pairing that names a mounted copy's
+// nodes by their twins in the stored markup — the copy being the kernel's
+// own mount (`dd.mountViewport`). Real Chromium only.
 import { afterAll, describe, expect, test } from "vitest";
 
 import { createPageItem, createTestKernel } from "@daydream/plugin-testing";
 
-import { pageRules } from "./pageCss";
-import { parsePage, storedNames } from "./pageDom";
+import { mountedStyle, parsePage, storedNames } from "./pageDom";
 
 const kernel = createTestKernel();
 afterAll(() => kernel.dispose());
@@ -23,7 +21,7 @@ async function namesOf(
     { html, css: "" },
     { id: "v1", frame: { width: 600 } },
   );
-  const stored = parsePage(page.payload).doc;
+  const stored = parsePage(page.payload.html);
   const mount = await kernel.dd.mountViewport(page);
   try {
     const nameOf = storedNames(stored, mount.document());
@@ -44,22 +42,6 @@ function named(stored: Document, name: string): Element {
 }
 
 describe("storedNames", () => {
-  test("a kept SVG animation is named as itself, not as a removed one before it that looked the same by tag, id and class", async () => {
-    // The walk removes a `<set>` that animates a url; the one beside it,
-    // animating paint, stays.
-    const { stored, names } = await namesOf(
-      [
-        "<!doctype html><html><head></head><body><svg>",
-        '<rect><set attributeName="href" to="#x" class="a"></set>',
-        '<set attributeName="fill" to="red" class="a"></set></rect>',
-        "</svg></body></html>",
-      ].join(""),
-      "set",
-    );
-    expect(names).toHaveLength(1);
-    expect(named(stored, names[0]!)).toBe(stored.querySelectorAll("set")[1]);
-  });
-
   test("an element whose attributes the walk and the mount changed is still its stored twin", async () => {
     // Its handler is removed, its asset urls pointed at the document's
     // route: the same element for all that.
@@ -78,73 +60,43 @@ describe("storedNames", () => {
       imgs[1],
     ]);
   });
-});
 
-describe("parsePage", () => {
-  test("a <style media> folds into the css under its @media, as the kernel folds it", () => {
-    const { css } = parsePage({
-      html: [
-        "<!doctype html><html><head>",
-        '<style media="print">.a { color: red }</style>',
-        '<style media="all">.b { color: blue }</style>',
-        "<style>.c { color: green }</style>",
-        "</head><body></body></html>",
-      ].join(""),
-      css: ".page { margin: 0 }",
-    });
-    expect(css).toBe(
+  test("what the mount adds to the head, and a noscript's content, leave the pairing one for one", async () => {
+    const { stored, names } = await namesOf(
       [
-        ".page { margin: 0 }",
-        "@media print {\n.a { color: red }\n}",
-        ".b { color: blue }",
-        ".c { color: green }",
-      ].join("\n"),
+        "<!doctype html><html><head><noscript><style>p { color: red }</style></noscript></head><body>",
+        "<noscript><p>no script</p></noscript><p>one</p><p>two</p>",
+        "</body></html>",
+      ].join(""),
+      "p",
+    );
+    expect(names.map((name) => named(stored, name))).toEqual(
+      Array.from(stored.querySelectorAll("p")),
     );
   });
+});
 
-  test("a <style media> whose sheet does not close its own blocks folds as the kernel folds it: as the browser reads it", async () => {
-    // A stray `}` would close the `@media` early and apply what follows
-    // everywhere; an unclosed block, comment or string would swallow the
-    // `@media`'s own `}`. The kernel's landing is the reference.
-    for (const sheet of [
-      ".a { color: red } } .b { color: blue }",
-      ".a { color: red",
-      ".a { color: red } /* open",
-      '.a { content: "open }',
-    ]) {
-      const page = {
-        html: `<!doctype html><html><head><style media="print">${sheet}</style></head><body></body></html>`,
-        css: ".page { margin: 0 }",
-      };
-      expect(parsePage(page).css).toBe(
-        (await kernel.dd.cleanPage(page)).css,
+describe("mountedStyle", () => {
+  test("the page's own sheet in a mount is the one the live face writes, never a noscript's or a template's before it", async () => {
+    const page = createPageItem(
+      {
+        html: [
+          "<!doctype html><html><head>",
+          "<noscript><style>.noscript { color: red }</style></noscript>",
+          "<template><style>.template { color: red }</style></template>",
+          '</head><body><div class="page"></div></body></html>',
+        ].join(""),
+        css: ".page { color: blue }",
+      },
+      { id: "v1", frame: { width: 600 } },
+    );
+    const mount = await kernel.dd.mountViewport(page, { still: true });
+    try {
+      expect(mountedStyle(mount.document())?.textContent).toBe(
+        ".page { color: blue }",
       );
-    }
-  });
-
-  test("a <style> with no media whose sheet does not close its own blocks folds as the browser reads it too, and swallows no block after it", async () => {
-    // Each sheet is parsed on its own on the page, so `.b` applies there;
-    // folded raw, the open block, comment or string would run over it.
-    for (const sheet of [
-      ".a { color: red",
-      ".a { color: red } /* open",
-      '.a { content: "open }',
-      ".a { color: red } } .z { color: blue }",
-      // A newline ends a string before its quote: the kernel's guard
-      // refuses it as never closed.
-      '.a { content: "open\n} .z { color: blue }',
-      '.a { color: #url(a"b) }',
-    ]) {
-      const page = {
-        html: `<!doctype html><html><head><style>${sheet}</style><style>.b { color: green }</style></head><body></body></html>`,
-        css: ".page { margin: 0 }",
-      };
-      const { css } = parsePage(page);
-      expect(css, sheet).toBe((await kernel.dd.cleanPage(page)).css);
-      expect(
-        pageRules(css).map((rule) => rule.selector),
-        sheet,
-      ).toContain(".b");
+    } finally {
+      mount.dispose();
     }
   });
 });

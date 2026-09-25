@@ -349,6 +349,31 @@ describe("matchLint", () => {
     );
     expect(findings.map((f) => [f.rule, f.property])).toEqual([[1, "color"]]);
   });
+
+  test("a `<style>` the markup keeps in a noscript is never taken for the page's css", async () => {
+    // The kernel keeps a noscript's stylesheet in the markup, and the
+    // measurer's copy (no scripting there) parses it as a `<style>` in the
+    // head, before the page's own.
+    const findings = await matchLint({
+      version: 7,
+      items: [
+        createPageItem(
+          {
+            html: '<!doctype html><html><head><noscript><style>.gone { color: red; }</style></noscript></head><body><div class="card"></div></body></html>',
+            css: ".card { position: static; }",
+          },
+          { id: "v1", frame: { width: 960 } },
+        ),
+      ],
+    });
+    expect(findings.map((f) => [f.rule, f.property, f.message])).toEqual([
+      [
+        0,
+        "position",
+        "position: static in rule `.card` of viewport v1 restates the initial value",
+      ],
+    ]);
+  });
 });
 
 // A container query with no container to ask. On a tree this was the

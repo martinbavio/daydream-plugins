@@ -257,16 +257,15 @@ async function lintViewport(
   dd: NecessityHost,
   page: DreamPage,
 ): Promise<{ candidates: Candidate[]; notes: Finding[] }> {
-  // The page as stored (its markup's `<style>` blocks folded in, as the
-  // mount folds them), for naming: the mounted copy's css has the asset
+  // The page as stored, for naming: the mounted copy's css has the asset
   // route in its urls, and a finding should quote what the author wrote;
   // an element is named by its selector in the stored markup.
-  const stored = parsePage(page.payload);
-  const { css } = stored;
+  const stored = parsePage(page.payload.html);
+  const { css } = page.payload;
   const authored = pageRules(css);
   const { own, naming, candidates, unloaded } = await withMount(dd, page, undefined, async (m) => {
     const prepared = await prepare(m);
-    const nameOf = storedNames(stored.doc, prepared.doc);
+    const nameOf = storedNames(stored, prepared.doc);
     const width = prepared.doc.defaultView?.innerWidth ?? page.frame?.width ?? 0;
     // The two scans line up rule for rule unless the mounted copy is not
     // this text (it always is, cleaned as a landing cleans it); if they

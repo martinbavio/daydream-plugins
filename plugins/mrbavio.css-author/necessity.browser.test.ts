@@ -316,6 +316,31 @@ describe("dead and live declarations", () => {
     expect(findings.map((f) => [f.rule, f.property])).toEqual([[0, "position"]]);
   });
 
+  test("a `<style>` the markup keeps in a noscript is never taken for the page's css", async () => {
+    // The kernel keeps a noscript's stylesheet in the markup, and the
+    // measurer's copy (no scripting there) parses it as a `<style>` in the
+    // head, before the page's own.
+    const findings = await necessityLint({
+      version: 7,
+      items: [
+        createPageItem(
+          {
+            html: '<!doctype html><html><head><noscript><style>#box { color: red; }</style></noscript></head><body style="margin: 0"><div id="box" style="height: 20px"></div></body></html>',
+            css: "#box { position: static; }",
+          },
+          { id: "v1", frame: FRAME },
+        ),
+      ],
+    });
+    expect(findings.map((f) => [f.rule, f.property, f.message])).toEqual([
+      [
+        0,
+        "position",
+        `position: static in rule \`#box\` of viewport v1 changes nothing at ${sweptAt(400)}`,
+      ],
+    ]);
+  });
+
   test("an element is named by its selector in the stored markup, which still holds an element the safety walk removed", async () => {
     // The mount drops the `<script>`, so `#box` is unique there; in the
     // markup an agent reads and addresses, it is not.
