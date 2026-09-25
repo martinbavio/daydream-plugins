@@ -15,8 +15,8 @@
 // A page (decision #76) is two texts. The markup is parsed by the
 // browser (`DOMParser`, pageDom.ts): an element's own declarations are
 // its `style` attribute, and it is named in a finding by its unique
-// selector (uniqueSelector.ts), as `measure` names it. The css is scanned
-// (pageCss.ts) so each declaration is judged as the author wrote it — the
+// selector (`dd.core.uniqueSelector`), as `measure` names it. The css is
+// scanned (pageCss.ts) so each declaration is judged as the author wrote it — the
 // CSSOM drops `width: 100` before anyone could read it, which is the
 // point of rule 1 — and a rule finding carries the rule's position among
 // the page's rules in `rule`, the address the gate runner keys a
@@ -25,6 +25,7 @@
 
 import type {
   CoreApi,
+  CssDeclaration,
   DreamDocument,
   DreamPage,
   Finding,
@@ -34,13 +35,10 @@ import {
   fontFaces,
   pageRules,
   ruleName,
-  scanDeclarations,
   selectorPreludes,
-  type CssDeclaration,
   type PageRule,
 } from "./pageCss";
-import { lintElements, parsePage } from "./pageDom";
-import { uniqueSelector } from "./uniqueSelector";
+import { lintElements } from "./pageDom";
 
 /** Every static finding for the document: per page, the elements' own
  * unit-less lengths in tree order, then the page's unused font faces,
@@ -51,27 +49,27 @@ export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
   const findings: Finding[] = [];
   for (const page of core.viewportItems(doc) as DreamPage[]) {
     const { css } = page.payload;
-    const parsed = parsePage(page.payload.html);
-    const rules = pageRules(css);
+    const parsed = core.parsePage(page.payload.html);
+    const rules = pageRules(core, css);
     const elements = lintElements(parsed);
     const names = new Map<Element, string>();
     const nameOf = (el: Element): string => {
       let name = names.get(el);
       if (name === undefined) {
-        name = uniqueSelector(el, parsed);
+        name = core.uniqueSelector(el, parsed);
         names.set(el, name);
       }
       return name;
     };
     for (const el of elements) {
-      const own = scanDeclarations(el.getAttribute("style") ?? "");
+      const own = core.cssDeclarations(el.getAttribute("style") ?? "");
       if (own.length === 0) continue;
       lintUnitlessLengths(own, nameOf(el), findings);
     }
     lintUnusedFontFaces(core, page, css, rules, elements, findings);
     lintUnitlessLengthsOnRules(rules, page.id, findings);
     lintUnreferencedClasses(
-      selectorPreludes(css),
+      selectorPreludes(core, css),
       elements,
       nameOf,
       page.id,
@@ -285,7 +283,7 @@ function lintUnusedFontFaces(
   elements: readonly Element[],
   findings: Finding[],
 ): void {
-  const faces = fontFaces(css);
+  const faces = fontFaces(core, css);
   if (faces.length === 0) return;
   const named = new Set<string>();
   /** Values searched by substring: `font` shorthands the browser could
@@ -306,7 +304,7 @@ function lintUnusedFontFaces(
   };
   for (const rule of rules) rule.declarations.forEach(use);
   for (const el of elements) {
-    scanDeclarations(el.getAttribute("style") ?? "").forEach(use);
+    core.cssDeclarations(el.getAttribute("style") ?? "").forEach(use);
   }
   for (const face of faces) {
     const declared = face.declarations.find((d) => d.property === "font-family");

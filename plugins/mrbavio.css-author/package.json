@@ -1,7 +1,7 @@
 {
   "name": "@mrbavio/plugin-css-author",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.1.7",
   "type": "module",
   "peerDependencies": {
     "@solidjs/web": "2.0.0-rc.9",

@@ -92,6 +92,7 @@
 
 import type {
   CoreApi,
+  CssDeclaration,
   DreamDocument,
   DreamPage,
   Finding,
@@ -113,18 +114,15 @@ import {
   declarationMap,
   pageRules,
   ruleName,
-  scanDeclarations,
   selectorForMatching,
   splitTopLevelCommas,
   trailingPseudoElement,
-  type CssDeclaration,
   type PageRule,
 } from "./pageCss";
 import { restatesInitial, ruleInitialCandidates } from "./initialValues";
 import {
   lintElements,
   mountedStyle,
-  parsePage,
   storedNames,
 } from "./pageDom";
 import {
@@ -179,10 +177,10 @@ export async function matchLint(
   for (const page of dd.core.viewportItems(doc) as DreamPage[]) {
     // Every question here is about a rule or a restated initial, so a
     // page with neither has nothing to ask and pays for no mount.
-    const stored = parsePage(page.payload.html);
-    const authored = pageRules(page.payload.css);
+    const stored = dd.core.parsePage(page.payload.html);
+    const authored = pageRules(dd.core, page.payload.css);
     const restated = lintElements(stored).some((el) =>
-      scanDeclarations(el.getAttribute("style") ?? "").some(restatesInitial),
+      dd.core.cssDeclarations(el.getAttribute("style") ?? "").some(restatesInitial),
     );
     if (authored.length === 0 && !restated) continue;
     await withMount(dd, page, undefined, async (mounted) => {
@@ -197,15 +195,15 @@ export async function matchLint(
         page,
         doc: mdoc,
         style,
-        rules: copied == null ? authored : pageRules(copied),
+        rules: copied == null ? authored : pageRules(dd.core, copied),
         nodes,
         own: new Map(
           nodes.map((node) => [
             node,
-            scanDeclarations(node.getAttribute("style") ?? ""),
+            dd.core.cssDeclarations(node.getAttribute("style") ?? ""),
           ]),
         ),
-        nameOf: storedNames(stored, mdoc),
+        nameOf: storedNames(dd.core, stored, mdoc),
         match: ruleMatcher(mdoc),
       };
       const ranked = rankedMatches(dd.core, read);

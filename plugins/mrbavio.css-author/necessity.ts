@@ -24,9 +24,8 @@
 // top or inside a group rule, are moved to a `<style>` of their own
 // before the baseline, and where a re-parse still reloads a face (a page
 // with an `@layer` reloads every one), the read waits for it
-// (pageMount.ts readWithoutReloading). The kernel's container probes in
-// the mounted css are the measurer's, not the page's, and the scanner
-// leaves them out.
+// (pageMount.ts readWithoutReloading). The page is mounted bare, so the
+// mounted css is the page's and nothing of the measurer's.
 //
 // What that catches is the "just in case" class of failure: explicit
 // initial values, a custom property nothing reads, a declaration the
@@ -114,6 +113,7 @@
 
 import type {
   CoreApi,
+  CssDeclaration,
   DreamDocument,
   DreamPage,
   Finding,
@@ -127,17 +127,14 @@ import {
   mediaPreludes,
   pageRules,
   ruleName,
-  scanDeclarations,
   selectorForMatching,
   splitTopLevelCommas,
   trailingPseudoElement,
-  type CssDeclaration,
   type PageRule,
 } from "./pageCss";
 import {
   lintElements,
   mountedStyle,
-  parsePage,
   storedNames,
 } from "./pageDom";
 import {
@@ -292,17 +289,17 @@ async function lintViewport(
   // The page as stored, for naming: the mounted copy's css has the asset
   // route in its urls, and a finding should quote what the author wrote;
   // an element is named by its selector in the stored markup.
-  const stored = parsePage(page.payload.html);
+  const stored = dd.core.parsePage(page.payload.html);
   const { css } = page.payload;
-  const authored = pageRules(css);
+  const authored = pageRules(dd.core, css);
   const started = Date.now();
   let slowest = 0;
   const { own, naming, candidates, unloaded } = await withMount(dd, page, undefined, async (m) => {
-    const prepared = await prepare(m);
+    const prepared = await prepare(dd.core, m);
     // What a mount costs, before any judging: what a probe will cost
     // at least, and so what the time left must hold for one.
     slowest = Date.now() - started;
-    const nameOf = storedNames(stored, prepared.doc);
+    const nameOf = storedNames(dd.core, stored, prepared.doc);
     const width = prepared.doc.defaultView?.innerWidth ?? page.frame?.width ?? 0;
     // The two scans line up rule for rule unless the mounted copy is not
     // this text (it always is, cleaned as a landing cleans it); if they
@@ -333,7 +330,7 @@ async function lintViewport(
     const width = widths[next]!;
     const began = Date.now();
     await withMount(dd, page, width, async (m) => {
-      const prepared = await prepare(m);
+      const prepared = await prepare(dd.core, m);
       const probe = baseline(prepared);
       for (const c of pending) {
         c.applies ||= appliesIn(prepared, c.removal[0]!);
@@ -395,11 +392,14 @@ function isStartingStyle(rule: Pick<PageRule, "conditions">): boolean {
  * where the page first declares it and the layers keep their order. The
  * rest of the css keeps every offset: each moved face's characters become
  * spaces. */
-async function prepare(mounted: MountedViewport): Promise<Prepared> {
+async function prepare(
+  core: CoreApi,
+  mounted: MountedViewport,
+): Promise<Prepared> {
   const doc = mounted.document();
   const style = mountedStyle(doc);
   let base = style?.textContent ?? "";
-  const faces = fontFaceBlocks(base);
+  const faces = fontFaceBlocks(core, base);
   if (style !== null && faces.length > 0) {
     const fonts = doc.createElement("style");
     fonts.setAttribute("data-css-author", "fonts");
@@ -425,10 +425,10 @@ async function prepare(mounted: MountedViewport): Promise<Prepared> {
   return {
     doc,
     style,
-    rules: pageRules(base),
+    rules: pageRules(core, base),
     nodes,
     own: nodes.map((node) => ({
-      declarations: scanDeclarations(node.getAttribute("style") ?? ""),
+      declarations: core.cssDeclarations(node.getAttribute("style") ?? ""),
     })),
   };
 }
@@ -444,7 +444,7 @@ async function prepare(mounted: MountedViewport): Promise<Prepared> {
  */
 export function probeWidths(core: CoreApi, css: string, own: number): number[] {
   const widths = new Set<number>(SWEEP_WIDTHS);
-  for (const prelude of mediaPreludes(css)) {
+  for (const prelude of mediaPreludes(core, css)) {
     for (const px of core.mediaPreludePxValues(prelude)) {
       widths.add(px - 1);
       widths.add(px);
@@ -904,8 +904,7 @@ function hundredths(n: number): number {
  * computed value on its element vanishes the moment it is removed, so
  * including it would make every `--x` live by definition; excluded, `--x`
  * is live exactly when some `var(--x)` resolved differently without it —
- * which is what "an unread custom property is dead" means. (The
- * measurer's container probes drop out the same way.)
+ * which is what "an unread custom property is dead" means.
  */
 function snapshotProperties(style: CSSStyleDeclaration): string[] {
   return Array.from(style).filter((name) => !name.startsWith("--"));

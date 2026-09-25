@@ -6,8 +6,9 @@
 // query read one way by one and another way by the other. Browser only.
 //
 // A mount is the live face core renders (`dd.mountViewport`, the page's
-// own text in an iframe), motion pinned off: a remove-and-read is
-// synchronous, and a transition would answer it with its start value.
+// own text in an iframe), bare — nothing the measurer adds for its own
+// read — and motion pinned off: a remove-and-read is synchronous, and a
+// transition would answer it with its start value.
 // What a condition answers is the mounted window's own — the one the page
 // renders with.
 
@@ -39,6 +40,9 @@ export async function withMount<T>(
 ): Promise<T> {
   const mounted = await dd.mountViewport(page, {
     still: true,
+    // The page alone: nothing of the measurer's own in the copy, so its
+    // `<style>` is the page's css (pageDom.ts mountedStyle).
+    bare: true,
     ...(width === undefined ? {} : { width }),
   });
   try {

@@ -1,12 +1,13 @@
-// The static lint's rule-level checks, in the node project, over a page's
-// css text scanned into rules (pageCss.ts) — no DOM, no `dd.core`:
-// unit-less lengths read a rule's declarations exactly like an element's
-// own (staticLint.ts). The full staticLint() over a page — the markup
+// The static lint's rule-level checks, over a page's css text read into
+// rules (pageCss.ts, through the kernel's scan, so run from a Daydream
+// checkout) — no page parsed: unit-less lengths read a rule's
+// declarations exactly like an element's own (staticLint.ts). The full staticLint() over a page — the markup
 // parsed by the browser, the font faces, the classes — is
 // staticLint.browser.test.ts's, run from a Daydream checkout (README.md).
 import { describe, expect, test } from "vitest";
 
 import type { Finding } from "@daydream/plugin-api";
+import { coreApi } from "@daydream/plugin-testing";
 
 import { pageRules } from "./pageCss";
 import {
@@ -17,7 +18,7 @@ import {
 
 function unitless(css: string): Finding[] {
   const out: Finding[] = [];
-  lintUnitlessLengthsOnRules(pageRules(css), "v1", out);
+  lintUnitlessLengthsOnRules(pageRules(coreApi(), css), "v1", out);
   return out;
 }
 

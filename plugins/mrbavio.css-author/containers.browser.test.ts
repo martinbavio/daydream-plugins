@@ -1,7 +1,10 @@
 // What a container query needs and what declarations provide
-// (containers.ts), proved under node. Which ELEMENTS are a query's
+// (containers.ts), the declarations read by the kernel's scan (so run from
+// a Daydream checkout). Which ELEMENTS are a query's
 // ancestors is the browser's, and matchLint.browser.test.ts's.
 import { describe, expect, test } from "vitest";
+
+import { coreApi } from "@daydream/plugin-testing";
 
 import {
   emptyContainerDeclaration,
@@ -10,11 +13,10 @@ import {
   satisfies,
   splitContainerPrelude,
 } from "./containers";
-import { scanDeclarations } from "./pageCss";
 
 function declared(...lists: string[]) {
   const out = emptyContainerDeclaration();
-  for (const list of lists) mergeContainerDeclaration(out, scanDeclarations(list));
+  for (const list of lists) mergeContainerDeclaration(out, coreApi().cssDeclarations(list));
   return out;
 }
 

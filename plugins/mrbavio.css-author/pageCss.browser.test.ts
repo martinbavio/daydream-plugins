@@ -1,7 +1,11 @@
-// The scanner the lints read a page's css through (pageCss.ts), proved
-// under node: where each rule and declaration is, what a nested rule's
-// selector resolves to, and what the measurer's probes leave behind.
+// The rules the lints read a page's css as (pageCss.ts): which rules are
+// the page's, what a nested or scoped rule's selector resolves to, and
+// the walks over them. The text is read by the kernel's scan
+// (`dd.core.cssBlocks`, tested in the kernel), so this runs from a
+// Daydream checkout.
 import { describe, expect, test } from "vitest";
+
+import { coreApi } from "@daydream/plugin-testing";
 
 import {
   declarationMap,
@@ -12,17 +16,16 @@ import {
   replaceScopePseudo,
   resolveNested,
   ruleName,
-  scanCss,
-  scanDeclarations,
   selectorForMatching,
   selectorPreludes,
   trailingPseudoElement,
   withoutRanges,
-  type CssBlock,
 } from "./pageCss";
 
+const core = coreApi();
+
 const shape = (css: string) =>
-  pageRules(css).map((rule) => ({
+  pageRules(core, css).map((rule) => ({
     index: rule.index,
     prelude: rule.prelude,
     parents: rule.parents,
@@ -129,7 +132,7 @@ nav a, .link:hover { color: inherit !important; }
 
   test("@scope: a rule's selector is relative to the root — a member naming neither `:scope` nor `&` its descendant — and each scope's start and end are resolved as a rule is", () => {
     expect(
-      pageRules(`@scope (.card) to (.content) { :scope > img, p, > span, & a { margin: 0 } color: red; }
+      pageRules(core, `@scope (.card) to (.content) { :scope > img, p, > span, & a { margin: 0 } color: red; }
 .card { @scope (& > .x) { :scope { gap: 0 } padding: 0; } }
 @scope (.a) { @scope (.b) to (:scope > i) { i { top: 0 } } }
 @scope { b { left: 0 } }
@@ -192,27 +195,14 @@ nav a, .link:hover { color: inherit !important; }
       ["color: red"],
       ["margin: 0"],
     ]);
-    expect(shape("} .a { color: red }").map((r) => r.prelude)).toEqual([".a"]);
-  });
-
-  test("the measurer's container probes are not the page's: its declarations and reach copies are left out", () => {
-    // The mounted copy's css for `.card { gap: 1px } @container (w > 1px) { .card { color: red } }`,
-    // as src/measure/livePage.ts writes it.
-    const probed = `.card { gap: 1px }
-@media all {  .card {  --dream-container-0: 1;} } @container (width > 1px) { .card {  --dream-container-0: 2;  color: red } }
-@property --dream-container-0 { syntax: "<integer>"; inherits: false; initial-value: 0; }
-`;
-    expect(shape(probed).map((r) => [r.index, r.conditions, r.declarations])).toEqual([
-      [0, [], ["gap: 1px"]],
-      [1, ["@container (width > 1px)"], ["color: red"]],
-    ]);
-    // An author's own `@media all` stays.
-    expect(shape("@media all { .a { color: red } } @container (w > 1px) { .a { color: blue } }")).toHaveLength(2);
+    // A stray brace is the next rule's prelude, as the parser reads it: a
+    // selector it refuses, which matches nothing.
+    expect(shape("} .a { color: red }").map((r) => r.prelude)).toEqual(["} .a"]);
   });
 
   test("ranges cut exactly the declaration, and the rest still reads", () => {
     const css = ".a { color: red; /* keep */ margin: 0 }";
-    const [rule] = pageRules(css);
+    const [rule] = pageRules(core, css);
     const [color, margin] = rule!.declarations;
     expect(withoutRanges(css, [color!.range])).toBe(".a {  /* keep */ margin: 0 }");
     expect(withoutRanges(css, [margin!.range])).toBe(".a { color: red; /* keep */ }");
@@ -225,29 +215,12 @@ describe("deeply nested css", () => {
   // the blocks nest.
   const DEPTH = 50_000;
 
-  test("50,000 nested blocks scan as 50,000 blocks, each the parent of the next", () => {
-    const css = `${".a {".repeat(DEPTH)}color: red${"}".repeat(DEPTH)} .b { gap: 0 }`;
-    const blocks = scanCss(css);
-    expect(blocks.map((b) => b.prelude)).toEqual([".a", ".b"]);
-    let depth = 0;
-    let innermost = blocks[0]!;
-    for (let b: CssBlock | undefined = blocks[0]; b !== undefined; b = b.children[0]) {
-      depth++;
-      innermost = b;
-    }
-    expect(depth).toBe(DEPTH);
-    expect(innermost.declarations.map((d) => d.value)).toEqual(["red"]);
-    expect(blocks[0]!.range).toEqual([0, css.indexOf(" .b")]);
-  });
-
-  test("50,000 unclosed blocks, and 50,000 unclosed at-rules around a rule, are read without a stack overflow", () => {
-    expect(scanCss("{".repeat(DEPTH))).toHaveLength(1);
-    expect(scanDeclarations(`color: red; ${"{".repeat(DEPTH)}`)).toHaveLength(1);
+  test("50,000 unclosed at-rules around a rule are walked without a stack overflow", () => {
     const css = `${"@media all {".repeat(DEPTH)}.a { color: red }`;
-    expect(mediaPreludes(css)).toHaveLength(DEPTH);
-    expect(selectorPreludes(css)).toEqual([".a"]);
-    expect(fontFaces(css)).toEqual([]);
-    const rules = pageRules(css);
+    expect(mediaPreludes(core, css)).toHaveLength(DEPTH);
+    expect(selectorPreludes(core, css)).toEqual([".a"]);
+    expect(fontFaces(core, css)).toEqual([]);
+    const rules = pageRules(core, css);
     expect(rules.map((rule) => [rule.selector, rule.conditions.length])).toEqual([
       [".a", DEPTH],
     ]);
@@ -255,20 +228,6 @@ describe("deeply nested css", () => {
 });
 
 describe("helpers", () => {
-  test("scanDeclarations reads a style attribute", () => {
-    expect(
-      scanDeclarations("color: red; width:100px;;  --x : a b ").map((d) => [
-        d.property,
-        d.value,
-      ]),
-    ).toEqual([
-      ["color", "red"],
-      ["width", "100px"],
-      ["--x", "a b"],
-    ]);
-    expect(scanDeclarations("")).toEqual([]);
-  });
-
   test("resolveNested desugars `&` to :is(parent), and a member without one is a descendant", () => {
     expect(resolveNested("&.open", ".card")).toBe(":is(.card).open");
     expect(resolveNested("& + &", "li")).toBe(":is(li) + :is(li)");
@@ -297,7 +256,7 @@ describe("helpers", () => {
     // Inside an @scope, a member naming `:scope` only in an attribute is
     // still the root's descendant.
     expect(
-      pageRules('@scope (.card) { [data-value=":scope"] { color: red } }')[0]!
+      pageRules(core, '@scope (.card) { [data-value=":scope"] { color: red } }')[0]!
         .selector,
     ).toBe(':where(:scope) [data-value=":scope"]');
   });
@@ -325,13 +284,13 @@ describe("helpers", () => {
 @media (width >= 600px) { .a { @media (width < 900px) { color: red } } }
 @scope (.card) { .title { color: red } }
 @keyframes k { from { color: red } }`;
-    expect(fontFaces(css).map((f) => f.declarations[0]!.value)).toEqual(["A", "B"]);
-    expect(mediaPreludes(css)).toEqual(["@media (width >= 600px)", "@media (width < 900px)"]);
-    expect(selectorPreludes(css)).toEqual([".a", "@scope (.card)", ".title"]);
+    expect(fontFaces(core, css).map((f) => f.declarations[0]!.value)).toEqual(["A", "B"]);
+    expect(mediaPreludes(core, css)).toEqual(["@media (width >= 600px)", "@media (width < 900px)"]);
+    expect(selectorPreludes(core, css)).toEqual([".a", "@scope (.card)", ".title"]);
   });
 
   test("declarationMap: later wins, !important kept in the value", () => {
-    const [rule] = pageRules(".a { height: 100vh; height: 100dvh; color: red !important }");
+    const [rule] = pageRules(core, ".a { height: 100vh; height: 100dvh; color: red !important }");
     expect(declarationMap(rule!.declarations)).toEqual({
       height: "100dvh",
       color: "red !important",

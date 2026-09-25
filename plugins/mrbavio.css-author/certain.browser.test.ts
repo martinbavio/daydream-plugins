@@ -1,15 +1,18 @@
-// The one test of "a rule that is certain" (certain.ts), in the node
-// project, over a page's css text scanned into rules (pageCss.ts): every
+// The one test of "a rule that is certain" (certain.ts), over a page's
+// css text read into rules (pageCss.ts, through the kernel's scan, so run
+// from a Daydream checkout): every
 // group at-rule a rule can sit under, nesting, and the state
 // pseudo-classes — in the selector, a parent's or an `@scope`'s.
 import { describe, expect, test } from "vitest";
+
+import { coreApi } from "@daydream/plugin-testing";
 
 import { isCertain } from "./certain";
 import { pageRules } from "./pageCss";
 
 /** Each rule of the css as `[its selector as written, certain]`. */
 const judged = (css: string): [string, boolean][] =>
-  pageRules(css).map((rule) => [rule.prelude, isCertain(rule)]);
+  pageRules(coreApi(), css).map((rule) => [rule.prelude, isCertain(rule)]);
 
 describe("isCertain", () => {
   test("a top-level rule with no state pseudo-class is certain", () => {

@@ -5,8 +5,8 @@
 // element's own line or a rule's restates it (matchLint.ts,
 // ruleRedundancy.ts), whether its restated initial is a candidate
 // (initialValues.ts), and whether the necessity lint judges an element's
-// line together with it (necessity.ts). Pure, so it is proved under node
-// (certain.test.ts).
+// line together with it (necessity.ts). Pure; proved over rules the
+// kernel's scan reads (certain.browser.test.ts).
 //
 // What gates a rule is an at-rule that holds at one width, in one
 // browser or at one moment and not at another — `@media`, `@supports`,

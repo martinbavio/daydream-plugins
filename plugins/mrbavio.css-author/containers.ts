@@ -1,6 +1,7 @@
 // What a container query NEEDS and what a declaration list PROVIDES — the
 // text half of "a container query with no container to ask"
-// (matchLint.ts). Pure, so it is proved under node (containers.test.ts).
+// (matchLint.ts). Pure; proved over declarations the kernel's scan reads
+// (containers.browser.test.ts).
 //
 // `@container` matches against the nearest ANCESTOR that is a query
 // container for what the condition asks (css-contain-3 §4.1, css-contain-4
@@ -11,7 +12,7 @@
 // not. A named query further needs the satisfying ancestor to carry the
 // name, via `container-name` or the shorthand's first half.
 
-import type { CssDeclaration } from "./pageCss";
+import type { CssDeclaration } from "@daydream/plugin-api";
 
 /** The `<container-name>` a prelude asks for (null for an unnamed query)
  * and the condition after it. The name is the first token after

@@ -1,20 +1,23 @@
 // Which declarations the explicit-initial-value rule weighs
-// (initialValues.ts), in the node project, over a page's css text scanned
-// into rules (pageCss.ts). Whether one is a finding is measured against
+// (initialValues.ts), over a page's css text read into rules (pageCss.ts,
+// through the kernel's scan, so run from a Daydream checkout). Whether one
+// is a finding is measured against
 // the mounted page, the UA sheet included (matchLint.browser.test.ts,
 // gates.browser.test.ts).
 import { describe, expect, test } from "vitest";
 
-import { pageRules, scanDeclarations } from "./pageCss";
+import { coreApi } from "@daydream/plugin-testing";
+
+import { pageRules } from "./pageCss";
 import { restatesInitial, ruleInitialCandidates } from "./initialValues";
 
 const restated = (style: string): string[] =>
-  scanDeclarations(style)
+  coreApi().cssDeclarations(style)
     .filter(restatesInitial)
     .map((d) => d.property);
 
 const candidates = (css: string): [number, string][] =>
-  ruleInitialCandidates(pageRules(css)).map(({ rule, declaration }) => [
+  ruleInitialCandidates(pageRules(coreApi(), css)).map(({ rule, declaration }) => [
     rule.index,
     declaration.property,
   ]);
