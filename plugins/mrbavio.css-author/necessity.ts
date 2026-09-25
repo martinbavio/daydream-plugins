@@ -17,13 +17,16 @@
 // the read; an element's own declaration is cut from its `style`
 // attribute the same way. The browser parses what is left, so the answer
 // is the page without that line, whatever the line was: a shorthand, a
-// fallback, a declaration the parser drops, a custom property. One
-// preparation keeps that honest: the page's top-level `@font-face` rules
-// are moved to a `<style>` of their own before the baseline, since
-// re-parsing a sheet that declares a face reloads it, and a face still
-// loading reads as a changed page. The kernel's container probes in the
-// mounted css are the measurer's, not the page's, and the scanner leaves
-// them out.
+// fallback, a declaration the parser drops, a custom property. Web fonts
+// would make that dishonest: re-parsing a sheet that declares a face
+// reloads it, and a face still loading reads as a changed page — every
+// declaration would read live. So the page's `@font-face` rules, at the
+// top or inside a group rule, are moved to a `<style>` of their own
+// before the baseline, and where a re-parse still reloads a face (a page
+// with an `@layer` reloads every one), the read waits for it
+// (pageMount.ts readWithoutReloading). The kernel's container probes in
+// the mounted css are the measurer's, not the page's, and the scanner
+// leaves them out.
 //
 // What that catches is the "just in case" class of failure: explicit
 // initial values, a custom property nothing reads, a declaration the
@@ -112,10 +115,10 @@ import type {
 import { isCertain } from "./certain";
 import {
   atKeyword,
+  fontFaceBlocks,
   mediaPreludes,
   pageRules,
   ruleName,
-  scanCss,
   scanDeclarations,
   selectorForMatching,
   splitTopLevelCommas,
@@ -131,7 +134,7 @@ import {
 } from "./pageDom";
 import {
   conditionsHold,
-  readWithout,
+  readWithoutReloading,
   withMount,
   type MountHost,
   type TextRange,
@@ -243,7 +246,7 @@ interface Prepared {
   doc: Document;
   /** The page's `<style>` in the copy, or null when there is none. Its
    * text once prepared is what every removal is cut from and every
-   * restore puts back (pageMount.ts readWithout). */
+   * restore puts back (pageMount.ts readWithoutReloading). */
   style: HTMLStyleElement | null;
   rules: PageRule[];
   nodes: Element[];
@@ -283,7 +286,7 @@ async function lintViewport(
     return {
       own: width,
       naming,
-      candidates: judgeAll(page, prepared, naming, width, nameOf),
+      candidates: await judgeAll(page, prepared, naming, width, nameOf),
       unloaded: prepared.nodes.filter(isUnloadedImage).map(nameOf),
     };
   });
@@ -296,7 +299,7 @@ async function lintViewport(
       const probe = baseline(prepared);
       for (const c of pending) {
         c.applies ||= appliesIn(prepared, c.removal[0]!);
-        c.dead = isDead(prepared, probe, c.removal);
+        c.dead = await isDead(prepared, probe, c.removal);
       }
     });
     swept.push(width);
@@ -342,26 +345,32 @@ function isStartingStyle(rule: Pick<PageRule, "conditions">): boolean {
   );
 }
 
-/** Read the mounted copy once and move its top-level `@font-face` rules
- * to a `<style>` of their own (see the header), waiting for the faces to
- * load again. The rest of the css keeps every offset: each moved face's
- * characters become spaces. */
+/** Read the mounted copy once and move its `@font-face` rules — at the
+ * top, or inside a group rule, each then under the same group rules — to
+ * a `<style>` of their own after the page's (see the header), waiting for
+ * the faces to load again. After, so a `@layer` it names is declared
+ * where the page first declares it and the layers keep their order. The
+ * rest of the css keeps every offset: each moved face's characters become
+ * spaces. */
 async function prepare(mounted: MountedViewport): Promise<Prepared> {
   const doc = mounted.document();
   const style = mountedStyle(doc);
   let base = style?.textContent ?? "";
-  const faces = scanCss(base).filter(
-    (block) => !block.statement && atKeyword(block.prelude) === "font-face",
-  );
+  const faces = fontFaceBlocks(base);
   if (style !== null && faces.length > 0) {
     const fonts = doc.createElement("style");
     fonts.setAttribute("data-css-author", "fonts");
     fonts.textContent = faces
-      .map((face) => base.slice(face.range[0], face.range[1]))
+      .map(({ block, within }) =>
+        within.reduceRight(
+          (inner, prelude) => `${prelude} {\n${inner}\n}`,
+          base.slice(block.range[0], block.range[1]),
+        ),
+      )
       .join("\n");
-    style.before(fonts);
-    for (const face of faces) {
-      const [start, end] = face.range;
+    style.after(fonts);
+    for (const { block } of faces) {
+      const [start, end] = block.range;
       base = base.slice(0, start) + " ".repeat(end - start) + base.slice(end);
     }
     style.textContent = base;
@@ -411,13 +420,13 @@ export function probeWidths(core: CoreApi, css: string, own: number): number[] {
  * alone — and is rewritten with the swept widths for the ones that stay
  * dead. A declaration on an image the copy could not load that a loaded
  * one would answer (`isImageSizing`) is recorded live, unjudged. */
-function judgeAll(
+async function judgeAll(
   page: DreamPage,
   prepared: Prepared,
   authored: readonly PageRule[],
   own: number,
   nameOf: (node: Element) => string,
-): Candidate[] {
+): Promise<Candidate[]> {
   const probe = baseline(prepared);
   const { rules, nodes } = prepared;
   const nameAt = (node: number): string => nameOf(nodes[node]!);
@@ -434,7 +443,15 @@ function judgeAll(
           match(node, selector, rule.scopes) ? [index] : [],
         );
   });
-  const candidates: Candidate[] = [];
+  /** What is judged, in order: each declaration, what goes with it, and
+   * whether it is recorded live unjudged. */
+  const judged: {
+    key: string;
+    element: boolean;
+    declaration: CssDeclaration;
+    removal: At[];
+    unjudged: boolean;
+  }[] = [];
   const record = (
     key: string,
     element: boolean,
@@ -442,18 +459,7 @@ function judgeAll(
     removal: At[],
     unjudged: boolean,
   ): void => {
-    const candidate: Candidate = {
-      key,
-      element,
-      property: declaration.property,
-      value: shown(declaration),
-      removal,
-      applies: appliesIn(prepared, removal[0]!),
-      dead: !unjudged && isDead(prepared, probe, removal),
-      finding: { tier: "necessity", severity: "blocking", message: "" },
-    };
-    candidate.finding = findingFor(page, candidate, [own], authored, nameAt);
-    candidates.push(candidate);
+    judged.push({ key, element, declaration, removal, unjudged });
   };
 
   // An element's own declarations, paired with the certain rules
@@ -531,6 +537,22 @@ function judgeAll(
       );
     });
   });
+
+  const candidates: Candidate[] = [];
+  for (const { key, element, declaration, removal, unjudged } of judged) {
+    const candidate: Candidate = {
+      key,
+      element,
+      property: declaration.property,
+      value: shown(declaration),
+      removal,
+      applies: appliesIn(prepared, removal[0]!),
+      dead: !unjudged && (await isDead(prepared, probe, removal)),
+      finding: { tier: "necessity", severity: "blocking", message: "" },
+    };
+    candidate.finding = findingFor(page, candidate, [own], authored, nameAt);
+    candidates.push(candidate);
+  }
   return candidates;
 }
 
@@ -638,12 +660,17 @@ function refused(doc: Document, selector: string): boolean {
   }
 }
 
-/** Remove, read, restore (pageMount.ts readWithout): the declarations
- * cut from the page's css and from their elements' `style` in one write,
- * one read, then everything put back as it was. The read is a single
- * sweep that stops at the first element whose observation left the
- * baseline. */
-function isDead(prepared: Prepared, probe: Probe, removal: readonly At[]): boolean {
+/** Remove, read, restore (pageMount.ts readWithoutReloading): the
+ * declarations cut from the page's css and from their elements' `style`
+ * in one write, one read once any web font the write made the page load
+ * again has loaded, then everything put back as it was. The read is a
+ * single sweep that stops at the first element whose observation left
+ * the baseline. */
+function isDead(
+  prepared: Prepared,
+  probe: Probe,
+  removal: readonly At[],
+): Promise<boolean> {
   const cssRanges: TextRange[] = [];
   const inline = new Map<Element, TextRange[]>();
   for (const where of removal) {
@@ -659,7 +686,9 @@ function isDead(prepared: Prepared, probe: Probe, removal: readonly At[]): boole
       inline.set(node, ranges);
     }
   }
-  return readWithout(prepared.style, cssRanges, inline, () => unchanged(probe));
+  return readWithoutReloading(prepared.doc, prepared.style, cssRanges, inline, () =>
+    unchanged(probe),
+  );
 }
 
 /** Rule 3: dead only where dead everywhere the declaration exists. Order

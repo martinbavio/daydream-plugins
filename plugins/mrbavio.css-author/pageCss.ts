@@ -621,6 +621,39 @@ export function fontFaces(css: string): CssBlock[] {
   return out;
 }
 
+/** Every `@font-face` block the browser reads as a face — at the top
+ * level or inside group rules, never inside a style rule, where none is
+ * one — with the preludes of the group rules around it, outermost first.
+ * Walked with an explicit stack, as the rules are. */
+export function fontFaceBlocks(
+  css: string,
+): { block: CssBlock; within: string[] }[] {
+  const out: { block: CssBlock; within: string[] }[] = [];
+  const levels: { blocks: readonly CssBlock[]; at: number; within: Chain<string> }[] = [
+    { blocks: scanCss(css), at: 0, within: null },
+  ];
+  while (levels.length > 0) {
+    const level = levels[levels.length - 1]!;
+    const block = level.blocks[level.at++];
+    if (block === undefined) {
+      levels.pop();
+      continue;
+    }
+    if (block.statement) continue;
+    const keyword = atKeyword(block.prelude);
+    if (keyword === "font-face") {
+      out.push({ block, within: listOf(level.within) });
+    } else if (keyword !== null && GROUP_RULES.has(keyword)) {
+      levels.push({
+        blocks: block.children,
+        at: 0,
+        within: link(level.within, block.prelude),
+      });
+    }
+  }
+  return out;
+}
+
 /** Every `@media` prelude of the text, nested ones included, as written. */
 export function mediaPreludes(css: string): string[] {
   const out: string[] = [];
