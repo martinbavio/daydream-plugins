@@ -143,7 +143,7 @@ describe("the html", () => {
     expect(said).toEqual([RESERIALIZED, FOLDED("1 <style> block")]);
   });
 
-  test("a whole document keeps its doctype as written, its html element's attributes and its head; an icon link stays", async () => {
+  test("a whole document keeps its doctype as written, its html element's attributes and its head; an icon link goes, as every link but a stylesheet does", async () => {
     const source = wholeDocument.replace(
       "<title>",
       '<link rel="icon" href="https://example.com/favicon.ico"><title>',
@@ -154,7 +154,7 @@ describe("the html", () => {
     expect(html).toContain('lang="en"');
     expect(html).toContain('style="background: #111; color: #eee"');
     expect(html).toContain('<meta charset="utf-8">');
-    expect(html).toContain('<link rel="icon"');
+    expect(html).not.toContain("<link");
     expect(html).not.toContain('rel="stylesheet"');
     expect(html).not.toContain("<script");
   });

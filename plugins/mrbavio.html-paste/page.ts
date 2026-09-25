@@ -469,16 +469,9 @@ export async function storePaste(
     findings.push(...again.findings.map((finding) => finding.message));
   }
 
-  // The cleaning keeps css as written: a data: url left there is said.
+  // A data: url left in css (no image, or one the host could not store)
+  // is emptied by the cleaning, which says so in its findings.
   const landed = parseHtml(page.html);
-  for (const { url, file, inCss } of dataImages(landed, page.css)) {
-    if (!inCss || unstored.has(url)) continue;
-    said.push(
-      file === null
-        ? "a data: url in css that is not an image was left as written"
-        : "a data: image written with character references was not stored",
-    );
-  }
 
   const { options } = cleaned;
   const title = landed.title.trim();

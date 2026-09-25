@@ -192,7 +192,7 @@ function scan(
     // Where the next turn starts; every branch moves it past `i`.
     let next = i + 1;
     if (ch === "/" && css[i + 1] === "*") {
-      next = commentEnd(css, i, to);
+      next = commentOrStringEnd(css, i, to);
     } else if (
       body === root &&
       topLevel &&
@@ -203,7 +203,7 @@ function scan(
     } else {
       if (start === -1 && !/\s/.test(ch)) start = i;
       if (ch === '"' || ch === "'") {
-        next = stringEnd(css, i, to);
+        next = commentOrStringEnd(css, i, to);
       } else if (ch === "\\") {
         next = i + 2;
       } else if (ch === "(" || ch === "[") {
@@ -271,12 +271,12 @@ export function withoutComments(text: string): string {
   while (i < text.length) {
     const ch = text[i]!;
     if (ch === "/" && text[i + 1] === "*") {
-      i = commentEnd(text, i, text.length);
+      i = commentOrStringEnd(text, i, text.length);
       out += " ";
       continue;
     }
     if (ch === '"' || ch === "'") {
-      const end = stringEnd(text, i, text.length);
+      const end = commentOrStringEnd(text, i, text.length);
       out += text.slice(i, end);
       i = end;
       continue;
@@ -287,27 +287,32 @@ export function withoutComments(text: string): string {
   return out;
 }
 
-// The kernel's own two token ends (a plugin may not import its source),
-// each marked so the kernel test compares it with the kernel's.
+// The kernel's token reader, its comment and string ends only (a plugin
+// may not import its source): marked so the kernel test says when the
+// kernel's reader changes and this is to be read again.
 
-// mirrors: src/render/cssRanges.ts commentEnd
-function commentEnd(css: string, from: number, to: number): number {
-  const end = css.indexOf("*/", from + 2);
-  return end === -1 || end >= to ? to : end + 2;
-}
-
-// mirrors: src/render/cssRanges.ts stringEnd
-function stringEnd(css: string, from: number, to: number): number {
-  const quote = css[from];
-  for (let i = from + 1; i < to; i++) {
-    if (css[i] === "\\") i++;
-    else if (css[i] === quote) return i + 1;
-    // An unterminated string ends at the newline, as the CSS tokenizer's
-    // bad-string token does.
-    else if (css[i] === "\n") return i;
+// mirrors-adapted: src/render/cssRanges.ts opaqueToken 8097cf4acb19
+function commentOrStringEnd(css: string, i: number, to: number): number {
+  const ch = css[i]!;
+  if (ch === "/" && css[i + 1] === "*") {
+    const close = css.indexOf("*/", i + 2);
+    return close === -1 || close + 2 > to ? to : close + 2;
   }
-  return to;
+  // A string: an unterminated one ends at the newline, as the CSS
+  // tokenizer's bad-string token does, and an escaped newline continues it.
+  let j = i + 1;
+  while (j < to && css[j] !== ch && !NEWLINE.test(css[j]!)) {
+    j = css[j] === "\\" ? quotedEscapeEnd(css, j) : j + 1;
+  }
+  return j < to && css[j] === ch ? j + 1 : Math.min(j, to);
 }
+
+// mirrors: src/render/cssRanges.ts quotedEscapeEnd
+function quotedEscapeEnd(css: string, j: number): number {
+  return css.startsWith("\r\n", j + 1) ? j + 3 : j + 2;
+}
+
+const NEWLINE = /[\n\r\f]/;
 
 // ---------------------------------------------------------------------------
 // The rules.
@@ -553,7 +558,7 @@ function closingParen(text: string): number {
   let depth = 0;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i] as string;
-    if (ch === '"' || ch === "'") i = stringEnd(text, i, text.length) - 1;
+    if (ch === '"' || ch === "'") i = commentOrStringEnd(text, i, text.length) - 1;
     else if (ch === "\\") i++;
     else if (ch === "(") depth++;
     else if (ch === ")" && --depth === 0) return i;
