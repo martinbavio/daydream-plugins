@@ -25,6 +25,7 @@ import type { Target } from "./target";
 import {
   droppedLegacyPick,
   EMPTY_SESSION,
+  roundId,
   sessionState,
   type Pick,
   type SessionState,
@@ -217,6 +218,9 @@ export function createSession(dd: DaydreamApi): Session {
         viewportId: target.viewportId,
         element: target.element,
         ...(trimmed === "" ? {} : { brief: trimmed }),
+        // The round is minted here, once: whatever the agent lands for
+        // this pick carries it, however often it calls the verb.
+        round: roundId(),
         at: Date.now(),
       };
       // The element, while its mount lives: where the anchor was written.

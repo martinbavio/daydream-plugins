@@ -205,6 +205,28 @@ describe("impeccable host part", () => {
     expect(verb.options).toEqual(VERBS.map((v) => v.verb));
   });
 
+  test("a pick's round is the round: every call given it — a retry too — writes it on the marker, and the tool and the session say to pass it", async () => {
+    const { host, tools, prompts } = fakeHost(
+      state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [], selector: ".card" }),
+    );
+    await activate(host);
+    const verb = tools.find((t) => t.name === VERB_TOOL)!;
+    const run = verb.run as (args: Record<string, string | undefined>) => Promise<{ text: string }>;
+    const marker = "`Impeccable bolder · variant n of 3 of vp_pricing · round k3x9q2`";
+    expect((await run({ verb: "bolder", round: "k3x9q2" })).text).toContain(marker);
+    expect((await run({ verb: "bolder", round: "k3x9q2" })).text).toContain(marker);
+    const bolder = prompts.find((p) => p.name === "impeccable-bolder")!;
+    expect(await (bolder.build as Build)({ round: "k3x9q2" })).toContain(marker);
+    // Only a round a marker can carry.
+    const schema = verb.inputSchema as unknown as { round: { safeParse(v: unknown): { success: boolean } } };
+    expect(schema.round.safeParse("k3x9q2").success).toBe(true);
+    expect(schema.round.safeParse("Not one").success).toBe(false);
+    expect(verb.description).toContain("the pick's viewport, element and round");
+    const session = tools.find((t) => t.name === SESSION_TOOL)!;
+    const { text } = await (session.run as () => Promise<{ text: string }>)();
+    expect(text).toContain("impeccable_verb {verb, viewport, element, brief, round}");
+  });
+
   test("a selected viewport item is the whole page; an in-place verb reworks it as an edit draft", async () => {
     const { host, prompts } = fakeHost(
       state({ elementId: "vp_pricing", viewportId: "vp_pricing", itemIds: ["vp_pricing"] }),

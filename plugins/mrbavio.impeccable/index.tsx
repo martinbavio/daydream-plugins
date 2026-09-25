@@ -199,10 +199,11 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
 
   // What the canvas can see of a round's progress (the agent's impeccable_done
   // is the explicit end). A VARIANTS round: every variant carries the
-  // source and the verb in its notes marker, so the count on the canvas
-  // against the marker's `of` is the progress, and reaching it is the end
-  // — counting only the variants that landed after the pick was taken, so
-  // an earlier round of the same verb on the same source is not this one's.
+  // source, the verb and the pick's round in its notes marker, so the
+  // count on the canvas against the marker's `of` is the progress, and
+  // reaching it is the end — the round known by its id alone, as adopt
+  // knows it, so another run of the verb on the same source, before or
+  // during, is not this one's.
   // An IN-PLACE round lands as one change to the source's page: its two
   // texts, compared before and after — a move, a rename or a meta edit
   // is not it.
@@ -212,19 +213,17 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     return JSON.stringify([item.payload.html, item.payload.css]);
   };
   let sourceBefore: string | null = null;
-  let variantsBefore: ReadonlySet<string> = new Set();
 
   dd.registerTool({
     name: PICK_TOOL,
     title: "Impeccable pick",
     description:
-      "Take the verb the user picked on the canvas: answers {pick: {verb, viewportId, element, brief?, at} | null, exit} — element a CSS selector naming the target in the viewport's page, null for the whole page — and clears it (the canvas shows the pick as building). Call it first on any Impeccable request and on every wake-up of a session's watch; then impeccable_verb with the pick's verb, viewport, element and — when present — brief, the user's own words about this round, which outrank the playbook's defaults. exit true means the user ended the session.",
+      "Take the verb the user picked on the canvas: answers {pick: {verb, viewportId, element, brief?, round, at} | null, exit} — element a CSS selector naming the target in the viewport's page, null for the whole page — and clears it (the canvas shows the pick as building). Call it first on any Impeccable request and on every wake-up of a session's watch; then impeccable_verb with the pick's verb, viewport, element, round — every variant's marker carries it, a retried call's too — and, when present, brief, the user's own words about this round, which outrank the playbook's defaults. exit true means the user ended the session.",
     inputSchema: { type: "object", properties: {}, required: [] },
     annotations: { idempotentHint: false, destructiveHint: false },
     run: () => {
       const taken = session.take();
       sourceBefore = taken.pick === null ? null : pageText(taken.pick.viewportId);
-      variantsBefore = new Set(dd.items().filter((i) => markerOf(i) !== null).map((i) => i.id));
       return taken;
     },
   });
@@ -245,13 +244,13 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   const trackBuilding = (): void => {
     const phase = untrack(session.phase);
     if (phase.kind !== "building") return;
-    const { verb, viewportId } = phase.pick;
+    const { verb, viewportId, round } = phase.pick;
     if (isVariantsVerb(verb)) {
       let landed = 0;
       let of: number | null = null;
       for (const item of dd.items()) {
         const m = markerOf(item);
-        if (m !== null && m.sourceId === viewportId && m.verb === verb && !variantsBefore.has(item.id)) {
+        if (m !== null && m.sourceId === viewportId && m.verb === verb && m.round === round) {
           landed += 1;
           of = Math.max(of ?? 0, m.of);
         }

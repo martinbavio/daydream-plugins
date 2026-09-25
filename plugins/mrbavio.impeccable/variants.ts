@@ -26,6 +26,17 @@ export interface VariantMarker {
 const MARKER =
   /^(?:Impeccable|Glaser) ([a-z]+) · variant (\d+) of (\d+) of (\S+)(?: · round ([a-z0-9]+))?\s*$/;
 
+/** What a round id may be: what the marker line reads back. */
+export const ROUND_ID = /^[a-z0-9]{1,32}$/;
+
+/** A fresh round id: six lowercase letters and digits — enough that two
+ * rounds over one source never share one. Minted once per round, with
+ * the pick that starts it (session.ts), or by impeccable_verb when it is
+ * called with no pick's round. */
+export function roundId(): string {
+  return Math.random().toString(36).slice(2, 8).padEnd(6, "0");
+}
+
 /** The line; `n` may be the letter, for a prompt describing every
  * variant at once. */
 export function variantMarker(
@@ -75,6 +86,11 @@ export interface Pick {
   /** What the user typed after the verb — the brief, which outranks the
    * playbook's defaults; absent when nothing was typed. */
   brief?: string;
+  /** The round the pick starts (VariantMarker.round), minted with it:
+   * impeccable_pick answers it, impeccable_verb writes it on every
+   * variant's marker — a retried call too — and the caption and adopt
+   * both know the round by it alone. */
+  round: string;
   /** Epoch ms. */
   at: number;
 }
@@ -87,9 +103,16 @@ export function sessionState(raw: unknown): SessionState {
   const pick = legacyWholePage(r["pick"]);
   return {
     seq: typeof r["seq"] === "number" ? r["seq"] : 0,
-    pick: isPick(pick) ? pick : null,
+    pick: isPick(pick) ? withRound(pick) : null,
     exit: r["exit"] === true,
   };
+}
+
+/** A pick saved before picks carried their round, or with one no marker
+ * can carry, is given one now: whatever lands for it lands under that. */
+function withRound(pick: Omit<Pick, "round"> & { round?: unknown }): Pick {
+  const { round } = pick;
+  return typeof round === "string" && ROUND_ID.test(round) ? { ...pick, round } : { ...pick, round: roundId() };
 }
 
 /** A pick saved before pages (decision #76) named its element by
@@ -119,7 +142,7 @@ function legacyWholePage(raw: unknown): unknown {
   return page;
 }
 
-function isPick(raw: unknown): raw is Pick {
+function isPick(raw: unknown): raw is Omit<Pick, "round"> & { round?: unknown } {
   if (typeof raw !== "object" || raw === null) return false;
   const r = raw as Record<string, unknown>;
   return (

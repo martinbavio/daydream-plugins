@@ -22,6 +22,8 @@ import { z } from "zod";
 
 import type { DaydreamHostApi } from "@daydream/plugin-api/host";
 
+import { ROUND_ID, roundId } from "./variants.ts";
+
 import type * as Detect from "./bridge/detect.ts";
 import type * as Skill from "./bridge/skill.ts";
 import type * as Verbs from "./bridge/verbs.ts";
@@ -53,6 +55,7 @@ interface VerbArgs {
   element?: string;
   brief?: string;
   variants?: string;
+  round?: string;
 }
 
 const TARGET_ARGS = {
@@ -76,6 +79,13 @@ const TARGET_ARGS = {
     .string()
     .optional()
     .describe("How many draft variants to open (1–6, default 3); ignored by in-place verbs."),
+  round: z
+    .string()
+    .regex(ROUND_ID)
+    .optional()
+    .describe(
+      "The pick's round (impeccable_pick answers it). Every variant's marker carries it, so the canvas counts the round and adopt clears it whole — pass the same one when you call the verb again for the same pick. Default: a fresh round, for a verb with no pick.",
+    ),
 };
 
 /** The shell loop that exits when the storage file's contents change (or
@@ -103,19 +113,12 @@ export function sessionText(dataFile: string): string {
     "THE LOOP — one state at a time, never two:",
     "1. WAITING: call impeccable_pick FIRST — a pick made before you were watching is already in the file, and a watch started now would never wake for it. A pick → step 3. exit → stop. Nothing → start the watch (and nothing else) and tell the user in one line that the session is on and they can pick a verb on the canvas.",
     "2. WOKEN: the watch exited. Call impeccable_pick; it answers {pick, exit} and takes the pick (the canvas caption changes from waiting to building). exit true → say the session ended and stop, no watch. pick null → back to 1.",
-    "3. WORKING: impeccable_verb {verb, viewport, element, brief} from the pick (brief when the pick carries one — the user's words, which outrank the playbook's defaults) and follow it TO THE END — every draft landed, one line per direction, then impeccable_done (the canvas stops saying building). THE WATCH DOES NOT RUN DURING THIS STATE: a watch started here waits for a pick the user cannot make while you are still building, and stalls the round.",
+    "3. WORKING: impeccable_verb {verb, viewport, element, brief, round} from the pick (brief when the pick carries one — the user's words, which outrank the playbook's defaults; round always, the same one if you call the verb again for this pick) and follow it TO THE END — every draft landed, one line per direction, then impeccable_done (the canvas stops saying building). THE WATCH DOES NOT RUN DURING THIS STATE: a watch started here waits for a pick the user cannot make while you are still building, and stalls the round.",
     "4. Only when the round is done: back to 1 — start the watch again.",
     "The user adopts a variant from the canvas; nothing for you to do there.",
     "",
     "Chat is overhead during a session: one line when the session starts, one line per round, one when it ends. Never run a verb the user did not pick.",
   ].join("\n");
-}
-
-/** A fresh round id for one run of a verb (variants.ts): six lowercase
- * letters and digits, a new one per prompt — enough that two rounds over
- * one source never share one. */
-function roundId(): string {
-  return Math.random().toString(36).slice(2, 8).padEnd(6, "0");
 }
 
 /** The instructions section, computed once per activation from what is
@@ -166,7 +169,9 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
       target: state === null ? null : resolveTarget(state, args),
       ...(args.brief === undefined ? {} : { brief: args.brief }),
       variants: variantCount(args.variants),
-      round: roundId(),
+      // The pick's round when there is one: a second call for the same
+      // pick lands into the same round, never a round of its own.
+      round: args.round ?? roundId(),
       playbook,
       craftFloor,
       skillVersion: version,
@@ -177,7 +182,7 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
   host.registerTool({
     name: VERB_TOOL,
     title: "Impeccable verb",
-    description: `The playbook for one design verb over a viewport on the canvas, with the target resolved from the selection (or the arguments) and the deliverable spelled out — call it, then follow it. Verbs: ${verbNames.join(", ")}. ${VERBS.filter((v) => v.mode === "variants").length} of them open draft variants beside the source, ${VERBS.filter((v) => v.mode === "in-place").length} rework it in place, and critique and audit answer a report over the rendered page (impeccable_html + Impeccable's detector) and land nothing. After a canvas pick, pass the pick's viewport and element.`,
+    description: `The playbook for one design verb over a viewport on the canvas, with the target resolved from the selection (or the arguments) and the deliverable spelled out — call it, then follow it. Verbs: ${verbNames.join(", ")}. ${VERBS.filter((v) => v.mode === "variants").length} of them open draft variants beside the source, ${VERBS.filter((v) => v.mode === "in-place").length} rework it in place, and critique and audit answer a report over the rendered page (impeccable_html + Impeccable's detector) and land nothing. After a canvas pick, pass the pick's viewport, element and round.`,
     inputSchema: {
       verb: z.enum(verbNames as [string, ...string[]]).describe("The verb."),
       ...TARGET_ARGS,

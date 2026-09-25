@@ -217,6 +217,10 @@ describe("mrbavio.impeccable in the shell", () => {
       pick: { verb: "bolder", viewportId: source.id, element: "div.grid", brief: "keep the photo, louder CTA" },
     });
     expect(JSON.stringify(waiting)).not.toContain(grid);
+    // The round is minted with the pick: every variant the agent lands
+    // for it carries this id, however many times it calls the verb.
+    const round = (waiting["pick"] as { round: string }).round;
+    expect(round).toMatch(/^[a-z0-9]{6}$/);
     await settle();
     expect(caption()!.textContent).toBe("bolder · waiting for an agent");
     expect(caption()!.dataset["phase"]).toBe("waiting");
@@ -225,7 +229,7 @@ describe("mrbavio.impeccable in the shell", () => {
 
     // The agent takes it: the pick is answered once and cleared.
     const taken = (await pickTool().run({})) as { pick: unknown; exit: boolean };
-    expect(taken).toMatchObject({ pick: { verb: "bolder", element: "div.grid", brief: "keep the photo, louder CTA" }, exit: false });
+    expect(taken).toMatchObject({ pick: { verb: "bolder", element: "div.grid", brief: "keep the photo, louder CTA", round }, exit: false });
     expect(await stored(files, 2)).toMatchObject({ pick: null, exit: false });
     await settle();
     expect(caption()!.textContent).toBe("bolder · building");
@@ -236,13 +240,13 @@ describe("mrbavio.impeccable in the shell", () => {
     mounted.store.landItems([page("white")]);
     await settle();
     expect(caption()!.textContent).toBe("bolder · building");
-    mounted.store.landItems([variantOf(source, "bolder", 1, 3)]);
+    mounted.store.landItems([variantOf(source, "bolder", 1, 3, round)]);
     await settle();
     expect(caption()!.textContent).toBe("bolder · 1 of 3");
-    mounted.store.landItems([variantOf(source, "bolder", 2, 3)]);
+    mounted.store.landItems([variantOf(source, "bolder", 2, 3, round)]);
     await settle();
     expect(caption()!.textContent).toBe("bolder · 2 of 3");
-    mounted.store.landItems([variantOf(source, "bolder", 3, 3)]);
+    mounted.store.landItems([variantOf(source, "bolder", 3, 3, round)]);
     await settle();
     expect(caption()).toBeNull();
   });
@@ -342,8 +346,8 @@ describe("mrbavio.impeccable in the shell", () => {
     // impeccable_done: the agent's word ends a round the canvas cannot see the
     // end of (a round that stopped short).
     await pickVerb("bolder");
-    await pickTool().run({});
-    mounted.store.landItems([variantOf(source, "bolder", 1, 3)]);
+    const { pick } = (await pickTool().run({})) as { pick: { round: string } };
+    mounted.store.landItems([variantOf(source, "bolder", 1, 3, pick.round)]);
     await settle();
     expect(caption()!.textContent).toBe("bolder · 1 of 3");
     expect(await tool(DONE_TOOL).run({})).toEqual({ done: true });
@@ -863,7 +867,7 @@ describe("mrbavio.impeccable in the shell", () => {
     expect((mounted.store.document.items[0] as DreamPage).payload.css).toBe(second[1]!.payload.css);
   });
 
-  test("a second round of a verb on one source counts its own variants, not the first round's", async () => {
+  test("the caption counts the pick's round alone: another round of the verb on the source, landed before or during, is not this one's", async () => {
     const { doc, source } = sourceDocument("Pricing");
     doc.items.push(...[1, 2, 3].map((n) => variantOf(source, "bolder", n, 3, "r1")));
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
@@ -871,14 +875,44 @@ describe("mrbavio.impeccable in the shell", () => {
 
     select(source.id);
     await pickVerb("bolder");
-    await pickTool().run({});
+    const { pick } = (await pickTool().run({})) as { pick: { round: string } };
     await settle();
     expect(caption()!.textContent).toBe("bolder · building");
+    // A variant of some other run of the verb — a verb call that minted
+    // its own round — is not the pick's.
     mounted.store.landItems([variantOf(source, "bolder", 1, 3, "r2")]);
     await settle();
+    expect(caption()!.textContent).toBe("bolder · building");
+    mounted.store.landItems([variantOf(source, "bolder", 1, 3, pick.round)]);
+    await settle();
     expect(caption()!.textContent).toBe("bolder · 1 of 3");
-    mounted.store.landItems([variantOf(source, "bolder", 2, 3, "r2"), variantOf(source, "bolder", 3, 3, "r2")]);
+    mounted.store.landItems([variantOf(source, "bolder", 2, 3, pick.round), variantOf(source, "bolder", 3, 3, pick.round)]);
     await settle();
     expect(caption()).toBeNull();
+  });
+
+  test("a verb called twice for one pick is one round: adopt takes out every variant of it, the ones the caption counted", async () => {
+    const { doc, source } = sourceDocument("Pricing");
+    mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
+    await mountedId(source.id, ".grid");
+
+    select(source.id);
+    await pickVerb("bolder");
+    const { pick } = (await pickTool().run({})) as { pick: { round: string } };
+    // The first call's fan stopped at two; the retry landed a third, all
+    // under the pick's round.
+    const fan = [1, 2, 1].map((n) => variantOf(source, "bolder", n, 3, pick.round));
+    mounted.store.landItems(fan.slice(0, 2));
+    await settle();
+    expect(caption()!.textContent).toBe("bolder · 2 of 3");
+    mounted.store.landItems(fan.slice(2));
+    await settle();
+    expect(caption()).toBeNull();
+
+    const buttons = Array.from(mounted.host.querySelectorAll<HTMLElement>('[data-item-action="mrbavio.impeccable:adopt"]'));
+    expect(buttons.length).toBe(3);
+    buttons[2]!.click();
+    flush();
+    expect(mounted.store.document.items.map((i) => i.id)).toEqual([source.id]);
   });
 });
