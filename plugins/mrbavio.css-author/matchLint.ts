@@ -27,24 +27,27 @@
 // named by its unique selector in the page's stored markup (pageDom.ts
 // storedNames), not in the mounted copy.
 //
-// REDUNDANCY: an element's own declaration a matched, unconditional rule
-// already sets with the identical value — the element's line does nothing
-// a rule does not already do, so the finding names it as the one to
-// remove. Sharing a value is not enough: the cascade decides what the
-// element gets without its line (an `!important` elsewhere, a layer, a
-// later rule), so the claim is MEASURED — the line cut from the copy, the
-// element's computed style read, the line put back, as the necessity lint
-// removes a declaration — and holds only when nothing changed. What the
-// frame cannot show is refused outright: a rule reaching the element that
-// touches the property under an `@media`, `@container`, `@supports` or
-// `@starting-style`, or a state pseudo-class, could win without the line
-// at another width or in another state.
+// REDUNDANCY: an element's own declaration a matched rule that applies
+// wherever it matches (certain.ts: under no `@media`, `@supports`,
+// `@container` or `@starting-style`, in no state; a layer or a scope
+// gates nothing) already sets with the identical value — the element's
+// line does nothing a rule does not already do, so the finding names it
+// as the one to remove. Sharing a value is not enough: the cascade
+// decides what the element gets without its line (an `!important`
+// elsewhere, a layer, a later rule), so the claim is MEASURED — the line
+// cut from the copy, the element's computed style read, the line put
+// back, as the necessity lint removes a declaration — and holds only when
+// nothing changed. What the frame cannot show is refused outright: a rule
+// reaching the element that touches the property and is not certain could
+// win without the line at another width or in another state.
 //
 // AN EXPLICIT INITIAL VALUE (rule 2 of the static gate): a declaration
 // restating its property's initial value (initialValues.ts) — an
-// element's own, or a top-level unconditional rule's — MEASURED the same
-// way: the line cut, the element (or every element the rule reaches)
-// read, and a finding only when nothing changed. So an initial the UA
+// element's own, or a certain rule's — MEASURED the same way: the line
+// cut, the element (or everything the rule styles, each pseudo-element
+// read as `getComputedStyle(el, "::before")` reads it) read, and a
+// finding only when nothing changed; a rule styling a pseudo-element the
+// browser's computed style cannot read is never one. So an initial the UA
 // sheet overrides (`<dialog open>`'s `position: absolute`, a popover's
 // `inset: 0`, an `img`'s clipped overflow) or a rule sets is an override
 // the page needs, never a redundant line; what the frame cannot show is
@@ -62,10 +65,12 @@
 //
 // A CONTAINER QUERY WITH NO CONTAINER: a rule under `@container` whose
 // every matched element lacks an ancestor that is a container for what the
-// query asks (containers.ts). Each ancestor's container declarations are
-// gathered from its own style and every rule matching it under any
-// condition — generous, because a static lint must never flag a query the
-// browser could match at some width.
+// query asks (containers.ts). An ancestor is one when the mounted copy
+// computes it one (`container-type` and `container-name` as the cascade
+// resolved them), or when its container declarations — gathered from its
+// own style and every rule matching it under any condition — say it could
+// be: generous, because a static lint must never flag a query the browser
+// could match at some width.
 //
 // RULE-AGAINST-RULE REDUNDANCY (the CSS author's review after the
 // selectors step landed): a rule's declaration restating, for EVERY
@@ -78,11 +83,12 @@
 //
 // A selector member's trailing `::pseudo-element` has no element for
 // `Element.matches` to test, so every match strips it first
-// (pageCss.ts `trailingPseudoElement`) and keeps its name for the two
+// (pageCss.ts `trailingPseudoElement`) and keeps its name for the
 // questions that need it: a pseudo-element match still answers the
 // dead-rule question (a `.card::before` rule is not dead while `.card`
-// exists) but is skipped for redundancy (a pseudo-element's box has no
-// `style` attribute for a rule to restate).
+// exists), is skipped for an element's redundancy (a pseudo-element's box
+// has no `style` attribute for a rule to restate), and is what a rule's
+// measurement reads.
 
 import type {
   CoreApi,
@@ -91,13 +97,16 @@ import type {
   Finding,
 } from "@daydream/plugin-api";
 
+import { isCertain } from "./certain";
 import {
+  computedContainer,
   emptyContainerDeclaration,
   mergeContainerDeclaration,
   queryNeeds,
   satisfies,
   splitContainerPrelude,
   type ContainerDeclaration,
+  type QueryNeeds,
 } from "./containers";
 import {
   atKeyword,
@@ -170,9 +179,9 @@ export async function matchLint(
   for (const page of dd.core.viewportItems(doc) as DreamPage[]) {
     // Every question here is about a rule or a restated initial, so a
     // page with neither has nothing to ask and pays for no mount.
-    const stored = parsePage(page.payload);
-    const authored = pageRules(stored.css);
-    const restated = lintElements(stored.doc).some((el) =>
+    const stored = parsePage(page.payload.html);
+    const authored = pageRules(page.payload.css);
+    const restated = lintElements(stored).some((el) =>
       scanDeclarations(el.getAttribute("style") ?? "").some(restatesInitial),
     );
     if (authored.length === 0 && !restated) continue;
@@ -196,7 +205,7 @@ export async function matchLint(
             scanDeclarations(node.getAttribute("style") ?? ""),
           ]),
         ),
-        nameOf: storedNames(stored.doc, mdoc),
+        nameOf: storedNames(stored, mdoc),
         match: ruleMatcher(mdoc),
       };
       const ranked = rankedMatches(dd.core, read);
@@ -227,11 +236,15 @@ function matchesAny(
 /** One rule matching a node, ranked the way the browser's cascade would:
  * `specificity` is the MATCHING member's own (a selector list's effective
  * specificity is whichever member matched), `pseudo` present exactly when
- * every matching member ended in one. */
+ * every matching member ended in one. What it styles — the element's own
+ * box (`box`), and each pseudo-element a matching member names
+ * (`pseudos`) — is what a measurement reads (`targetsOf`). */
 interface RuleMatch {
   index: number;
   pseudo?: string;
   specificity: [number, number, number];
+  box: boolean;
+  pseudos: string[];
 }
 
 /** Every rule matching `node`, winner-first: specificity descending, then
@@ -241,7 +254,7 @@ interface RuleMatch {
  * matches as though the state were in effect (state-stripped): nobody
  * hovers the mount, but the redundancy questions must see the rule that
  * would win once somebody does — and never take it for a certain one
- * (`varies`). Every condition is ignored the same way. */
+ * (certain.ts). Every condition is ignored the same way. */
 function matchedRulesFor(
   core: CoreApi,
   read: MountedPage,
@@ -252,6 +265,7 @@ function matchedRulesFor(
     let best: { specificity: [number, number, number]; pseudo?: string } | null =
       null;
     let plain = false;
+    const pseudos = new Set<string>();
     for (const member of splitTopLevelCommas(rule.selector)) {
       const trimmed = member.trim();
       const trailing = trailingPseudoElement(trimmed);
@@ -262,6 +276,7 @@ function matchedRulesFor(
           read.match(node, stripStatePseudo(base), rule.scopes));
       if (!matched) continue;
       if (trailing === null) plain = true;
+      else pseudos.add(trailing.pseudo);
       const rank = core.specificity(trimmed);
       if (best === null || isMoreSpecific(rank, best.specificity)) {
         best =
@@ -277,6 +292,8 @@ function matchedRulesFor(
       index: rule.index,
       specificity: best.specificity,
       ...(best.pseudo === undefined || plain ? {} : { pseudo: best.pseudo }),
+      box: plain,
+      pseudos: [...pseudos],
     });
   }
   out.sort((a, b) => {
@@ -315,21 +332,66 @@ function rankedMatches(core: CoreApi, read: MountedPage): Map<Element, RuleMatch
 }
 
 // ---------------------------------------------------------------------------
-// What a measured line is weighed against: the rules styling the element.
+// What a measured line is weighed against: what a rule styles, and the
+// rules styling it.
 
-/** The rules matching `node` that style the element itself, winner
- * first: a pseudo-element match styles a box the element's own style
- * never reaches. */
-function boxMatches(
+/** What a measurement reads: an element's own box (`pseudo` null), or
+ * one of its pseudo-elements. */
+interface Target {
+  node: Element;
+  pseudo: string | null;
+}
+
+/** The pseudo-elements the browser's computed style answers for — asked
+ * of Chromium: a rule on any other (`::placeholder`, `::selection`, a
+ * `::part()`) is read back as the element's own style, never its own. */
+const MEASURED_PSEUDO: ReadonlySet<string> = new Set([
+  "::before",
+  "::after",
+  "::marker",
+  "::first-line",
+  "::first-letter",
+  "::backdrop",
+]);
+
+/** What rule `index` styles among the mounted nodes: each box and each
+ * pseudo-element a member of it reaches — or null when one of those is a
+ * pseudo-element the browser cannot measure, so no measurement can
+ * speak for the rule. */
+function targetsOf(
+  read: MountedPage,
   ranked: ReadonlyMap<Element, readonly RuleMatch[]>,
-  node: Element,
+  index: number,
+): Target[] | null {
+  const out: Target[] = [];
+  for (const node of read.nodes) {
+    const match = ranked.get(node)?.find((m) => m.index === index);
+    if (match === undefined) continue;
+    if (match.box) out.push({ node, pseudo: null });
+    for (const pseudo of match.pseudos) {
+      if (!MEASURED_PSEUDO.has(pseudo)) return null;
+      out.push({ node, pseudo });
+    }
+  }
+  return out;
+}
+
+/** The rules styling `target`, winner first: the element's own box, or
+ * the one pseudo-element — a match on another box styles what the
+ * target's line never reaches. */
+function matchesOf(
+  ranked: ReadonlyMap<Element, readonly RuleMatch[]>,
+  target: Target,
 ): RuleMatch[] {
-  return (ranked.get(node) ?? []).filter((match) => match.pseudo === undefined);
+  return (ranked.get(target.node) ?? []).filter((match) =>
+    target.pseudo === null ? match.box : match.pseudos.includes(target.pseudo),
+  );
 }
 
 /** Whether one of `matched` could win without a line of `property` at
- * another width or in another state (`varies`) and touches the property:
- * the frame cannot say the line changes nothing there. */
+ * another width or in another state (it is not certain, certain.ts) and
+ * touches the property: the frame cannot say the line changes nothing
+ * there. */
 function contested(
   read: MountedPage,
   matched: readonly RuleMatch[],
@@ -339,7 +401,7 @@ function contested(
     const rule = read.rules[match.index];
     return (
       rule !== undefined &&
-      varies(rule) &&
+      !isCertain(rule) &&
       rule.declarations.some((d) => relatedProperties(property, d.property))
     );
   });
@@ -354,12 +416,13 @@ function lintRestatedInitials(
   findings: Finding[],
 ): void {
   for (const node of read.nodes) {
-    const matched = boxMatches(ranked, node);
+    const box: Target = { node, pseudo: null };
+    const matched = matchesOf(ranked, box);
     for (const declaration of read.own.get(node) ?? []) {
       if (!restatesInitial(declaration)) continue;
       if (contested(read, matched, declaration.property)) continue;
       const cut = new Map([[node, [declaration.range]]]);
-      if (!unchangedWithout(read, [], cut, [node])) continue;
+      if (!unchangedWithout(read, [], cut, [box])) continue;
       const selector = read.nameOf(node);
       findings.push({
         tier: "static",
@@ -371,12 +434,13 @@ function lintRestatedInitials(
     }
   }
   for (const { rule, declaration } of ruleInitialCandidates(read.rules)) {
-    const reached = read.nodes.filter((node) =>
-      boxMatches(ranked, node).some((match) => match.index === rule.index),
-    );
+    // What the rule styles, its pseudo-elements included: a reset there
+    // is read on the pseudo-element, never on the element beside it.
+    const reached = targetsOf(read, ranked, rule.index);
+    if (reached === null) continue;
     if (
-      reached.some((node) =>
-        contested(read, boxMatches(ranked, node), declaration.property),
+      reached.some((target) =>
+        contested(read, matchesOf(ranked, target), declaration.property),
       )
     ) {
       continue;
@@ -405,7 +469,8 @@ function lintRedundancy(
   const maps = read.rules.map((rule) => declarationMap(rule.declarations));
   for (const node of read.nodes) {
     const own = read.own.get(node) ?? [];
-    const matched = boxMatches(ranked, node);
+    const box: Target = { node, pseudo: null };
+    const matched = matchesOf(ranked, box);
     if (own.length === 0 || matched.length === 0) continue;
     for (const [property, value] of Object.entries(declarationMap(own))) {
       // A rule that could win without the line at another width or in
@@ -415,14 +480,13 @@ function lintRedundancy(
       // declaration is the one worth naming.
       for (const match of matched) {
         const rule = read.rules[match.index];
-        // A conditional or state rule may not apply everywhere the
-        // element does: only an unconditional one can restate it.
-        if (rule === undefined || rule.conditions.length > 0) continue;
-        if (hasStatePseudo(rule.selector)) continue;
+        // Only a rule that applies wherever the element is can restate
+        // its line (certain.ts).
+        if (rule === undefined || !isCertain(rule)) continue;
         if (maps[rule.index]?.[property] !== value) continue;
         // The cascade without the line may still pick another rule.
         const lines = allOf(own, property).map((d) => d.range);
-        if (!unchangedWithout(read, [], new Map([[node, lines]]), [node])) {
+        if (!unchangedWithout(read, [], new Map([[node, lines]]), [box])) {
           break;
         }
         const selector = read.nameOf(node);
@@ -451,16 +515,16 @@ function lintRuleRestatements(
   const sheet: RedundancyRule[] = read.rules.map((rule) => ({
     selector: rule.selector,
     conditions: rule.conditions,
+    scopes: rule.scopes,
     styles: declarationMap(rule.declarations),
   }));
-  for (const hit of ruleRestatements(sheet, ranked, hasStatePseudo)) {
+  for (const hit of ruleRestatements(sheet, ranked)) {
     const rule = read.rules[hit.rule];
     if (rule === undefined) continue;
-    // Measured: the rule's line cut from the copy, every element it
-    // reaches read against the page with it.
-    const reached = read.nodes.filter((node) =>
-      (ranked.get(node) ?? []).some((match) => match.index === hit.rule),
-    );
+    // Measured: the rule's line cut from the copy, everything it styles
+    // read against the page with it.
+    const reached = targetsOf(read, ranked, hit.rule);
+    if (reached === null) continue;
     const lines = allOf(rule.declarations, hit.property).map((d) => d.range);
     if (!unchangedWithout(read, lines, new Map(), reached)) continue;
     const beneath = hit.restates
@@ -478,19 +542,6 @@ function lintRuleRestatements(
   }
 }
 
-/** Whether a rule may apply at one width or in one state and not at
- * another: under an at-rule that gates it (`@layer` and `@scope` do not
- * — they hold at every width), or with a state pseudo-class. */
-function varies(rule: PageRule): boolean {
-  return (
-    hasStatePseudo(rule.selector) ||
-    rule.conditions.some((condition) => {
-      const keyword = atKeyword(condition);
-      return keyword !== "layer" && keyword !== "scope";
-    })
-  );
-}
-
 function allOf(
   list: readonly CssDeclaration[],
   property: string,
@@ -500,32 +551,34 @@ function allOf(
 
 /**
  * Remove, read, restore — the necessity lint's measurement, through the
- * same helper (pageMount.ts readWithout), asked of the elements a
- * redundancy is about: whether every one of `nodes` computes exactly what
- * it did with the `css` and `inline` ranges cut. The computed style
- * decides an element's box and everything that inherits from it, so an
- * element computing the same is a page unchanged by the cut. With no
- * `<style>` to cut from, a css range reads as a change.
+ * same helper (pageMount.ts readWithout), asked of what a redundancy is
+ * about: whether every one of `targets` — an element's box or one of its
+ * pseudo-elements — computes exactly what it did with the `css` and
+ * `inline` ranges cut. The computed style decides a box and everything
+ * that inherits from it, so a box computing the same is a page unchanged
+ * by the cut. Nothing to read proves nothing: with no target, or no
+ * `<style>` to cut a css range from, the answer is a change.
  */
 function unchangedWithout(
   read: MountedPage,
   css: readonly TextRange[],
   inline: ReadonlyMap<Element, readonly TextRange[]>,
-  nodes: readonly Element[],
+  targets: readonly Target[],
 ): boolean {
+  if (targets.length === 0) return false;
   if (css.length > 0 && read.style === null) return false;
-  const before = nodes.map(computedOf);
+  const before = targets.map(computedOf);
   return readWithout(read.style, css, inline, () =>
-    nodes.every((node, i) => computedOf(node) === before[i]),
+    targets.every((target, i) => computedOf(target) === before[i]),
   );
 }
 
-/** Every computed value of the element, custom properties included (a
+/** Every computed value of the box, custom properties included (a
  * restated `--x` is the element's own value), as one comparable string —
  * read through the copy's own window. */
-function computedOf(node: Element): string {
+function computedOf({ node, pseudo }: Target): string {
   const view = node.ownerDocument.defaultView ?? window;
-  const style = view.getComputedStyle(node);
+  const style = view.getComputedStyle(node, pseudo);
   let out = "";
   for (const name of Array.from(style)) {
     out += `|${name}:${style.getPropertyValue(name)}`;
@@ -586,6 +639,30 @@ function lintContainerQueries(read: MountedPage, findings: Finding[]): void {
     gathered.set(node, out);
     return out;
   };
+  // And what each node IS at the mounted width — the cascade's own
+  // answer, `!important`, `var()` and `inherit` resolved — which the
+  // declarations only add to: a type declared under a condition the
+  // frame is not in is still a container at some width.
+  const measured = new Map<Element, ContainerDeclaration>();
+  const measuredOf = (node: Element): ContainerDeclaration => {
+    let out = measured.get(node);
+    if (out === undefined) {
+      const style = (node.ownerDocument.defaultView ?? window).getComputedStyle(node);
+      out = computedContainer(
+        style.getPropertyValue("container-type"),
+        style.getPropertyValue("container-name"),
+      );
+      measured.set(node, out);
+    }
+    return out;
+  };
+  const answers = (
+    node: Element,
+    needs: QueryNeeds,
+    name: string | null,
+  ): boolean =>
+    satisfies(measuredOf(node), needs, name) ||
+    satisfies(declarationOf(node), needs, name);
 
   for (const rule of read.rules) {
     for (const condition of rule.conditions) {
@@ -602,9 +679,8 @@ function lintContainerQueries(read: MountedPage, findings: Finding[]): void {
       let satisfied = false;
       for (const node of matched) {
         for (let a = node.parentElement; a !== null; a = a.parentElement) {
-          const declared = declarationOf(a);
-          if (satisfies(declared, needs, null)) typed = true;
-          if (satisfies(declared, needs, name)) {
+          if (answers(a, needs, null)) typed = true;
+          if (answers(a, needs, name)) {
             satisfied = true;
             break;
           }

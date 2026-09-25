@@ -62,10 +62,55 @@ export function readWithout<T>(
   inline: ReadonlyMap<Element, readonly TextRange[]>,
   read: () => T,
 ): T {
+  const restore = cut(style, css, inline);
+  try {
+    return read();
+  } finally {
+    restore();
+  }
+}
+
+/**
+ * `readWithout`, the read waiting for the web fonts the write made the
+ * page load again. A sheet parsed again can drop the faces it holds, and
+ * in Chromium a page with an `@layer` drops every face of the page, the
+ * ones in a sheet the write never touched included: each is asked for
+ * again, and one whose file must be asked of the network (served
+ * `no-cache`) arrives later — a read in between sees the fallback face,
+ * and a page that changed. So the page is laid out, which starts every
+ * face its text needs, and read once they have loaded.
+ */
+export async function readWithoutReloading<T>(
+  doc: Document,
+  style: HTMLStyleElement | null,
+  css: readonly TextRange[],
+  inline: ReadonlyMap<Element, readonly TextRange[]>,
+  read: () => T,
+): Promise<T> {
+  const restore = cut(style, css, inline);
+  try {
+    doc.documentElement.getBoundingClientRect();
+    if (doc.fonts.status === "loading") await doc.fonts.ready;
+    return read();
+  } finally {
+    restore();
+  }
+}
+
+/** The write of `readWithout`, answering what puts it back. */
+function cut(
+  style: HTMLStyleElement | null,
+  css: readonly TextRange[],
+  inline: ReadonlyMap<Element, readonly TextRange[]>,
+): () => void {
   const sheet = style?.textContent ?? "";
   const attributes = new Map(
     Array.from(inline.keys(), (node) => [node, node.getAttribute("style") ?? ""]),
   );
+  const restore = (): void => {
+    if (style !== null && css.length > 0) style.textContent = sheet;
+    for (const [node, text] of attributes) node.setAttribute("style", text);
+  };
   try {
     if (style !== null && css.length > 0) {
       style.textContent = withoutRanges(sheet, css);
@@ -73,11 +118,11 @@ export function readWithout<T>(
     for (const [node, ranges] of inline) {
       node.setAttribute("style", withoutRanges(attributes.get(node)!, ranges));
     }
-    return read();
-  } finally {
-    if (style !== null && css.length > 0) style.textContent = sheet;
-    for (const [node, text] of attributes) node.setAttribute("style", text);
+  } catch (error) {
+    restore();
+    throw error;
   }
+  return restore;
 }
 
 /**

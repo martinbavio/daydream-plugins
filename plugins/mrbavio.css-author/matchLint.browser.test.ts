@@ -349,6 +349,83 @@ describe("matchLint", () => {
     );
     expect(findings.map((f) => [f.rule, f.property])).toEqual([[1, "color"]]);
   });
+
+  test("a `<style>` the markup keeps in a noscript is never taken for the page's css", async () => {
+    // The kernel keeps a noscript's stylesheet in the markup, and the
+    // measurer's copy (no scripting there) parses it as a `<style>` in the
+    // head, before the page's own.
+    const findings = await matchLint({
+      version: 7,
+      items: [
+        createPageItem(
+          {
+            html: '<!doctype html><html><head><noscript><style>.gone { color: red; }</style></noscript></head><body><div class="card"></div></body></html>',
+            css: ".card { position: static; }",
+          },
+          { id: "v1", frame: { width: 960 } },
+        ),
+      ],
+    });
+    expect(findings.map((f) => [f.rule, f.property, f.message])).toEqual([
+      [
+        0,
+        "position",
+        "position: static in rule `.card` of viewport v1 restates the initial value",
+      ],
+    ]);
+  });
+
+  test("a layered or scoped rule applies wherever it matches: an element's own declaration it already makes is redundancy", async () => {
+    for (const css of [
+      "@layer base { .card { color: red; } }",
+      "@scope (body) { .card { color: red; } }",
+    ]) {
+      const findings = await matchLint(
+        page(css, '<div class="card" style="color: red"></div>'),
+      );
+      expect(findings.map((f) => [f.elementId, f.rule, f.property]), css).toEqual([
+        ["div.card", 0, "color"],
+      ]);
+    }
+  });
+
+  test("a layered rule beneath restates a rule's declaration as an unlayered one does", async () => {
+    const findings = await matchLint(
+      page(
+        "@layer base { .card { color: #333; } }\n.card.featured { color: #333; border: 1px solid; }",
+        '<div class="card featured"></div>',
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([[1, "color"]]);
+  });
+});
+
+describe("matchLint: a pseudo-element's declarations are measured on the pseudo-element", () => {
+  test("a reset to the initial that overrides a pseudo-element's value is the override, not a restatement", async () => {
+    expect(
+      await matchLint(
+        page(
+          '.card::before { content: ""; opacity: 0.2; }\n.card.on::before { opacity: 1; }',
+          '<div class="card on"></div>',
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a pseudo-element's restated initial nothing overrides is a finding", async () => {
+    const findings = await matchLint(
+      page('.card::before { content: ""; opacity: 1; }'),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([[0, "opacity"]]);
+  });
+
+  test("a pseudo-element the browser's computed style cannot read is never called a restatement", async () => {
+    expect(
+      await matchLint(
+        page(".card::placeholder { opacity: 1; }", '<input class="card">'),
+      ),
+    ).toEqual([]);
+  });
 });
 
 // A container query with no container to ask. On a tree this was the
@@ -562,6 +639,35 @@ describe("matchLint: a container query with no container", () => {
   test("the container shorthand with a slashed type satisfies the query; an unslashed one names only", async () => {
     expect(await matchLint(queried(wrapped("container: grid / size")))).toEqual([]);
     expect(await matchLint(queried(wrapped("container: grid")))).toHaveLength(1);
+  });
+
+  test("an !important container-type is not reset by a later normal container shorthand", async () => {
+    expect(
+      await matchLint(
+        queried(wrapped("container-type: inline-size !important; container: card"), "", NAMED),
+      ),
+    ).toEqual([]);
+    expect(
+      await matchLint(
+        queried(
+          `<section class="wrap">${CARD}</section>`,
+          ".wrap { container-type: inline-size !important; container: card; }",
+          NAMED,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a container type the text cannot read is measured: an inherited container-type counts", async () => {
+    expect(
+      await matchLint(
+        queried(
+          `<div class="outer"><div class="wrap">${CARD}</div></div>`,
+          ".outer { container-type: inline-size; } .wrap { container-type: inherit; container-name: card; }",
+          NAMED,
+        ),
+      ),
+    ).toEqual([]);
   });
 
   test("container-type: normal is not a container", async () => {

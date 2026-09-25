@@ -103,10 +103,12 @@ export interface PageScope {
   end: string | null;
 }
 
+// mirrors: src/measure/livePage.ts GROUP_RULES
 /** The at-rules whose blocks hold rules (or, inside a style rule,
  * declarations) that style elements — the kernel's own list for the same
- * question (src/measure/livePage.ts). */
-const GROUP_RULES: ReadonlySet<string> = new Set([
+ * question, to the letter: the measurer copies and probes through these,
+ * so the rules read here are the rules its probes stand in. */
+const GROUP_RULES = new Set([
   "media",
   "supports",
   "container",
@@ -285,11 +287,16 @@ export function withoutComments(text: string): string {
   return out;
 }
 
+// The kernel's own two token ends (a plugin may not import its source),
+// each marked so the kernel test compares it with the kernel's.
+
+// mirrors: src/render/cssRanges.ts commentEnd
 function commentEnd(css: string, from: number, to: number): number {
   const end = css.indexOf("*/", from + 2);
   return end === -1 || end >= to ? to : end + 2;
 }
 
+// mirrors: src/render/cssRanges.ts stringEnd
 function stringEnd(css: string, from: number, to: number): number {
   const quote = css[from];
   for (let i = from + 1; i < to; i++) {
@@ -300,155 +307,6 @@ function stringEnd(css: string, from: number, to: number): number {
     else if (css[i] === "\n") return i;
   }
   return to;
-}
-
-// THE KERNEL'S GUARD, copied: whether a sheet closes its own blocks
-// decides how a `<style>` folds into the page's css (pageDom.ts
-// withMedia), and the lints must read the css the page renders, so the
-// answer must be the kernel's to the letter. A plugin may not import the
-// kernel's source, so each declaration below is the kernel's, and says so
-// on the line before it (a `mirrors:` line naming the kernel file and the
-// declaration), so the kernel test can compare it with the kernel the
-// plugins pin.
-
-// mirrors: src/render/cssRanges.ts CLOSER
-/** Each bracket that opens a block in CSS, and the one that closes it. */
-const CLOSER: Readonly<Record<string, string>> = {
-  "{": "}",
-  "(": ")",
-  "[": "]",
-};
-
-// mirrors: src/render/cssRanges.ts BRACKET
-/** Each closer's bracket, named for a sentence. */
-const BRACKET: Readonly<Record<string, string>> = {
-  "}": "brace",
-  ")": "parenthesis",
-  "]": "bracket",
-};
-
-// mirrors: src/render/cssRanges.ts reachProblem
-/**
- * THE GUARD every write of css text goes through, and the landing's fold
- * (decision #76): the problem with putting `text` inside a block — or at
- * the end of a sheet — as written, in words an editor can show, or null
- * when whatever comes after it is still read as it was. Every `{`, `(`
- * and `[` it opens must be closed by its own closer and it may close
- * nothing it did not open, and no comment, string or unquoted `url(…)`
- * may run off its end: one unclosed bracket is enough for the browser to
- * drop every rule after it, and the damage is on disk.
- *
- * Read as the CSS tokenizer reads it: a bracket in a comment, a string, a
- * url or an escape is not one, and a url is known by its name with
- * escapes decoded (`\75rl(` is `url(`). A string a newline ends before
- * its quote is the tokenizer's bad string, and refused as never closed;
- * an escaped newline continues it. Where it is unsure it refuses — a
- * stray `)` the CSS parser would keep as a token is refused here too.
- *
- * `visit`, when given, is shown every character outside those tokens and
- * may refuse one — a selector's `{` or `;` — by answering the problem.
- */
-export function reachProblem(
-  text: string,
-  visit?: (ch: string) => string | null,
-): string | null {
-  // The tokenizer's preprocessing: every newline is one `\n`.
-  const css = text.replace(/\r\n?|\f/g, "\n");
-  const open: string[] = [];
-  for (let i = 0; i < css.length; i++) {
-    const ch = css[i]!;
-    // `@name` and `#name` are one token each: a `url(` there is a name's.
-    const hashed = ch === "@" || ch === "#";
-    const name = nameAt(css, hashed ? i + 1 : i);
-    if (name !== null) {
-      i = name.end - 1;
-      if (
-        hashed ||
-        name.value.toLowerCase() !== "url" ||
-        css[name.end] !== "("
-      ) {
-        continue;
-      }
-      let j = name.end + 1;
-      while (j < css.length && /[\t\n ]/.test(css[j]!)) j++;
-      // A quoted url is an ordinary function around a string.
-      if (css[j] === '"' || css[j] === "'") continue;
-      // An unquoted one is one token to its `)`, a bad one included: a
-      // quote or a bracket inside it is the url's.
-      while (j < css.length && css[j] !== ")") j += css[j] === "\\" ? 2 : 1;
-      if (j >= css.length) return "a url( is never closed";
-      i = j;
-    } else if (ch === "/" && css[i + 1] === "*") {
-      const end = css.indexOf("*/", i + 2);
-      if (end === -1) return "a comment is never closed";
-      i = end + 1;
-    } else if (ch === '"' || ch === "'") {
-      let j = i + 1;
-      while (j < css.length && css[j] !== ch && css[j] !== "\n") {
-        j += css[j] === "\\" ? 2 : 1;
-      }
-      if (css[j] !== ch) return "a quote is never closed";
-      i = j;
-    } else {
-      const refused = visit?.(ch) ?? null;
-      if (refused !== null) return refused;
-      if (ch in CLOSER) {
-        open.push(CLOSER[ch]!);
-      } else if (ch in BRACKET) {
-        if (open.at(-1) === ch) open.pop();
-        // It closes one opened further out: the one inside, left open,
-        // is what went wrong.
-        else if (open.includes(ch)) return neverClosed(open.at(-1)!);
-        else return `a closing ${BRACKET[ch]} has no opening one`;
-      }
-    }
-  }
-  return open.length === 0 ? null : neverClosed(open.at(-1)!);
-}
-
-// mirrors: src/render/cssRanges.ts neverClosed
-function neverClosed(closer: string): string {
-  return `an opening ${BRACKET[closer]} is never closed`;
-}
-
-// mirrors: src/render/cssRanges.ts closesItsOwnBlocks
-/** Whether `text` passes the guard (reachProblem): the landing's question
- * of a sheet it folds under a `@media`. */
-export function closesItsOwnBlocks(text: string): boolean {
-  return reachProblem(text) === null;
-}
-
-// mirrors: src/render/cssRanges.ts nameAt
-/** The run of name characters starting at `i` — letters, digits, `_`,
- * `-`, anything non-ASCII, and escapes, decoded — or null when none
- * starts there. What the tokenizer reads as one name (a number's unit
- * included), so no part of it is taken for anything else. A `\` before a
- * newline is no escape, and starts no name. */
-function nameAt(css: string, i: number): { value: string; end: number } | null {
-  let value = "";
-  let j = i;
-  while (j < css.length) {
-    const ch = css[j]!;
-    if (/[\w-]/.test(ch) || ch.charCodeAt(0) >= 0x80) {
-      value += ch;
-      j++;
-    } else if (ch === "\\" && j + 1 < css.length && css[j + 1] !== "\n") {
-      const hex = /^[\dA-Fa-f]{1,6}/.exec(css.slice(j + 1, j + 7))?.[0];
-      if (hex === undefined) {
-        value += css[j + 1];
-        j += 2;
-        continue;
-      }
-      const code = parseInt(hex, 16);
-      value +=
-        code === 0 || code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)
-          ? "�"
-          : String.fromCodePoint(code);
-      j += 1 + hex.length;
-      if (/[\t\n ]/.test(css[j] ?? "")) j++;
-    } else break;
-  }
-  return j === i ? null : { value, end: j };
 }
 
 // ---------------------------------------------------------------------------
@@ -760,6 +618,39 @@ export function fontFaces(css: string): CssBlock[] {
     }
     return keyword === null || GROUP_RULES.has(keyword);
   });
+  return out;
+}
+
+/** Every `@font-face` block the browser reads as a face — at the top
+ * level or inside group rules, never inside a style rule, where none is
+ * one — with the preludes of the group rules around it, outermost first.
+ * Walked with an explicit stack, as the rules are. */
+export function fontFaceBlocks(
+  css: string,
+): { block: CssBlock; within: string[] }[] {
+  const out: { block: CssBlock; within: string[] }[] = [];
+  const levels: { blocks: readonly CssBlock[]; at: number; within: Chain<string> }[] = [
+    { blocks: scanCss(css), at: 0, within: null },
+  ];
+  while (levels.length > 0) {
+    const level = levels[levels.length - 1]!;
+    const block = level.blocks[level.at++];
+    if (block === undefined) {
+      levels.pop();
+      continue;
+    }
+    if (block.statement) continue;
+    const keyword = atKeyword(block.prelude);
+    if (keyword === "font-face") {
+      out.push({ block, within: listOf(level.within) });
+    } else if (keyword !== null && GROUP_RULES.has(keyword)) {
+      levels.push({
+        blocks: block.children,
+        at: 0,
+        within: link(level.within, block.prelude),
+      });
+    }
+  }
   return out;
 }
 

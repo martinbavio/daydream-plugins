@@ -29,7 +29,7 @@
 import type { DaydreamApi, DreamDocument } from "@daydream/plugin-api";
 
 import { matchLint } from "./matchLint";
-import { necessityLint } from "./necessity";
+import { NECESSITY_BUDGET_MS, necessityLint } from "./necessity";
 import { staticLint } from "./staticLint";
 
 /** The two gate ids; the runner's dedupe (src/ai/gates.ts) names the same
@@ -52,6 +52,10 @@ export default function activate(dd: DaydreamApi): void {
   dd.registerGate({
     id: NECESSITY_GATE,
     title: "Necessity lint",
-    run: (doc) => necessityLint(dd, doc as DreamDocument),
+    // Its width sweep ends inside the runner's time for a gate.
+    run: (doc) =>
+      necessityLint(dd, doc as DreamDocument, {
+        deadline: Date.now() + NECESSITY_BUDGET_MS,
+      }),
   });
 }

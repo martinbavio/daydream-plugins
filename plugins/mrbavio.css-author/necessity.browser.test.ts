@@ -5,6 +5,7 @@
 // declarations from a live iframe core mounts (`dd.mountViewport`) and
 // reads the CSS engine's answer back. The API object is a test kernel's.
 import { afterAll, afterEach, describe, expect, test } from "vitest";
+import { commands } from "vitest/browser";
 
 import type { DreamDocument, Finding } from "@daydream/plugin-api";
 import {
@@ -71,6 +72,89 @@ function sweptAt(frame: number, ...breakpoints: number[]): string {
 
 function properties(findings: Finding[]): string[] {
   return findings.map((f) => f.property ?? "");
+}
+
+/** Where a test serves a web font from, written for the test and removed
+ * after it (a path from the checkout's root, as `commands` takes it and
+ * the test server serves it). */
+const SERVED_FONT = "plugins/mrbavio.css-author/necessity-test-font.ttf";
+
+/** A TrueType font, base64: every printable ASCII character is one glyph
+ * (a triangle) 1000 units wide, so text in it is wider than in any
+ * fallback. Only the tables the browser's font sanitizer requires. */
+function wideFont(): string {
+  const u16 = (...values: number[]): number[] =>
+    values.flatMap((v) => [(v >> 8) & 255, v & 255]);
+  const u32 = (...values: number[]): number[] =>
+    values.flatMap((v) => u16((v >>> 16) & 0xffff, v & 0xffff));
+  const names = ["Wide", "Regular", "Wide Regular", "Wide-Regular"];
+  const records: number[] = [];
+  let at = 0;
+  for (const [i, name] of names.entries()) {
+    records.push(...u16(3, 1, 0x409, [1, 2, 4, 6][i]!, name.length * 2, at));
+    at += name.length * 2;
+  }
+  // Glyph 1 is the triangle; 0 (.notdef) and 2–95 are empty, and take
+  // the last advance, 1000.
+  const glyph = [
+    ...u16(1, 0, 0, 500, 700, 2, 0),
+    1, 1, 1,
+    ...u16(0, 500, -250, 0, 0, 700),
+    0,
+  ];
+  const tables: Record<string, number[]> = {
+    "OS/2": [
+      ...u16(4, 1000, 400, 5, 0, 650, 700, 0, 140, 650, 700, 0, 480, 50, 250, 0),
+      ...new Array<number>(10).fill(0),
+      ...u32(1, 0, 0, 0),
+      ...Array.from("NONE", (c) => c.charCodeAt(0)),
+      ...u16(0x40, 0x20, 0x7e, 800, -200, 0, 800, 200),
+      ...u32(1, 0),
+      ...u16(500, 700, 0, 0x20, 1),
+    ],
+    // Format 4: 0x20–0x7e onto glyphs 1–95.
+    cmap: [
+      ...u16(0, 1, 3, 1),
+      ...u32(12),
+      ...u16(4, 32, 0, 4, 4, 1, 0, 0x7e, 0xffff, 0, 0x20, 0xffff, 1 - 0x20, 1, 0, 0),
+    ],
+    glyf: glyph,
+    head: [
+      ...u32(0x10000, 0x10000, 0, 0x5f0f3cf5),
+      ...u16(0x000b, 1000),
+      ...u32(0, 0, 0, 0),
+      ...u16(0, 0, 500, 700, 0, 8, 2, 0, 0),
+    ],
+    hhea: [...u32(0x10000), ...u16(800, -200, 0, 1000, 0, 0, 500, 1, 0, 0, 0, 0, 0, 0, 0, 2)],
+    hmtx: u16(500, 0, 1000, 0, ...new Array<number>(94).fill(0)),
+    loca: u16(0, 0, ...new Array<number>(95).fill(glyph.length / 2)),
+    maxp: [...u32(0x10000), ...u16(96, 3, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0)],
+    name: [
+      ...u16(0, names.length, 6 + records.length),
+      ...records,
+      ...names.flatMap((name) => u16(...Array.from(name, (c) => c.charCodeAt(0)))),
+    ],
+    post: [...u32(0x30000, 0), ...u16(-100, 50), ...u32(0, 0, 0, 0, 0)],
+  };
+  const tags = Object.keys(tables).sort();
+  const directory = [
+    ...u32(0x10000),
+    ...u16(tags.length, 128, 3, tags.length * 16 - 128),
+  ];
+  const body: number[] = [];
+  let offset = 12 + tags.length * 16;
+  for (const tag of tags) {
+    const data = tables[tag]!;
+    while (data.length % 4 !== 0) data.push(0);
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      sum = (sum + ((data[i]! << 24) | (data[i + 1]! << 16) | (data[i + 2]! << 8) | data[i + 3]!)) >>> 0;
+    }
+    directory.push(...Array.from(tag, (c) => c.charCodeAt(0)), ...u32(sum, offset, data.length));
+    body.push(...data);
+    offset += data.length;
+  }
+  return btoa(String.fromCharCode(...directory, ...body));
 }
 
 describe("dead and live declarations", () => {
@@ -316,6 +400,74 @@ describe("dead and live declarations", () => {
     expect(findings.map((f) => [f.rule, f.property])).toEqual([[0, "position"]]);
   });
 
+  test("an element's own declaration a layered or scoped rule restates is judged with that rule, as a plain one is: the match lint's redundancy, not a dead line", async () => {
+    for (const css of [
+      ".card { color: red; }",
+      "@layer base { .card { color: red; } }",
+      "@scope (body) { .card { color: red; } }",
+    ]) {
+      const findings = await necessityLint(
+        makeDocument(FRAME, '<p class="card" style="color: red">x</p>', css),
+      );
+      expect(findings, css).toEqual([]);
+    }
+  });
+
+  test("a served web font survives every removal: declared at the top or inside a group rule, on a page with a layer or without", async () => {
+    // Served `no-cache`, as the test server serves it: a face dropped and
+    // asked for again arrives later, and a read in between would see the
+    // fallback face. A sheet parsed again drops the faces it holds; with
+    // an `@layer` in the page, every face of the page.
+    await commands.writeFile(SERVED_FONT, wideFont(), "base64");
+    try {
+      const url = new URL(`/${SERVED_FONT}`, location.href).href;
+      const face = `@font-face { font-family: "Wide"; src: url(${url}); }`;
+      for (const css of [
+        face,
+        `@media (width >= 1px) { ${face} }`,
+        `@supports (display: grid) { ${face} }`,
+        `@layer fonts { ${face} }`,
+        `${face}\n@layer base;`,
+      ]) {
+        const findings = await necessityLint(
+          makeDocument(
+            FRAME,
+            '<p id="text">Some words in the face</p>',
+            `${css}\n#text { font-family: "Wide", serif; position: static; }`,
+          ),
+        );
+        expect(findings.map((f) => [f.rule, f.property]), css).toEqual([[0, "position"]]);
+      }
+    } finally {
+      await commands.removeFile(SERVED_FONT);
+    }
+  });
+
+  test("a `<style>` the markup keeps in a noscript is never taken for the page's css", async () => {
+    // The kernel keeps a noscript's stylesheet in the markup, and the
+    // measurer's copy (no scripting there) parses it as a `<style>` in the
+    // head, before the page's own.
+    const findings = await necessityLint({
+      version: 7,
+      items: [
+        createPageItem(
+          {
+            html: '<!doctype html><html><head><noscript><style>#box { color: red; }</style></noscript></head><body style="margin: 0"><div id="box" style="height: 20px"></div></body></html>',
+            css: "#box { position: static; }",
+          },
+          { id: "v1", frame: FRAME },
+        ),
+      ],
+    });
+    expect(findings.map((f) => [f.rule, f.property, f.message])).toEqual([
+      [
+        0,
+        "position",
+        `position: static in rule \`#box\` of viewport v1 changes nothing at ${sweptAt(400)}`,
+      ],
+    ]);
+  });
+
   test("an element is named by its selector in the stored markup, which still holds an element the safety walk removed", async () => {
     // The mount drops the `<script>`, so `#box` is unique there; in the
     // markup an agent reads and addresses, it is not.
@@ -521,6 +673,55 @@ describe("the width sweep (a page is not a photo)", () => {
         400,
       ),
     ).toEqual([359, 360, 361, 768, 799, 800, 801, 899, 900, 901, 1279, 1280, 1281, 1920]);
+  });
+
+  test("the sweep stops at the lint's deadline: a line it could not sweep is advisory, naming the widths it read and those it did not", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        { width: 768, height: 300 },
+        '<div id="box"></div>',
+        "#box { position: static; height: 10px; }",
+      ),
+      { deadline: Date.now() },
+    );
+    expect(findings).toEqual([
+      {
+        tier: "necessity",
+        severity: "advisory",
+        rule: 0,
+        property: "position",
+        message:
+          "position: static in rule `#box` of viewport v1 changes nothing at 768px (the lint ran out of time before it could read 360, 1280 or 1920px)",
+      },
+    ]);
+  });
+
+  test("the sweep mounts no width once the answer is known: a line live in an earlier viewport is not swept in a later one", async () => {
+    // `#box`'s red is live under the blue parent of v1 and reads dead
+    // under the red parent of v2: dead in only one viewport, it is never
+    // a finding, so v2 has nothing to sweep.
+    const doc = makeDocument(
+      FRAME,
+      '<div style="color: blue"><p id="box" style="color: red">x</p></div>',
+    );
+    doc.items.push(
+      makeDocument(
+        FRAME,
+        '<div style="color: red"><p id="box" style="color: red">x</p></div>',
+        "",
+        { id: "v2" },
+      ).items[0]!,
+    );
+    let mounts = 0;
+    const counted = {
+      core: kernel.dd.core,
+      mountViewport: (...args: Parameters<typeof kernel.dd.mountViewport>) => {
+        mounts++;
+        return kernel.dd.mountViewport(...args);
+      },
+    };
+    expect(await lintWith(counted, doc)).toEqual([]);
+    expect(mounts).toBe(2);
   });
 
   test("widthsText", () => {

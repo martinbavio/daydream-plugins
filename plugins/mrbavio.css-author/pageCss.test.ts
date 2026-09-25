@@ -4,7 +4,6 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  closesItsOwnBlocks,
   declarationMap,
   fontFaces,
   hasScopePseudo,
@@ -218,45 +217,6 @@ nav a, .link:hover { color: inherit !important; }
     expect(withoutRanges(css, [color!.range])).toBe(".a {  /* keep */ margin: 0 }");
     expect(withoutRanges(css, [margin!.range])).toBe(".a { color: red; /* keep */ }");
     expect(withoutRanges(css, [color!.range, margin!.range])).toBe(".a {  /* keep */ }");
-  });
-});
-
-describe("closesItsOwnBlocks, the kernel's guard", () => {
-  // Its answer decides whether a folded <style> goes in as written
-  // (pageDom.ts withMedia), so it must be the kernel's to the letter
-  // (src/render/cssRanges.ts reachProblem).
-  test("a sheet that closes what it opens, brackets in comments, strings, urls and escapes not counted", () => {
-    for (const css of [
-      "",
-      "a { color: red }\n@media print { b { c: d } }",
-      'a::before { content: "}" } /* } */',
-      "a { background: url(x}y.png) }",
-      'a { background: url("}") }',
-      "a\\} { color: red }",
-      "a { width: calc((1px + 2px) * 3) } [data-x] {}",
-      'a { content: "multi\\\nline }" }',
-      "@url(x) {}",
-    ]) {
-      expect(closesItsOwnBlocks(css), css).toBe(true);
-    }
-  });
-
-  test("a stray closer, an unclosed block, comment, string or url, a string a newline ends, and a url in a name", () => {
-    for (const css of [
-      "a {} } b { color: red }",
-      "a { color: red",
-      "a {} /* never closed",
-      'a { content: "never closed',
-      'a { content: "a newline ends it\n} b {}',
-      "a { background: url(x.png }",
-      "a { width: calc(1px } b {}",
-      'a { background: url(a"}) } b {}\n)',
-      'a { background: \\75rl(a"}) } b {}\n)',
-      'a { color: #url(a"b) }',
-      "a { color: red ) }",
-    ]) {
-      expect(closesItsOwnBlocks(css), css).toBe(false);
-    }
   });
 });
 

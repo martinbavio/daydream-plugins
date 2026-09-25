@@ -17,13 +17,16 @@
 // the read; an element's own declaration is cut from its `style`
 // attribute the same way. The browser parses what is left, so the answer
 // is the page without that line, whatever the line was: a shorthand, a
-// fallback, a declaration the parser drops, a custom property. One
-// preparation keeps that honest: the page's top-level `@font-face` rules
-// are moved to a `<style>` of their own before the baseline, since
-// re-parsing a sheet that declares a face reloads it, and a face still
-// loading reads as a changed page. The kernel's container probes in the
-// mounted css are the measurer's, not the page's, and the scanner leaves
-// them out.
+// fallback, a declaration the parser drops, a custom property. Web fonts
+// would make that dishonest: re-parsing a sheet that declares a face
+// reloads it, and a face still loading reads as a changed page — every
+// declaration would read live. So the page's `@font-face` rules, at the
+// top or inside a group rule, are moved to a `<style>` of their own
+// before the baseline, and where a re-parse still reloads a face (a page
+// with an `@layer` reloads every one), the read waits for it
+// (pageMount.ts readWithoutReloading). The kernel's container probes in
+// the mounted css are the measurer's, not the page's, and the scanner
+// leaves them out.
 //
 // What that catches is the "just in case" class of failure: explicit
 // initial values, a custom property nothing reads, a declaration the
@@ -68,8 +71,9 @@
 //    branch's declaration is still judged on its own. The same pairing
 //    joins a rule's declaration with the elements it matches that set P
 //    in their own style (the inline copy would hide the rule's), and an
-//    element's own declaration with the unconditional rules restating it
-//    verbatim (that shape is matchLint.ts's redundancy finding).
+//    element's own declaration with the certain rules (certain.ts)
+//    restating it verbatim (that shape is matchLint.ts's redundancy
+//    finding).
 // 2. WIDTH SWEEP (#46). A page is not a photo: `minmax(0, 1fr)`, a
 //    `flex-wrap`, a rule for a breakpoint the frame is not at, all change
 //    nothing at THIS width and everything at another. So a declaration
@@ -83,6 +87,12 @@
 //    dead at. This only ever ACQUITS — and a rule whose `@media` or
 //    `@supports` held at none of those widths is not judged at all: the
 //    sweep reads width, and cannot make a window print or grow taller.
+//    The sweep is BOUNDED by the lint's deadline (the gate's own time,
+//    `deadline`): no probe is mounted that the time left could not see
+//    through, judged by the slowest mount so far, and a declaration the
+//    sweep could not finish is reported as advisory, naming the widths it
+//    read and those it did not — dead where it was read, but never
+//    refused on a sweep cut short.
 // 3. CROSS-VIEWPORT INTERSECTION. With several viewports, a declaration is
 //    dead only if it is dead in EVERY viewport where it exists (and
 //    applies: a rule not judged in one viewport has no say there). An
@@ -91,6 +101,8 @@
 //    rules it is nested in, its at-rules and its occurrence among rules of
 //    that shape — never by its index, which is a position in one page. A
 //    finding names the declaration as it appears in the first viewport.
+//    So a declaration found live in one viewport is answered: a later
+//    viewport where it reads dead at the frame sweeps nothing for it.
 //
 // Cost model: one write, one read, one restore per declaration, where the
 // read walks every element and stops at the first difference — so LIVE
@@ -108,12 +120,13 @@ import type {
   MountedViewport,
 } from "@daydream/plugin-api";
 
+import { isCertain } from "./certain";
 import {
   atKeyword,
+  fontFaceBlocks,
   mediaPreludes,
   pageRules,
   ruleName,
-  scanCss,
   scanDeclarations,
   selectorForMatching,
   splitTopLevelCommas,
@@ -129,7 +142,7 @@ import {
 } from "./pageDom";
 import {
   conditionsHold,
-  readWithout,
+  readWithoutReloading,
   withMount,
   type MountHost,
   type TextRange,
@@ -144,7 +157,17 @@ export type NecessityHost = MountHost;
 export interface NecessityOptions {
   /** Restrict to these viewports (unknown id → error). Default: all. */
   viewportIds?: string[];
+  /** When the lint must have answered (epoch ms): the width sweep mounts
+   * no probe the time left could not see through (rule 2). Default: no
+   * bound. */
+  deadline?: number;
 }
+
+/** How long the necessity gate gives itself: the runner stops a gate
+ * after 30s (src/ai/gates.ts GATE_TIMEOUT_MS), and a gate stopped there
+ * answers nothing but its timeout — so the sweep ends with room left to
+ * answer what it found. */
+export const NECESSITY_BUDGET_MS = 25_000;
 
 /** The widths every viewport's dead-at-the-frame declarations are re-judged
  * at (rule 2), besides the breakpoints its own `@media` rules name: a
@@ -184,10 +207,12 @@ export async function necessityLint(
 ): Promise<Finding[]> {
   const perViewport: Candidate[][] = [];
   const notes: Finding[] = [];
+  const live = new Set<string>();
   for (const page of selectViewports(dd.core, doc, options.viewportIds)) {
-    const judged = await lintViewport(dd, page);
+    const judged = await lintViewport(dd, page, live, options.deadline);
     perViewport.push(judged.candidates);
     notes.push(...judged.notes);
+    for (const c of judged.candidates) if (!c.dead) live.add(c.key);
   }
   return [...intersect(perViewport), ...notes];
 }
@@ -233,6 +258,9 @@ interface Candidate {
    * holds at the frame nor at any swept width is not judged here. */
   applies: boolean;
   dead: boolean;
+  /** The swept widths the lint ran out of time before reading, for a
+   * declaration dead at every width it did read (rule 2). */
+  unswept: number[];
   finding: Finding;
 }
 
@@ -241,7 +269,7 @@ interface Prepared {
   doc: Document;
   /** The page's `<style>` in the copy, or null when there is none. Its
    * text once prepared is what every removal is cut from and every
-   * restore puts back (pageMount.ts readWithout). */
+   * restore puts back (pageMount.ts readWithoutReloading). */
   style: HTMLStyleElement | null;
   rules: PageRule[];
   nodes: Element[];
@@ -250,23 +278,31 @@ interface Prepared {
 }
 
 /** The viewport at its frame, every declaration judged; then the sweep
- * (rule 2) over whatever read dead, each probe width a fresh mount of the
- * same window at that width. A finding that survives names every width.
- * `notes` is the advisory on the images the copy could not load. */
+ * (rule 2) over whatever read dead and is not `answered` — live in an
+ * earlier viewport — each probe width a fresh mount of the same window at
+ * that width, while `deadline` leaves time for one. A finding that
+ * survives names every width. `notes` is the advisory on the images the
+ * copy could not load. */
 async function lintViewport(
   dd: NecessityHost,
   page: DreamPage,
+  answered: ReadonlySet<string>,
+  deadline: number | undefined,
 ): Promise<{ candidates: Candidate[]; notes: Finding[] }> {
-  // The page as stored (its markup's `<style>` blocks folded in, as the
-  // mount folds them), for naming: the mounted copy's css has the asset
+  // The page as stored, for naming: the mounted copy's css has the asset
   // route in its urls, and a finding should quote what the author wrote;
   // an element is named by its selector in the stored markup.
-  const stored = parsePage(page.payload);
-  const { css } = stored;
+  const stored = parsePage(page.payload.html);
+  const { css } = page.payload;
   const authored = pageRules(css);
+  const started = Date.now();
+  let slowest = 0;
   const { own, naming, candidates, unloaded } = await withMount(dd, page, undefined, async (m) => {
     const prepared = await prepare(m);
-    const nameOf = storedNames(stored.doc, prepared.doc);
+    // What a mount costs, before any judging: what a probe will cost
+    // at least, and so what the time left must hold for one.
+    slowest = Date.now() - started;
+    const nameOf = storedNames(stored, prepared.doc);
     const width = prepared.doc.defaultView?.innerWidth ?? page.frame?.width ?? 0;
     // The two scans line up rule for rule unless the mounted copy is not
     // this text (it always is, cleaned as a landing cleans it); if they
@@ -282,26 +318,37 @@ async function lintViewport(
     return {
       own: width,
       naming,
-      candidates: judgeAll(page, prepared, naming, width, nameOf),
+      candidates: await judgeAll(page, prepared, naming, width, nameOf),
       unloaded: prepared.nodes.filter(isUnloadedImage).map(nameOf),
     };
   });
-  let pending = candidates.filter((c) => c.dead);
+  // A declaration live in an earlier viewport is never a finding (rule
+  // 3): it has nothing left to sweep.
+  let pending = candidates.filter((c) => c.dead && !answered.has(c.key));
   const swept = [own];
-  for (const width of probeWidths(dd.core, css, own)) {
-    if (pending.length === 0) break;
+  const widths = probeWidths(dd.core, css, own);
+  let next = 0;
+  for (; next < widths.length && pending.length > 0; next++) {
+    if (deadline !== undefined && Date.now() + slowest > deadline) break;
+    const width = widths[next]!;
+    const began = Date.now();
     await withMount(dd, page, width, async (m) => {
       const prepared = await prepare(m);
       const probe = baseline(prepared);
       for (const c of pending) {
         c.applies ||= appliesIn(prepared, c.removal[0]!);
-        c.dead = isDead(prepared, probe, c.removal);
+        c.dead = await isDead(prepared, probe, c.removal);
       }
     });
+    slowest = Math.max(slowest, Date.now() - began);
     swept.push(width);
     pending = pending.filter((c) => c.dead);
   }
-  for (const c of pending) c.finding = findingFor(page, c, swept, naming);
+  const unswept = widths.slice(next);
+  for (const c of pending) {
+    c.unswept = unswept;
+    c.finding = findingFor(page, c, swept, naming);
+  }
   // A declaration whose conditions held nowhere it was read is not judged
   // in this viewport: it does not exist here for rule 3 either.
   return {
@@ -341,26 +388,32 @@ function isStartingStyle(rule: Pick<PageRule, "conditions">): boolean {
   );
 }
 
-/** Read the mounted copy once and move its top-level `@font-face` rules
- * to a `<style>` of their own (see the header), waiting for the faces to
- * load again. The rest of the css keeps every offset: each moved face's
- * characters become spaces. */
+/** Read the mounted copy once and move its `@font-face` rules — at the
+ * top, or inside a group rule, each then under the same group rules — to
+ * a `<style>` of their own after the page's (see the header), waiting for
+ * the faces to load again. After, so a `@layer` it names is declared
+ * where the page first declares it and the layers keep their order. The
+ * rest of the css keeps every offset: each moved face's characters become
+ * spaces. */
 async function prepare(mounted: MountedViewport): Promise<Prepared> {
   const doc = mounted.document();
   const style = mountedStyle(doc);
   let base = style?.textContent ?? "";
-  const faces = scanCss(base).filter(
-    (block) => !block.statement && atKeyword(block.prelude) === "font-face",
-  );
+  const faces = fontFaceBlocks(base);
   if (style !== null && faces.length > 0) {
     const fonts = doc.createElement("style");
     fonts.setAttribute("data-css-author", "fonts");
     fonts.textContent = faces
-      .map((face) => base.slice(face.range[0], face.range[1]))
+      .map(({ block, within }) =>
+        within.reduceRight(
+          (inner, prelude) => `${prelude} {\n${inner}\n}`,
+          base.slice(block.range[0], block.range[1]),
+        ),
+      )
       .join("\n");
-    style.before(fonts);
-    for (const face of faces) {
-      const [start, end] = face.range;
+    style.after(fonts);
+    for (const { block } of faces) {
+      const [start, end] = block.range;
       base = base.slice(0, start) + " ".repeat(end - start) + base.slice(end);
     }
     style.textContent = base;
@@ -410,13 +463,13 @@ export function probeWidths(core: CoreApi, css: string, own: number): number[] {
  * alone — and is rewritten with the swept widths for the ones that stay
  * dead. A declaration on an image the copy could not load that a loaded
  * one would answer (`isImageSizing`) is recorded live, unjudged. */
-function judgeAll(
+async function judgeAll(
   page: DreamPage,
   prepared: Prepared,
   authored: readonly PageRule[],
   own: number,
   nameOf: (node: Element) => string,
-): Candidate[] {
+): Promise<Candidate[]> {
   const probe = baseline(prepared);
   const { rules, nodes } = prepared;
   const nameAt = (node: number): string => nameOf(nodes[node]!);
@@ -433,7 +486,15 @@ function judgeAll(
           match(node, selector, rule.scopes) ? [index] : [],
         );
   });
-  const candidates: Candidate[] = [];
+  /** What is judged, in order: each declaration, what goes with it, and
+   * whether it is recorded live unjudged. */
+  const judged: {
+    key: string;
+    element: boolean;
+    declaration: CssDeclaration;
+    removal: At[];
+    unjudged: boolean;
+  }[] = [];
   const record = (
     key: string,
     element: boolean,
@@ -441,22 +502,12 @@ function judgeAll(
     removal: At[],
     unjudged: boolean,
   ): void => {
-    const candidate: Candidate = {
-      key,
-      element,
-      property: declaration.property,
-      value: shown(declaration),
-      removal,
-      applies: appliesIn(prepared, removal[0]!),
-      dead: !unjudged && isDead(prepared, probe, removal),
-      finding: { tier: "necessity", severity: "blocking", message: "" },
-    };
-    candidate.finding = findingFor(page, candidate, [own], authored, nameAt);
-    candidates.push(candidate);
+    judged.push({ key, element, declaration, removal, unjudged });
   };
 
-  // An element's own declarations, paired with the unconditional rules
-  // that restate them verbatim (rule 1, mirrored from redundancy).
+  // An element's own declarations, paired with the certain rules
+  // (certain.ts) that restate them verbatim (rule 1, mirrored from
+  // redundancy).
   prepared.own.forEach(({ declarations }, node) => {
     declarations.forEach((declaration, at) => {
       if (!isChecked(declaration, declarations, at)) return;
@@ -465,7 +516,7 @@ function judgeAll(
         ...fallbacks(declarations, at, (k) => ({ node, at: k })),
       ];
       rules.forEach((rule, r) => {
-        if (rule.conditions.length > 0 || hasStatePseudo(rule.selector)) return;
+        if (!isCertain(rule)) return;
         if (!reached[r]!.includes(node)) return;
         const last = lastOf(rule.declarations, declaration.property);
         if (last === -1) return;
@@ -529,6 +580,23 @@ function judgeAll(
       );
     });
   });
+
+  const candidates: Candidate[] = [];
+  for (const { key, element, declaration, removal, unjudged } of judged) {
+    const candidate: Candidate = {
+      key,
+      element,
+      property: declaration.property,
+      value: shown(declaration),
+      removal,
+      applies: appliesIn(prepared, removal[0]!),
+      dead: !unjudged && (await isDead(prepared, probe, removal)),
+      unswept: [],
+      finding: { tier: "necessity", severity: "blocking", message: "" },
+    };
+    candidate.finding = findingFor(page, candidate, [own], authored, nameAt);
+    candidates.push(candidate);
+  }
   return candidates;
 }
 
@@ -636,12 +704,17 @@ function refused(doc: Document, selector: string): boolean {
   }
 }
 
-/** Remove, read, restore (pageMount.ts readWithout): the declarations
- * cut from the page's css and from their elements' `style` in one write,
- * one read, then everything put back as it was. The read is a single
- * sweep that stops at the first element whose observation left the
- * baseline. */
-function isDead(prepared: Prepared, probe: Probe, removal: readonly At[]): boolean {
+/** Remove, read, restore (pageMount.ts readWithoutReloading): the
+ * declarations cut from the page's css and from their elements' `style`
+ * in one write, one read once any web font the write made the page load
+ * again has loaded, then everything put back as it was. The read is a
+ * single sweep that stops at the first element whose observation left
+ * the baseline. */
+function isDead(
+  prepared: Prepared,
+  probe: Probe,
+  removal: readonly At[],
+): Promise<boolean> {
   const cssRanges: TextRange[] = [];
   const inline = new Map<Element, TextRange[]>();
   for (const where of removal) {
@@ -657,22 +730,29 @@ function isDead(prepared: Prepared, probe: Probe, removal: readonly At[]): boole
       inline.set(node, ranges);
     }
   }
-  return readWithout(prepared.style, cssRanges, inline, () => unchanged(probe));
+  return readWithoutReloading(prepared.doc, prepared.style, cssRanges, inline, () =>
+    unchanged(probe),
+  );
 }
 
 /** Rule 3: dead only where dead everywhere the declaration exists. Order
  * is first appearance — the first viewport's order, then whatever later
  * viewports add — elements' own before rules', and the finding is the
- * first viewport's. */
+ * first viewport's; advisory when some viewport's sweep was cut short. */
 function intersect(perViewport: readonly Candidate[][]): Finding[] {
-  const merged = new Map<string, { dead: boolean; element: boolean; finding: Finding }>();
+  const merged = new Map<
+    string,
+    { dead: boolean; cut: boolean; element: boolean; finding: Finding }
+  >();
   for (const candidates of perViewport) {
     for (const c of candidates) {
+      const cut = c.unswept.length > 0;
       const seen = merged.get(c.key);
       if (seen === undefined) {
-        merged.set(c.key, { dead: c.dead, element: c.element, finding: c.finding });
+        merged.set(c.key, { dead: c.dead, cut, element: c.element, finding: c.finding });
       } else {
         seen.dead = seen.dead && c.dead;
+        seen.cut ||= cut;
       }
     }
   }
@@ -680,14 +760,18 @@ function intersect(perViewport: readonly Candidate[][]): Finding[] {
   return [
     ...entries.filter((entry) => entry.element),
     ...entries.filter((entry) => !entry.element),
-  ].map((entry) => entry.finding);
+  ].map((entry) =>
+    entry.cut ? { ...entry.finding, severity: "advisory" } : entry.finding,
+  );
 }
 
 /** The finding's sentence names every width the declaration was dead at,
  * ascending — the fact is "changes nothing at any of these", never
- * "changes nothing". An element's own declaration is addressed by the
- * element's unique selector; a rule's by the rule's index among the page's
- * rules (`Finding.rule`), and named by its selector as written. */
+ * "changes nothing" — and, when the sweep ran out of time, the widths it
+ * never read, which make it advisory. An element's own declaration is
+ * addressed by the element's unique selector; a rule's by the rule's
+ * index among the page's rules (`Finding.rule`), and named by its
+ * selector as written. */
 function findingFor(
   page: DreamPage,
   c: Candidate,
@@ -696,14 +780,21 @@ function findingFor(
   nameAt?: (node: number) => string,
 ): Finding {
   const first = c.removal[0] as At;
+  const cut = c.unswept.length > 0;
+  const read = `changes nothing at ${widthsText(widths)}${
+    cut
+      ? ` (the lint ran out of time before it could read ${widthsText(c.unswept)})`
+      : ""
+  }`;
+  const severity = cut ? "advisory" : "blocking";
   if ("node" in first) {
     const selector = nameAt?.(first.node) ?? c.finding.elementId ?? "";
     return {
       tier: "necessity",
-      severity: "blocking",
+      severity,
       elementId: selector,
       property: c.property,
-      message: `${c.property}: ${c.value} on \`${selector}\` changes nothing at ${widthsText(widths)}`,
+      message: `${c.property}: ${c.value} on \`${selector}\` ${read}`,
     };
   }
   const rule = authored[first.rule];
@@ -716,10 +807,10 @@ function findingFor(
     rule === undefined ? `#${first.rule}` : ruleName(rule);
   return {
     tier: "necessity",
-    severity: "blocking",
+    severity,
     rule: first.rule,
     property: c.property,
-    message: `${c.property}: ${value} in rule ${name} of viewport ${page.id} changes nothing at ${widthsText(widths)}`,
+    message: `${c.property}: ${value} in rule ${name} of viewport ${page.id} ${read}`,
   };
 }
 

@@ -20,8 +20,8 @@
 // declaration is never judged: it is there to win, which a reset may need
 // to.
 
+import { isCertain } from "./certain";
 import type { CssDeclaration, PageRule } from "./pageCss";
-import { hasStatePseudo } from "./statePseudo";
 
 /** Each property the rule judges, and its initial value. */
 const INITIAL_VALUES: ReadonlyMap<string, string> = new Map([
@@ -60,22 +60,22 @@ export function restatesInitial(declaration: CssDeclaration): boolean {
 }
 
 /** The rules' declarations the rule judges, in source order: those that
- * restate an initial in a TOP-LEVEL rule under no at-rule and with no
- * state pseudo-class — where it holds as it does for an element's own
- * style. A rule inside an `@media`, `@container` or `@supports`, nested
- * in another rule, or under `:hover`, exists to override something under
- * that condition or in that state, and resetting to the initial there is
- * the override, which no single read of the page can see. */
+ * restate an initial in a rule that applies wherever it matches
+ * (certain.ts) — where it holds as it does for an element's own style,
+ * and one read of the page sees what it does. A rule inside an `@media`,
+ * `@container`, `@supports` or `@starting-style`, or under `:hover`,
+ * exists to override something under that condition or in that state,
+ * and resetting to the initial there is the override, which no single
+ * read of the page can see. A nested rule resetting what its parent set
+ * is an override the measure sees. */
 export function ruleInitialCandidates(
   rules: readonly PageRule[],
 ): { rule: PageRule; declaration: CssDeclaration }[] {
   return rules.flatMap((rule) =>
-    rule.conditions.length > 0 ||
-    rule.parents.length > 0 ||
-    hasStatePseudo(rule.selector)
-      ? []
-      : rule.declarations
+    isCertain(rule)
+      ? rule.declarations
           .filter(restatesInitial)
-          .map((declaration) => ({ rule, declaration })),
+          .map((declaration) => ({ rule, declaration }))
+      : [],
   );
 }

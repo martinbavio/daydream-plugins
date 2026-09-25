@@ -78,17 +78,35 @@ describe("ruleInitialCandidates", () => {
     ]);
   });
 
-  test("a rule under a condition, nested in another or under a state pseudo-class resets under that condition or state — the override — and is never one", () => {
+  test("a rule under a condition or a state pseudo-class resets under that condition or state — the override — and is never one", () => {
     expect(
       candidates(
         [
           "@media (width >= 600px) { .card { position: static; max-width: none; } }",
-          ".card { position: absolute; &.open { position: static; } }",
+          "@supports (display: grid) { .card { position: static; } }",
+          "@container (width > 400px) { .card { position: static; } }",
+          "@starting-style { .card { opacity: 1; } }",
           ".card { @media (width >= 600px) { position: static; } }",
           ".card:hover { position: static; }",
         ].join("\n"),
       ),
     ).toEqual([]);
+  });
+
+  test("a rule applying wherever it matches is one — nested, layered or scoped — and the measure decides (an override it needs is no finding)", () => {
+    expect(
+      candidates(
+        [
+          ".card { position: absolute; &.open { position: static; } }",
+          "@layer base { .card { overflow: visible; } }",
+          "@scope (main) { .card { opacity: 1; } }",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      [1, "position"],
+      [2, "overflow"],
+      [3, "opacity"],
+    ]);
   });
 
   test("an !important initial is there to win, and is not one", () => {

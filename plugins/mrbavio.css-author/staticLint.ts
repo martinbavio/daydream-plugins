@@ -50,14 +50,15 @@ import { uniqueSelector } from "./uniqueSelector";
 export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
   const findings: Finding[] = [];
   for (const page of core.viewportItems(doc) as DreamPage[]) {
-    const parsed = parsePage(page.payload);
-    const rules = pageRules(parsed.css);
-    const elements = lintElements(parsed.doc);
+    const { css } = page.payload;
+    const parsed = parsePage(page.payload.html);
+    const rules = pageRules(css);
+    const elements = lintElements(parsed);
     const names = new Map<Element, string>();
     const nameOf = (el: Element): string => {
       let name = names.get(el);
       if (name === undefined) {
-        name = uniqueSelector(el, parsed.doc);
+        name = uniqueSelector(el, parsed);
         names.set(el, name);
       }
       return name;
@@ -67,10 +68,10 @@ export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
       if (own.length === 0) continue;
       lintUnitlessLengths(own, nameOf(el), findings);
     }
-    lintUnusedFontFaces(core, page, parsed.css, rules, elements, findings);
+    lintUnusedFontFaces(core, page, css, rules, elements, findings);
     lintUnitlessLengthsOnRules(rules, page.id, findings);
     lintUnreferencedClasses(
-      selectorPreludes(parsed.css),
+      selectorPreludes(css),
       elements,
       nameOf,
       page.id,
