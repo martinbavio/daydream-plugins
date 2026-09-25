@@ -87,6 +87,12 @@
 //    dead at. This only ever ACQUITS — and a rule whose `@media` or
 //    `@supports` held at none of those widths is not judged at all: the
 //    sweep reads width, and cannot make a window print or grow taller.
+//    The sweep is BOUNDED by the lint's deadline (the gate's own time,
+//    `deadline`): no probe is mounted that the time left could not see
+//    through, judged by the slowest mount so far, and a declaration the
+//    sweep could not finish is reported as advisory, naming the widths it
+//    read and those it did not — dead where it was read, but never
+//    refused on a sweep cut short.
 // 3. CROSS-VIEWPORT INTERSECTION. With several viewports, a declaration is
 //    dead only if it is dead in EVERY viewport where it exists (and
 //    applies: a rule not judged in one viewport has no say there). An
@@ -95,6 +101,8 @@
 //    rules it is nested in, its at-rules and its occurrence among rules of
 //    that shape — never by its index, which is a position in one page. A
 //    finding names the declaration as it appears in the first viewport.
+//    So a declaration found live in one viewport is answered: a later
+//    viewport where it reads dead at the frame sweeps nothing for it.
 //
 // Cost model: one write, one read, one restore per declaration, where the
 // read walks every element and stops at the first difference — so LIVE
@@ -149,7 +157,17 @@ export type NecessityHost = MountHost;
 export interface NecessityOptions {
   /** Restrict to these viewports (unknown id → error). Default: all. */
   viewportIds?: string[];
+  /** When the lint must have answered (epoch ms): the width sweep mounts
+   * no probe the time left could not see through (rule 2). Default: no
+   * bound. */
+  deadline?: number;
 }
+
+/** How long the necessity gate gives itself: the runner stops a gate
+ * after 30s (src/ai/gates.ts GATE_TIMEOUT_MS), and a gate stopped there
+ * answers nothing but its timeout — so the sweep ends with room left to
+ * answer what it found. */
+export const NECESSITY_BUDGET_MS = 25_000;
 
 /** The widths every viewport's dead-at-the-frame declarations are re-judged
  * at (rule 2), besides the breakpoints its own `@media` rules name: a
@@ -189,10 +207,12 @@ export async function necessityLint(
 ): Promise<Finding[]> {
   const perViewport: Candidate[][] = [];
   const notes: Finding[] = [];
+  const live = new Set<string>();
   for (const page of selectViewports(dd.core, doc, options.viewportIds)) {
-    const judged = await lintViewport(dd, page);
+    const judged = await lintViewport(dd, page, live, options.deadline);
     perViewport.push(judged.candidates);
     notes.push(...judged.notes);
+    for (const c of judged.candidates) if (!c.dead) live.add(c.key);
   }
   return [...intersect(perViewport), ...notes];
 }
@@ -238,6 +258,9 @@ interface Candidate {
    * holds at the frame nor at any swept width is not judged here. */
   applies: boolean;
   dead: boolean;
+  /** The swept widths the lint ran out of time before reading, for a
+   * declaration dead at every width it did read (rule 2). */
+  unswept: number[];
   finding: Finding;
 }
 
@@ -255,12 +278,16 @@ interface Prepared {
 }
 
 /** The viewport at its frame, every declaration judged; then the sweep
- * (rule 2) over whatever read dead, each probe width a fresh mount of the
- * same window at that width. A finding that survives names every width.
- * `notes` is the advisory on the images the copy could not load. */
+ * (rule 2) over whatever read dead and is not `answered` — live in an
+ * earlier viewport — each probe width a fresh mount of the same window at
+ * that width, while `deadline` leaves time for one. A finding that
+ * survives names every width. `notes` is the advisory on the images the
+ * copy could not load. */
 async function lintViewport(
   dd: NecessityHost,
   page: DreamPage,
+  answered: ReadonlySet<string>,
+  deadline: number | undefined,
 ): Promise<{ candidates: Candidate[]; notes: Finding[] }> {
   // The page as stored, for naming: the mounted copy's css has the asset
   // route in its urls, and a finding should quote what the author wrote;
@@ -268,8 +295,13 @@ async function lintViewport(
   const stored = parsePage(page.payload.html);
   const { css } = page.payload;
   const authored = pageRules(css);
+  const started = Date.now();
+  let slowest = 0;
   const { own, naming, candidates, unloaded } = await withMount(dd, page, undefined, async (m) => {
     const prepared = await prepare(m);
+    // What a mount costs, before any judging: what a probe will cost
+    // at least, and so what the time left must hold for one.
+    slowest = Date.now() - started;
     const nameOf = storedNames(stored, prepared.doc);
     const width = prepared.doc.defaultView?.innerWidth ?? page.frame?.width ?? 0;
     // The two scans line up rule for rule unless the mounted copy is not
@@ -290,10 +322,16 @@ async function lintViewport(
       unloaded: prepared.nodes.filter(isUnloadedImage).map(nameOf),
     };
   });
-  let pending = candidates.filter((c) => c.dead);
+  // A declaration live in an earlier viewport is never a finding (rule
+  // 3): it has nothing left to sweep.
+  let pending = candidates.filter((c) => c.dead && !answered.has(c.key));
   const swept = [own];
-  for (const width of probeWidths(dd.core, css, own)) {
-    if (pending.length === 0) break;
+  const widths = probeWidths(dd.core, css, own);
+  let next = 0;
+  for (; next < widths.length && pending.length > 0; next++) {
+    if (deadline !== undefined && Date.now() + slowest > deadline) break;
+    const width = widths[next]!;
+    const began = Date.now();
     await withMount(dd, page, width, async (m) => {
       const prepared = await prepare(m);
       const probe = baseline(prepared);
@@ -302,10 +340,15 @@ async function lintViewport(
         c.dead = await isDead(prepared, probe, c.removal);
       }
     });
+    slowest = Math.max(slowest, Date.now() - began);
     swept.push(width);
     pending = pending.filter((c) => c.dead);
   }
-  for (const c of pending) c.finding = findingFor(page, c, swept, naming);
+  const unswept = widths.slice(next);
+  for (const c of pending) {
+    c.unswept = unswept;
+    c.finding = findingFor(page, c, swept, naming);
+  }
   // A declaration whose conditions held nowhere it was read is not judged
   // in this viewport: it does not exist here for rule 3 either.
   return {
@@ -548,6 +591,7 @@ async function judgeAll(
       removal,
       applies: appliesIn(prepared, removal[0]!),
       dead: !unjudged && (await isDead(prepared, probe, removal)),
+      unswept: [],
       finding: { tier: "necessity", severity: "blocking", message: "" },
     };
     candidate.finding = findingFor(page, candidate, [own], authored, nameAt);
@@ -694,16 +738,21 @@ function isDead(
 /** Rule 3: dead only where dead everywhere the declaration exists. Order
  * is first appearance — the first viewport's order, then whatever later
  * viewports add — elements' own before rules', and the finding is the
- * first viewport's. */
+ * first viewport's; advisory when some viewport's sweep was cut short. */
 function intersect(perViewport: readonly Candidate[][]): Finding[] {
-  const merged = new Map<string, { dead: boolean; element: boolean; finding: Finding }>();
+  const merged = new Map<
+    string,
+    { dead: boolean; cut: boolean; element: boolean; finding: Finding }
+  >();
   for (const candidates of perViewport) {
     for (const c of candidates) {
+      const cut = c.unswept.length > 0;
       const seen = merged.get(c.key);
       if (seen === undefined) {
-        merged.set(c.key, { dead: c.dead, element: c.element, finding: c.finding });
+        merged.set(c.key, { dead: c.dead, cut, element: c.element, finding: c.finding });
       } else {
         seen.dead = seen.dead && c.dead;
+        seen.cut ||= cut;
       }
     }
   }
@@ -711,14 +760,18 @@ function intersect(perViewport: readonly Candidate[][]): Finding[] {
   return [
     ...entries.filter((entry) => entry.element),
     ...entries.filter((entry) => !entry.element),
-  ].map((entry) => entry.finding);
+  ].map((entry) =>
+    entry.cut ? { ...entry.finding, severity: "advisory" } : entry.finding,
+  );
 }
 
 /** The finding's sentence names every width the declaration was dead at,
  * ascending — the fact is "changes nothing at any of these", never
- * "changes nothing". An element's own declaration is addressed by the
- * element's unique selector; a rule's by the rule's index among the page's
- * rules (`Finding.rule`), and named by its selector as written. */
+ * "changes nothing" — and, when the sweep ran out of time, the widths it
+ * never read, which make it advisory. An element's own declaration is
+ * addressed by the element's unique selector; a rule's by the rule's
+ * index among the page's rules (`Finding.rule`), and named by its
+ * selector as written. */
 function findingFor(
   page: DreamPage,
   c: Candidate,
@@ -727,14 +780,21 @@ function findingFor(
   nameAt?: (node: number) => string,
 ): Finding {
   const first = c.removal[0] as At;
+  const cut = c.unswept.length > 0;
+  const read = `changes nothing at ${widthsText(widths)}${
+    cut
+      ? ` (the lint ran out of time before it could read ${widthsText(c.unswept)})`
+      : ""
+  }`;
+  const severity = cut ? "advisory" : "blocking";
   if ("node" in first) {
     const selector = nameAt?.(first.node) ?? c.finding.elementId ?? "";
     return {
       tier: "necessity",
-      severity: "blocking",
+      severity,
       elementId: selector,
       property: c.property,
-      message: `${c.property}: ${c.value} on \`${selector}\` changes nothing at ${widthsText(widths)}`,
+      message: `${c.property}: ${c.value} on \`${selector}\` ${read}`,
     };
   }
   const rule = authored[first.rule];
@@ -747,10 +807,10 @@ function findingFor(
     rule === undefined ? `#${first.rule}` : ruleName(rule);
   return {
     tier: "necessity",
-    severity: "blocking",
+    severity,
     rule: first.rule,
     property: c.property,
-    message: `${c.property}: ${value} in rule ${name} of viewport ${page.id} changes nothing at ${widthsText(widths)}`,
+    message: `${c.property}: ${value} in rule ${name} of viewport ${page.id} ${read}`,
   };
 }
 

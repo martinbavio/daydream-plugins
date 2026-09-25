@@ -675,6 +675,55 @@ describe("the width sweep (a page is not a photo)", () => {
     ).toEqual([359, 360, 361, 768, 799, 800, 801, 899, 900, 901, 1279, 1280, 1281, 1920]);
   });
 
+  test("the sweep stops at the lint's deadline: a line it could not sweep is advisory, naming the widths it read and those it did not", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        { width: 768, height: 300 },
+        '<div id="box"></div>',
+        "#box { position: static; height: 10px; }",
+      ),
+      { deadline: Date.now() },
+    );
+    expect(findings).toEqual([
+      {
+        tier: "necessity",
+        severity: "advisory",
+        rule: 0,
+        property: "position",
+        message:
+          "position: static in rule `#box` of viewport v1 changes nothing at 768px (the lint ran out of time before it could read 360, 1280 or 1920px)",
+      },
+    ]);
+  });
+
+  test("the sweep mounts no width once the answer is known: a line live in an earlier viewport is not swept in a later one", async () => {
+    // `#box`'s red is live under the blue parent of v1 and reads dead
+    // under the red parent of v2: dead in only one viewport, it is never
+    // a finding, so v2 has nothing to sweep.
+    const doc = makeDocument(
+      FRAME,
+      '<div style="color: blue"><p id="box" style="color: red">x</p></div>',
+    );
+    doc.items.push(
+      makeDocument(
+        FRAME,
+        '<div style="color: red"><p id="box" style="color: red">x</p></div>',
+        "",
+        { id: "v2" },
+      ).items[0]!,
+    );
+    let mounts = 0;
+    const counted = {
+      core: kernel.dd.core,
+      mountViewport: (...args: Parameters<typeof kernel.dd.mountViewport>) => {
+        mounts++;
+        return kernel.dd.mountViewport(...args);
+      },
+    };
+    expect(await lintWith(counted, doc)).toEqual([]);
+    expect(mounts).toBe(2);
+  });
+
   test("widthsText", () => {
     expect(widthsText([400])).toBe("400px");
     expect(widthsText([768, 360, 360])).toBe("360 or 768px");
