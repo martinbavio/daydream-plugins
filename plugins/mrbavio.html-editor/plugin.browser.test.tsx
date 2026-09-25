@@ -11,7 +11,7 @@
 // after brings it back; Delete on an inner element cuts it
 // out of the text and never removes the viewport.
 import { EditorView } from "@codemirror/view";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, onTestFinished, test, vi } from "vitest";
 
 import type { DreamDocument, PluginManifest } from "@daydream/plugin-api";
 import {
@@ -19,9 +19,12 @@ import {
   createTestKernel,
   flush,
   mountPlugin,
+  openSlug,
+  overrideHostForTests,
   pageElementId,
   pageNode,
   viewportItems,
+  type HostStorage,
   type MountedPlugin,
 } from "@daydream/plugin-testing";
 
@@ -219,7 +222,7 @@ async function pause(): Promise<void> {
 describe("mrbavio.html-editor", () => {
   test("the manifest declares everything the entry registers", () => {
     expect(manifest.id).toBe("mrbavio.html-editor");
-    expect(manifest.minCore).toBe("0.1.38");
+    expect(manifest.minCore).toBe("0.1.39");
     expect(manifest.contributes?.panels).toEqual(["html-editor"]);
     expect(manifest.contributes?.commands).toEqual([
       BLUR_COMMAND,
@@ -655,6 +658,47 @@ describe("mrbavio.html-editor", () => {
     key(window, { key: "\\", code: "Backslash", metaKey: true });
     expect(m.panel()).not.toBeNull();
     expect(text()).toBe(edited("Old headline", "Kept"));
+  });
+
+  test("typing pending when the document is swapped is saved into it first; a deactivation writes it before the pane goes", async () => {
+    const saved: { slug: string; html: string }[] = [];
+    const next = createPageItem({ html: HTML, css: CSS }, { id: "next", frame: { width: 960 } });
+    overrideHostForTests({
+      storage: {
+        save: async (slug: string, doc: DreamDocument) => {
+          saved.push({ slug, html: viewportItems(doc)[0]!.payload.html });
+        },
+        load: async () => ({ version: 7, items: [next] }),
+      } as unknown as HostStorage,
+    });
+    onTestFinished(() => overrideHostForTests(null));
+    const item = createPageItem({ html: HTML, css: CSS }, { frame: { width: 960 } });
+    itemId = item.id;
+    mounted = await mountPlugin({
+      entry: activate,
+      manifest,
+      document: { version: 7, items: [item] },
+      slug: "mine",
+    });
+    await waitMounted(itemId, "h1");
+    select(itemId);
+    content().focus();
+    // Typed, and the swap asked for before the save's debounce is due.
+    await typeAll(edited("Old headline", "Typed before the swap"));
+    await expect(openSlug("other")).resolves.toEqual({ ok: true });
+    expect(saved.at(-1)).toEqual({
+      slug: "mine",
+      html: edited("Old headline", "Typed before the swap"),
+    });
+    expect(mounted.store.docSlug()).toBe("other");
+
+    await waitMounted("next", "h1");
+    select("next");
+    content().focus();
+    await typeAll(edited("Body copy", "Typed before the plugin stops"));
+    mounted.pluginHost.deactivate(manifest.id);
+    flush();
+    expect(stored("next")).toBe(edited("Body copy", "Typed before the plugin stops"));
   });
 
   test("a save the hidden dock deferred is dropped when another document loads, or an undo runs, before it lands", async () => {

@@ -1,8 +1,8 @@
 {
   "id": "mrbavio.html-editor",
   "name": "HTML editor",
-  "version": "0.2.0",
-  "minCore": "0.1.38",
+  "version": "0.2.1",
+  "minCore": "0.1.39",
   "contributes": {
     "panels": [
       "html-editor"

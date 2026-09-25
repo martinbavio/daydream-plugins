@@ -56,6 +56,7 @@ export default function activate(dd: DaydreamApi): void {
     undo: () => false,
     redo: () => false,
     saveOver: () => false,
+    leave: () => {},
     // Drafts outlive a panel mount: the dock unmounts its panels while
     // hidden (⌘\), and typed text must come back with it.
     drafts: { load: untrack(dd.loadVersion), pages: new Map<string, Draft>() },
@@ -120,6 +121,11 @@ export default function activate(dd: DaydreamApi): void {
     run: () => state.saveOver(),
   });
   dd.bindShortcut(SAVE_OVER_COMMAND, "Mod+S");
+
+  // The document is about to be swapped for another, or this plugin to
+  // stop: typing waiting on the save's debounce is saved now, into the
+  // page it was typed in (the panel's `leave`).
+  dd.on("leave", () => state.leave());
 
   // Delete / Backspace removes the selected INNER element of a page — the
   // kernel's `remove` edit, its span cut from where it was written — and

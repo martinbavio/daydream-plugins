@@ -60,6 +60,11 @@ export interface PanelState {
    * is saved over the page as it is now. Never handles the key (false),
    * so it goes on to core's save. Set by the panel once mounted. */
   saveOver: () => boolean;
+  /** The document is about to be swapped, or the plugin to stop (the
+   * entry's `leave` hook): what is typed and pending is saved now, into
+   * the page it was typed in, or held as its draft. Set by the panel once
+   * mounted. */
+  leave: () => void;
   /** By viewport id, of the document loaded when they were held: a
    * page id names a page of one document only, so another load (a page
    * of the same id in it, the same document reopened) must never show
@@ -107,25 +112,18 @@ export interface Target {
   elementId: string | null;
 }
 
-/** The page and element `id` selects; null for nothing or an item that
- * is not a page; "unmounted" for an id that names no item and no mounted
- * element — one from an earlier mount of a page, which an undo over a
- * markup change restores (a page element's id is minted at mount). */
-export function targetOf(
-  dd: DaydreamApi,
-  id: string | null,
-): Target | null | "unmounted" {
+/** The page and element `id` selects; null for nothing, an item that is
+ * not a page, or an id no mounted page holds. */
+export function targetOf(dd: DaydreamApi, id: string | null): Target | null {
   if (id === null) return null;
   const item = dd.items().find((candidate) => candidate.id === id);
   if (item !== undefined) {
-    return item.kind === "daydream.viewport"
+    return item.kind === dd.core.viewportKind
       ? { pageId: id, elementId: null }
       : null;
   }
   const element = dd.pageElement(id);
-  return element === null
-    ? "unmounted"
-    : { pageId: element.viewportId, elementId: id };
+  return element === null ? null : { pageId: element.viewportId, elementId: id };
 }
 
 /** A page's stored markup, or null when it is not on the canvas. */
@@ -149,8 +147,8 @@ type Saved =
   | { ok: false; kind: "refused"; message: string };
 
 /** The selection resolved (`target`), and the target it last resolved to
- * (`last`): what a selection naming no mounted element, or none while
- * the editor holds the caret, keeps showing. */
+ * (`last`): what the editor keeps showing while nothing is selected and
+ * it holds the caret. */
 interface Resolution {
   target: Target | null;
   last: Target | null;
@@ -206,29 +204,29 @@ export default function createHtmlPanel(state: PanelState) {
   const p = classPrefix(dd.plugin.id);
 
   // The selection's page and element. The page is read untracked: which
-  // page an element is in holds for as long as it is selected. Two
-  // selections keep the page last resolved, while it is on the canvas —
-  // carried in the memo's own value (`last`), never beside it: one
-  // naming no mounted element — an undo over a markup change restores an
-  // id from an earlier mount — asked again at every geometry change,
-  // which a mount is; and nothing, while the editor holds the caret — the
-  // kernel pruning that dangling id on the next write, never a gesture,
-  // since a click anywhere else takes the caret first.
+  // page an element is in holds for as long as it is selected (the kernel
+  // keeps a selection live across an undo or a redo that remounts its
+  // page, and answers `dd.pageElement` again from memory). Nothing
+  // selected while the editor holds the caret keeps the page last
+  // resolved, while it is on the canvas — carried in the memo's own value
+  // (`last`), never beside it: that is the kernel pruning a dangling id
+  // on the next write, never a gesture, since a click anywhere else takes
+  // the caret first.
   const holdingCaret = (): boolean => state.editor?.hasFocus() === true;
   const resolution = createMemo<Resolution>((previous) => {
     const last = previous?.last ?? null;
     const id = dd.selection();
     const read = untrack(() => targetOf(dd, id));
-    const keep = read === "unmounted" || (id === null && untrack(holdingCaret));
-    if (!keep) return { target: read, last: read };
-    if (id !== null) dd.geometry.version();
+    if (id !== null || !untrack(holdingCaret)) {
+      return { target: read, last: read };
+    }
     if (last === null || untrack(() => pageHtml(dd, last.pageId)) === null) {
       return { target: null, last };
     }
-    // The same object while nothing changes, so a pan does not re-run
-    // what follows the target.
+    // The same object while nothing changes, so nothing that follows the
+    // target re-runs.
     const kept =
-      last.elementId === id ? last : { pageId: last.pageId, elementId: id };
+      last.elementId === null ? last : { pageId: last.pageId, elementId: null };
     return { target: kept, last: kept };
   });
   const target = createMemo(() => resolution().target);
@@ -455,6 +453,14 @@ export default function createHtmlPanel(state: PanelState) {
   const leave = (id: string): void => {
     clearDebounce();
     saveEditor(id);
+  };
+
+  // The document is about to be swapped, or the plugin to stop: what is
+  // pending is saved into the page it was typed in now, while that page
+  // is still the document's — the debounce would fire into another
+  // document, or never.
+  state.leave = (): void => {
+    if (shown !== null) leave(shown);
   };
 
   /** Page `id`'s draft, unless the page holds a held draft's text now —
