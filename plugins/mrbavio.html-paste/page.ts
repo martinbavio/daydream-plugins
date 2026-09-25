@@ -17,9 +17,6 @@ import type { DaydreamApi, DreamPage } from "@daydream/plugin-api";
  * copied section was designed for. */
 export const VIEWPORT_WIDTH = 960;
 
-/** The kind constant, as the format names it. */
-const VIEWPORT_KIND = "daydream.viewport";
-
 /** DOMParser over the whole clipboard text: a fragment gets a synthetic
  * `html`/`body`, a Chrome copy (`<meta charset>` and StartFragment
  * comments around the fragment) parses as the document it claims to be,
@@ -372,7 +369,7 @@ function renamed(text: string, names: ReadonlyMap<string, string>): string {
  * for a paste that is abandoned before it lands.
  */
 export async function pageFromPaste(
-  dd: Pick<DaydreamApi, "cleanPage" | "vendorFile">,
+  dd: Pick<DaydreamApi, "cleanPage" | "vendorFile" | "core">,
   html: string,
   options: {
     id: string;
@@ -437,7 +434,7 @@ export async function cleanPaste(
  * sentences follow it, then the cleaning's findings.
  */
 export async function storePaste(
-  dd: Pick<DaydreamApi, "cleanPage" | "vendorFile">,
+  dd: Pick<DaydreamApi, "cleanPage" | "vendorFile" | "core">,
   cleaned: CleanedPaste,
   progress: { stored: number } = { stored: 0 },
 ): Promise<PastedPage> {
@@ -477,7 +474,7 @@ export async function storePaste(
   const title = landed.title.trim();
   const item: DreamPage = {
     id: options.id,
-    kind: VIEWPORT_KIND,
+    kind: dd.core.viewportKind,
     position: options.position,
     frame: { width: VIEWPORT_WIDTH },
     payload: {
