@@ -2,13 +2,8 @@ import { describe, expect, test } from "vitest";
 
 import type { DreamItem, DreamPage } from "@daydream/plugin-api";
 
-import { adoptInto as adoptWith, roundOf as roundWith } from "./adopt";
+import { adoptInto, roundOf } from "./adopt";
 import { droppedLegacyPick, parseVariantMarker, sessionState, variantMarker } from "./variants";
-
-/** What `dd.core` says a viewport item's kind is. */
-const core = { viewportKind: "daydream.viewport" } as const;
-const roundOf = (items: readonly DreamItem[], id: string) => roundWith(core, items, id);
-const adoptInto = (items: DreamItem[], id: string) => adoptWith(core, items, id);
 
 /** A page (decision #76): its markup and its stylesheet, verbatim. */
 const viewport = (
@@ -18,7 +13,7 @@ const viewport = (
   css = "",
 ): DreamPage => ({
   id,
-  kind: core.viewportKind,
+  kind: "daydream.viewport",
   position: { x: 0, y: 0 },
   frame: { width: 960, height: 600 },
   payload: {

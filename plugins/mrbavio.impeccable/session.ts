@@ -135,7 +135,7 @@ export function createSession(dd: DaydreamApi): Session {
   };
   const pageHtml = (viewportId: string): string | null => {
     const item = untrack(dd.items).find((i) => i.id === viewportId);
-    return item !== undefined && isViewport(dd.core, item) ? item.payload.html : null;
+    return item !== undefined && isViewport(item) ? item.payload.html : null;
   };
   /** How many elements the selector names in the page's stored text,
    * as the agent's tools count them (0 for one the browser refuses).

@@ -19,6 +19,8 @@ import { untrack } from "solid-js";
 
 import type { DaydreamApi, ElementId, OverlayRect } from "@daydream/plugin-api";
 
+import { isViewport } from "./adopt";
+
 export interface Target {
   viewportId: string;
   /** The element's unique selector in its page, or null: the whole page. */
@@ -50,9 +52,7 @@ export function createTargeting(dd: DaydreamApi): Targeting {
     if (selected === null) return null;
     const item = dd.items().find((i) => i.id === selected);
     if (item !== undefined) {
-      return item.kind === dd.core.viewportKind
-        ? { viewportId: item.id, anchor: null }
-        : null;
+      return isViewport(item) ? { viewportId: item.id, anchor: null } : null;
     }
     const viewportId = pageOf(selected);
     return viewportId === null ? null : { viewportId, anchor: selected };

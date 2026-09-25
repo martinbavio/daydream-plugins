@@ -105,12 +105,12 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   dd.registerItemAction({
     id: "adopt",
     title: "adopt",
-    when: (item) => roundOf(dd.core, dd.items(), item.id) !== null,
+    when: (item) => roundOf(dd.items(), item.id) !== null,
     run: (item) => {
-      const round = roundOf(dd.core, dd.items(), item.id);
+      const round = roundOf(dd.items(), item.id);
       if (round === null) return;
       dd.mutateItems((items) => {
-        adoptInto(dd.core, items, item.id);
+        adoptInto(items, item.id);
       });
       // The source, selected whole: its page is the variant's now, mounted
       // anew, so no element id from before names anything in it.
@@ -140,11 +140,12 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   // The viewport as one standalone HTML page, for a judge that reads
   // HTML — Impeccable's detector (the critique and audit verbs). The
   // kernel renders it: a live mount — the page's own text made safe, its
-  // css one <style> (decision #76) — its document read once, disposed,
-  // with what the mount adds for its own reads taken back out (the
-  // measuring ids, the container probes), so the detector judges the
-  // page and nothing else. Root-relative urls (a page's `assets/<file>` pointed at this host's
-  // route for its document) are made absolute so the file stands alone.
+  // css one <style> (decision #76) — mounted bare, so it carries nothing
+  // the measurer adds for its own reads (no measuring ids, no container
+  // probes), its document read once and disposed: the detector judges
+  // the page and nothing else. Root-relative urls (a page's
+  // `assets/<file>` pointed at this host's route for its document) are
+  // made absolute so the file stands alone.
   dd.registerTool({
     name: HTML_TOOL,
     title: "Impeccable HTML",
@@ -213,7 +214,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   // is not it.
   const pageText = (viewportId: string): string | null => {
     const item = dd.items().find((i) => i.id === viewportId);
-    if (item === undefined || !isViewport(dd.core, item)) return null;
+    if (item === undefined || !isViewport(item)) return null;
     return JSON.stringify([item.payload.html, item.payload.css]);
   };
   let sourceBefore: string | null = null;
@@ -255,7 +256,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
       let landed = 0;
       let of: number | null = null;
       for (const item of dd.items()) {
-        const m = markerOf(dd.core, item);
+        const m = markerOf(item);
         if (m !== null && m.sourceId === viewportId && m.verb === verb && m.round === round) {
           landed += 1;
           of = Math.max(of ?? 0, m.of);
@@ -276,18 +277,18 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   const titleVariants = (added: string[]): void => {
     for (const id of added) {
       const item = dd.items().find((i) => i.id === id);
-      if (item === undefined || !isViewport(dd.core, item)) continue;
-      const m = markerOf(dd.core, item);
+      if (item === undefined || !isViewport(item)) continue;
+      const m = markerOf(item);
       if (m === null) continue;
       const source = dd.items().find((i) => i.id === m.sourceId);
       const base =
-        source !== undefined && isViewport(dd.core, source)
+        source !== undefined && isViewport(source)
           ? (source.payload.meta?.title ?? "Untitled")
           : "Untitled";
       const title = `${base} · ${m.verb} ${m.n}/${m.of}`;
       if (item.payload.meta?.title === title) continue;
       dd.updateItem(id, (working) => {
-        if (!isViewport(dd.core, working)) return;
+        if (!isViewport(working)) return;
         working.payload.meta = { ...(working.payload.meta ?? {}), title };
       });
     }

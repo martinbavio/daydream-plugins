@@ -2,24 +2,25 @@
 // round goes away — one undo step, so ⌘Z brings the fan back. Pure over an
 // item array (the working copy dd.mutateItems hands out, or a document's
 // items for a test); the marker on each variant's notes (variants.ts) is
-// how a round is known. What a viewport is, is the kernel's to name
-// (`dd.core.viewportKind`), handed in.
+// how a round is known.
 
-import type { CoreApi, DreamItem, DreamPage } from "@daydream/plugin-api";
+import type { DreamItem, DreamPage, ViewportKind } from "@daydream/plugin-api";
 
 import { parseVariantMarker, type VariantMarker } from "./variants";
 
-/** What tells a viewport item: `dd.core`. */
-export type Viewports = Pick<CoreApi, "viewportKind">;
+/** A viewport item's kind, read once: `dd.core.viewportKind`'s value, the
+ * one `ViewportKind` names — a spelling the type checks against the
+ * kernel's, so no function here needs `dd.core` handed in for it. */
+const VIEWPORT_KIND: ViewportKind = "daydream.viewport";
 
 /** A viewport item — a page since format 7 (decision #76). */
-export function isViewport(core: Viewports, item: DreamItem): item is DreamPage {
-  return item.kind === core.viewportKind;
+export function isViewport(item: DreamItem): item is DreamPage {
+  return item.kind === VIEWPORT_KIND;
 }
 
 /** The marker on a viewport item's notes, or null. */
-export function markerOf(core: Viewports, item: DreamItem): VariantMarker | null {
-  return isViewport(core, item) ? parseVariantMarker(item.payload.meta?.notes) : null;
+export function markerOf(item: DreamItem): VariantMarker | null {
+  return isViewport(item) ? parseVariantMarker(item.payload.meta?.notes) : null;
 }
 
 export interface Round {
@@ -35,20 +36,19 @@ export interface Round {
  * when the item is not a variant, or its source is gone (adopting into
  * nothing is not a thing; the user deletes it). */
 export function roundOf(
-  core: Viewports,
   items: readonly DreamItem[],
   variantId: string,
 ): Round | null {
   const variant = items.find((i) => i.id === variantId);
   if (variant === undefined) return null;
-  const marker = markerOf(core, variant);
+  const marker = markerOf(variant);
   if (marker === null) return null;
   const source = items.find(
-    (i): i is DreamPage => i.id === marker.sourceId && isViewport(core, i),
+    (i): i is DreamPage => i.id === marker.sourceId && isViewport(i),
   );
   if (source === undefined) return null;
   const variants = items.filter((i): i is DreamPage => {
-    const m = markerOf(core, i);
+    const m = markerOf(i);
     return (
       m !== null &&
       m.sourceId === marker.sourceId &&
@@ -65,11 +65,10 @@ export function roundOf(
  * fonts are `@font-face` rules in its css, so they come along); the
  * round's variants are spliced out. False when nothing applies. */
 export function adoptInto(
-  core: Viewports,
   items: DreamItem[],
   variantId: string,
 ): boolean {
-  const round = roundOf(core, items, variantId);
+  const round = roundOf(items, variantId);
   if (round === null) return false;
   const chosen = round.variants.find((v) => v.id === variantId)!;
   const { meta } = round.source.payload;
