@@ -1,17 +1,17 @@
 {
   "name": "@mrbavio/plugin-notes",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "peerDependencies": {
-    "@solidjs/web": "2.0.0-rc.0",
-    "solid-js": "2.0.0-rc.0"
+    "@solidjs/web": "2.0.0-rc.9",
+    "solid-js": "2.0.0-rc.9"
   },
   "dependencies": {
-    "@daydream/plugin-api": "github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api"
+    "@daydream/plugin-api": "catalog:"
   },
   "devDependencies": {
-    "@daydream/plugin-testing": "github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing",
+    "@daydream/plugin-testing": "catalog:",
     "vitest": "^4.1.11"
   }
 }

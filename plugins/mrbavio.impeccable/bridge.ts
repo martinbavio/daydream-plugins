@@ -22,6 +22,8 @@ import { z } from "zod";
 
 import type { DaydreamHostApi } from "@daydream/plugin-api/host";
 
+import { ROUND_ID, roundId } from "./variants.ts";
+
 import type * as Detect from "./bridge/detect.ts";
 import type * as Skill from "./bridge/skill.ts";
 import type * as Verbs from "./bridge/verbs.ts";
@@ -53,6 +55,7 @@ interface VerbArgs {
   element?: string;
   brief?: string;
   variants?: string;
+  round?: string;
 }
 
 const TARGET_ARGS = {
@@ -66,7 +69,7 @@ const TARGET_ARGS = {
     .string()
     .optional()
     .describe(
-      "An element id inside the viewport, when one section is the target. Default: the selected element; the whole page when a viewport item is selected.",
+      "A CSS selector naming exactly one element of the viewport's page, when one section is the target (a pick's element, canvas_state's selection.selector). Default: the selected element; the whole page when a viewport item is selected.",
     ),
   brief: z
     .string()
@@ -76,6 +79,13 @@ const TARGET_ARGS = {
     .string()
     .optional()
     .describe("How many draft variants to open (1–6, default 3); ignored by in-place verbs."),
+  round: z
+    .string()
+    .regex(ROUND_ID)
+    .optional()
+    .describe(
+      "The pick's round (impeccable_pick answers it). Every variant's marker carries it, so the canvas counts the round and adopt clears it whole — pass the same one when you call the verb again for the same pick. Default: a fresh round, for a verb with no pick.",
+    ),
 };
 
 /** The shell loop that exits when the storage file's contents change (or
@@ -103,7 +113,7 @@ export function sessionText(dataFile: string): string {
     "THE LOOP — one state at a time, never two:",
     "1. WAITING: call impeccable_pick FIRST — a pick made before you were watching is already in the file, and a watch started now would never wake for it. A pick → step 3. exit → stop. Nothing → start the watch (and nothing else) and tell the user in one line that the session is on and they can pick a verb on the canvas.",
     "2. WOKEN: the watch exited. Call impeccable_pick; it answers {pick, exit} and takes the pick (the canvas caption changes from waiting to building). exit true → say the session ended and stop, no watch. pick null → back to 1.",
-    "3. WORKING: impeccable_verb {verb, viewport, element, brief} from the pick (brief when the pick carries one — the user's words, which outrank the playbook's defaults) and follow it TO THE END — every draft landed, one line per direction, then impeccable_done (the canvas stops saying building). THE WATCH DOES NOT RUN DURING THIS STATE: a watch started here waits for a pick the user cannot make while you are still building, and stalls the round.",
+    "3. WORKING: impeccable_verb {verb, viewport, element, brief, round} from the pick (brief when the pick carries one — the user's words, which outrank the playbook's defaults; round always, the same one if you call the verb again for this pick) and follow it TO THE END — every draft landed, one line per direction, then impeccable_done (the canvas stops saying building). THE WATCH DOES NOT RUN DURING THIS STATE: a watch started here waits for a pick the user cannot make while you are still building, and stalls the round.",
     "4. Only when the round is done: back to 1 — start the watch again.",
     "The user adopts a variant from the canvas; nothing for you to do there.",
     "",
@@ -159,6 +169,9 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
       target: state === null ? null : resolveTarget(state, args),
       ...(args.brief === undefined ? {} : { brief: args.brief }),
       variants: variantCount(args.variants),
+      // The pick's round when there is one: a second call for the same
+      // pick lands into the same round, never a round of its own.
+      round: args.round ?? roundId(),
       playbook,
       craftFloor,
       skillVersion: version,
@@ -169,7 +182,7 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
   host.registerTool({
     name: VERB_TOOL,
     title: "Impeccable verb",
-    description: `The playbook for one design verb over a viewport on the canvas, with the target resolved from the selection (or the arguments) and the deliverable spelled out — call it, then follow it. Verbs: ${verbNames.join(", ")}. ${VERBS.filter((v) => v.mode === "variants").length} of them open draft variants beside the source, ${VERBS.filter((v) => v.mode === "in-place").length} rework it in place, and critique and audit answer a report over the rendered page (impeccable_html + Impeccable's detector) and land nothing. After a canvas pick, pass the pick's viewport and element.`,
+    description: `The playbook for one design verb over a viewport on the canvas, with the target resolved from the selection (or the arguments) and the deliverable spelled out — call it, then follow it. Verbs: ${verbNames.join(", ")}. ${VERBS.filter((v) => v.mode === "variants").length} of them open draft variants beside the source, ${VERBS.filter((v) => v.mode === "in-place").length} rework it in place, and critique and audit answer a report over the rendered page (impeccable_html + Impeccable's detector) and land nothing. After a canvas pick, pass the pick's viewport, element and round.`,
     inputSchema: {
       verb: z.enum(verbNames as [string, ...string[]]).describe("The verb."),
       ...TARGET_ARGS,
@@ -198,10 +211,13 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
     name: DETECT_TOOL,
     title: "Impeccable detect",
     description:
-      "Impeccable's detector over a viewport as the canvas renders it: the page is exported by the tab (impeccable_html), written to a file by the host, scanned by the installed skill's own launcher, and the findings answered — {viewportId, file, target?, count, byRule, findings: [{antipattern, name, severity, category, snippet}]}. With element, the export is pruned to that element and its ancestors, so every finding is the target's. The evidence step of critique and audit, in one call; the file stays on disk for you to open.",
+      "Impeccable's detector over a viewport as the canvas renders it: the page is exported by the tab (impeccable_html), written to a file by the host, scanned by the installed skill's own launcher, and the findings answered — {viewportId, file, target?, count, byRule, findings: [{antipattern, name, severity, category, snippet}]}. With element, the page is scanned whole and again with that element taken out, and only the findings it adds are answered, so every finding is the target's; target.outside counts the page's others. The evidence step of critique and audit, in one call; the file stays on disk for you to open.",
     inputSchema: {
       viewport: z.string().describe("A viewport id from canvas_state"),
-      element: z.string().optional().describe("An element id inside it: scan the target alone, in its cascade"),
+      element: z
+        .string()
+        .optional()
+        .describe("A CSS selector naming exactly one element of its page: answer the target's findings alone, the target scanned in its page"),
     },
     annotations: { readOnlyHint: true },
     run: async ({ viewport, element }) => {
@@ -215,7 +231,7 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
       });
       const rules = Object.entries(report.byRule).map(([rule, n]) => `${n} ${rule}`).join(", ");
       return {
-        text: `${report.count} finding${report.count === 1 ? "" : "s"}${rules === "" ? "" : ` — ${rules}`} over ${report.file}${report.target === undefined ? "" : ` (pruned to ${report.target.id}: ${report.target.kept} elements kept, ${report.target.pruned} removed)`}.\n${JSON.stringify(report.findings)}`,
+        text: `${report.count} finding${report.count === 1 ? "" : "s"}${rules === "" ? "" : ` — ${rules}`} over ${report.file}${report.target === undefined ? "" : ` (the target ${report.target.selector}, ${report.target.kept} elements: ${report.target.outside} findings elsewhere on the page left out)`}.\n${JSON.stringify(report.findings)}`,
         structured: report as unknown as Record<string, unknown>,
       };
     },

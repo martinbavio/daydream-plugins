@@ -1,18 +1,18 @@
 {
   "name": "@mrbavio/plugin-impeccable",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "dependencies": {
-    "@daydream/plugin-api": "github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api",
-    "zod": "^4.6.5"
+    "@daydream/plugin-api": "catalog:",
+    "zod": "^4.5.4"
   },
   "peerDependencies": {
-    "@solidjs/web": "2.0.0-rc.0",
-    "solid-js": "2.0.0-rc.0"
+    "@solidjs/web": "2.0.0-rc.9",
+    "solid-js": "2.0.0-rc.9"
   },
   "devDependencies": {
-    "@daydream/plugin-testing": "github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing",
+    "@daydream/plugin-testing": "catalog:",
     "vitest": "^4.1.11"
   }
 }

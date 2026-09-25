@@ -17,7 +17,7 @@ import {
   vi,
   onTestFinished,
 } from "vitest";
-import { DEV, flush } from "solid-js";
+import { flush } from "solid-js";
 
 import activate from "./index";
 import manifest from "./manifest.json";
@@ -25,13 +25,21 @@ import { measureNaturalTextItem } from "./measurement";
 
 let appStore: AppStore;
 beforeEach(() => {
+  // Solid's dev build reports an untracked reactive read as a console
+  // warning naming STRICT_READ_UNTRACKED (rc.9 took `DEV.diagnostics`
+  // away); the kernel's own readiness test listens the same way.
   const stacks: string[] = [];
-  const stop = DEV?.diagnostics.subscribe((event) => {
-    if (event.code === "STRICT_READ_UNTRACKED" && stacks.length === 0)
+  const warn = console.warn;
+  const spy = vi.spyOn(console, "warn").mockImplementation((...args) => {
+    if (
+      String(args[0]).includes("STRICT_READ_UNTRACKED") &&
+      stacks.length === 0
+    )
       stacks.push(new Error("diagnostic origin").stack ?? "no stack");
+    else warn(...args);
   });
   onTestFinished(() => {
-    stop?.();
+    spy.mockRestore();
     expect(stacks).toEqual([]);
   });
   const kernel = createTestKernel({ document: createEmptyDocument() });
@@ -74,7 +82,7 @@ describe("canvas text plugin", () => {
   test("command-driven editor switching commits the previous session without duplicate editors", async () => {
     const { host, kernel } = await mountShell({
       document: {
-        version: 5,
+        version: 7,
         items: [
           {
             id: "first",
@@ -274,7 +282,7 @@ describe("canvas text plugin", () => {
   test("Enter edits the sole selected text at the end and Escape commits it as one undo step", async () => {
     appStore.loadDocument(
       {
-        version: 5,
+        version: 7,
         items: [
           {
             id: "text-1",
@@ -340,7 +348,7 @@ describe("canvas text plugin", () => {
   test("text uses ordinary resize handles, clamps to 1rem, hides handles while editing, and double-click resets natural sizing", async () => {
     appStore.loadDocument(
       {
-        version: 5,
+        version: 7,
         items: [
           {
             id: "text-1",
@@ -642,7 +650,7 @@ describe("canvas text plugin", () => {
   test("an unrelated document mutation finalizes editing first and remains a separate undo step", async () => {
     appStore.loadDocument(
       {
-        version: 5,
+        version: 7,
         items: [
           {
             id: "text-1",
@@ -702,7 +710,7 @@ describe("canvas text plugin", () => {
   test("loading another document invalidates an edit session, and later edits commit against that session's fresh value", async () => {
     appStore.loadDocument(
       {
-        version: 5,
+        version: 7,
         items: [
           {
             id: "text-1",
@@ -740,7 +748,7 @@ describe("canvas text plugin", () => {
     inputText(firstEditor, "Uncommitted");
     appStore.loadDocument(
       {
-        version: 5,
+        version: 7,
         items: [
           {
             id: "text-2",
@@ -787,7 +795,7 @@ describe("canvas text plugin", () => {
     const text = "Measured  text\n🌎";
     appStore.loadDocument(
       {
-        version: 5,
+        version: 7,
         items: [
           {
             id: "text-1",
@@ -810,7 +818,7 @@ describe("canvas text plugin", () => {
   test("unmounting a text item disposes its active drag without mutating the loaded document", async () => {
     appStore.loadDocument(
       {
-        version: 5,
+        version: 7,
         items: [
           {
             id: "old-text",
@@ -840,7 +848,7 @@ describe("canvas text plugin", () => {
 
     appStore.loadDocument(
       {
-        version: 5,
+        version: 7,
         items: [
           {
             id: "new-text",

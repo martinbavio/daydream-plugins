@@ -1,10 +1,11 @@
 /**
  * The HTML pane's CodeMirror 6 editor: HTML syntax colours and tag
- * completion from @codemirror/lang-html, bracket pairing, line wrapping.
- * Framework-free and imperative: HtmlPanel mounts it in a ref and owns
- * every policy decision (when to parse, when to write, what to select).
+ * completion from @codemirror/lang-html, bracket pairing, line wrapping,
+ * and the selected element's span marked in the text. Framework-free and
+ * imperative: HtmlPanel mounts it in a ref and owns every policy decision
+ * (when to save, what to mark).
  *
- * Two boundaries, the same two the CSS editor keeps:
+ * Three boundaries, the first two the CSS editor's own:
  * - Store→editor writes go through setText, a minimal span change tagged
  *   with an annotation, so the caret maps through instead of being
  *   clobbered by a whole-string swap.
@@ -12,6 +13,11 @@
  *   transactions — a sync must never read as an edit — and are
  *   microtask-deferred, because CodeMirror forbids dispatching from
  *   inside an update.
+ * - The caret reaches the panel (onCaret) only when the person moved it
+ *   — a click, an arrow key: CodeMirror's `select` user events — and
+ *   once a frame, as the CSS editor's caret line does. A sync mapping it
+ *   and a mark revealing it are no user event, so a canvas selection
+ *   shown in the text never echoes back as a caret move.
  *
  * Deliberately absent: CodeMirror's history. The store's burst-based
  * history is the only undo model; the command router handles ⌘Z at
@@ -33,14 +39,18 @@ import {
   HighlightStyle,
   syntaxHighlighting,
 } from "@codemirror/language";
-import { Annotation } from "@codemirror/state";
+import { Annotation, StateEffect, StateField } from "@codemirror/state";
 import {
+  Decoration,
   drawSelection,
   EditorView,
   highlightActiveLine,
   keymap,
+  type DecorationSet,
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
+
+import { diffSpan } from "./rebase";
 
 export interface HtmlEditorOptions {
   parent: HTMLElement;
@@ -48,6 +58,10 @@ export interface HtmlEditorOptions {
   /** The document changed through an actual edit (typing, paste — never
    * a setText sync). Deferred to a microtask. */
   onDocChanged: () => void;
+  /** The person moved the caret to `offset` (a click, a key — never a
+   * sync or a mark). Deferred to the next frame, the last move of the
+   * frame only. */
+  onCaret: (offset: number) => void;
   /** The editor lost focus. */
   onBlur: () => void;
 }
@@ -58,6 +72,14 @@ export interface HtmlEditorHandle {
   /** Sync the document to `text` via a minimal span change (no-op when
    * equal). The selection maps through; onDocChanged stays silent. */
   setText: (text: string) => void;
+  /** Mark `range` of the text as the selected element's (null: none).
+   * `reveal` scrolls it into view and puts the caret at its start — for a
+   * selection made on the canvas, never under a caret being typed at. The
+   * mark maps through edits until the next call. */
+  setMark: (
+    range: { from: number; to: number } | null,
+    reveal: boolean,
+  ) => void;
   /** Whether the completion popup is showing — CodeMirror's own Escape
    * closes it, so the panel's blur-on-Escape command steps aside then. */
   completionOpen: () => boolean;
@@ -69,34 +91,29 @@ export interface HtmlEditorHandle {
 /** Tags transactions produced by setText — store syncs, not user edits. */
 const storeSync = Annotation.define<boolean>();
 
+/** The selected element's span: set by setMark, mapped through edits. */
+const setMarkEffect = StateEffect.define<{ from: number; to: number } | null>();
+const selectedMark = Decoration.mark({ class: "cm-dd-selected-element" });
+const markField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(marks, tr) {
+    let next = marks.map(tr.changes);
+    for (const effect of tr.effects) {
+      if (!effect.is(setMarkEffect)) continue;
+      const range = effect.value;
+      next =
+        range === null || range.from >= range.to
+          ? Decoration.none
+          : Decoration.set([selectedMark.range(range.from, range.to)]);
+    }
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
 /** defaultKeymap bindings the pane's model cannot honour: Escape is the
  * router's blur. */
 const DROPPED_BINDINGS = new Set(["Escape"]);
-
-/** The change that turns `from` into `to`, as one span: the longest common
- * prefix and suffix stay put. Null when equal. */
-export function diffSpan(
-  from: string,
-  to: string,
-): { from: number; to: number; insert: string } | null {
-  if (from === to) return null;
-  let start = 0;
-  const max = Math.min(from.length, to.length);
-  while (start < max && from.charCodeAt(start) === to.charCodeAt(start)) {
-    start++;
-  }
-  let endFrom = from.length;
-  let endTo = to.length;
-  while (
-    endFrom > start &&
-    endTo > start &&
-    from.charCodeAt(endFrom - 1) === to.charCodeAt(endTo - 1)
-  ) {
-    endFrom--;
-    endTo--;
-  }
-  return { from: start, to: endFrom, insert: to.slice(start, endTo) };
-}
 
 // Quiet dark theme over the panel's --panel-* tokens (styles.ts defines
 // them on the panel root; the editor inherits them as a descendant).
@@ -123,6 +140,7 @@ const theme = EditorView.theme(
     ".cm-selectionBackground": { backgroundColor: "var(--panel-chrome)" },
     "&.cm-focused .cm-selectionBackground": { backgroundColor: "#2d3a49" },
     ".cm-activeLine": { backgroundColor: "#ffffff08" },
+    ".cm-dd-selected-element": { backgroundColor: "#8fb4dc1a" },
     "&.cm-focused .cm-matchingBracket, &.cm-focused .cm-nonmatchingBracket": {
       backgroundColor: "var(--panel-chrome)",
       outline: "none",
@@ -158,6 +176,7 @@ const highlight = HighlightStyle.define([
 
 export function createHtmlEditor(options: HtmlEditorOptions): HtmlEditorHandle {
   let destroyed = false;
+  let caretFrame: number | null = null;
 
   const view: EditorView = new EditorView({
     parent: options.parent,
@@ -171,6 +190,7 @@ export function createHtmlEditor(options: HtmlEditorOptions): HtmlEditorHandle {
       drawSelection(),
       highlightActiveLine(),
       EditorView.lineWrapping,
+      markField,
       theme,
       EditorView.contentAttributes.of({
         "aria-label": "HTML source",
@@ -186,6 +206,18 @@ export function createHtmlEditor(options: HtmlEditorOptions): HtmlEditorHandle {
         if (!userEdit) return;
         queueMicrotask(() => {
           if (!destroyed) options.onDocChanged();
+        });
+      }),
+      EditorView.updateListener.of((update) => {
+        if (!update.selectionSet) return;
+        if (!update.transactions.some((tr) => tr.isUserEvent("select"))) {
+          return;
+        }
+        const offset = update.state.selection.main.head;
+        if (caretFrame !== null) cancelAnimationFrame(caretFrame);
+        caretFrame = requestAnimationFrame(() => {
+          caretFrame = null;
+          if (!destroyed) options.onCaret(offset);
         });
       }),
       EditorView.domEventHandlers({
@@ -215,6 +247,27 @@ export function createHtmlEditor(options: HtmlEditorOptions): HtmlEditorHandle {
       if (change === null) return;
       view.dispatch({ changes: change, annotations: storeSync.of(true) });
     },
+    setMark: (range, reveal) => {
+      if (destroyed) return;
+      const length = view.state.doc.length;
+      const mark =
+        range === null
+          ? null
+          : {
+              from: Math.min(range.from, length),
+              to: Math.min(range.to, length),
+            };
+      const revealed = reveal && mark !== null;
+      view.dispatch({
+        effects: revealed
+          ? [
+              setMarkEffect.of(mark),
+              EditorView.scrollIntoView(mark.from, { y: "center" }),
+            ]
+          : setMarkEffect.of(mark),
+        ...(revealed ? { selection: { anchor: mark.from } } : {}),
+      });
+    },
     completionOpen: () =>
       !destroyed && completionStatus(view.state) === "active",
     focus: () => {
@@ -225,6 +278,7 @@ export function createHtmlEditor(options: HtmlEditorOptions): HtmlEditorHandle {
     },
     destroy: () => {
       destroyed = true;
+      if (caretFrame !== null) cancelAnimationFrame(caretFrame);
       view.destroy();
     },
   };

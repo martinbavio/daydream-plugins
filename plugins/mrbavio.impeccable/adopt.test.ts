@@ -1,42 +1,40 @@
 import { describe, expect, test } from "vitest";
 
-import type { DreamElement, DreamItem, DreamViewport } from "@daydream/plugin-api";
+import type { DreamItem, DreamPage } from "@daydream/plugin-api";
 
 import { adoptInto, roundOf } from "./adopt";
-import { parseVariantMarker, sessionState, variantMarker } from "./variants";
+import { droppedLegacyPick, parseVariantMarker, sessionState, variantMarker } from "./variants";
 
-const page = (id: string, color: string): DreamElement => ({
-  id: `html_${id}`,
-  tag: "html",
-  styles: {},
-  children: [
-    { id: `body_${id}`, tag: "body", styles: { background: color }, children: [] },
-  ],
-});
-
+/** A page (decision #76): its markup and its stylesheet, verbatim. */
 const viewport = (
   id: string,
   color: string,
-  meta?: DreamViewport["payload"]["meta"],
-  fonts?: DreamViewport["payload"]["fonts"],
-): DreamViewport => ({
+  meta?: DreamPage["payload"]["meta"],
+  css = "",
+): DreamPage => ({
   id,
   kind: "daydream.viewport",
   position: { x: 0, y: 0 },
   frame: { width: 960, height: 600 },
-  payload: { root: page(id, color), ...(meta === undefined ? {} : { meta }), ...(fonts === undefined ? {} : { fonts }) },
+  payload: {
+    html: `<!doctype html><html><head></head><body class="${id}"></body></html>`,
+    css: `${css}body { background: ${color}; }\n`,
+    ...(meta === undefined ? {} : { meta }),
+  },
 });
 
-const notes = (verb: string, n: number, of: number, source: string, why = "Because.") =>
-  `${variantMarker({ verb, n, of, sourceId: source })}\n\n${why}`;
+/** A variant's notes: its marker, then the direction. No `round`: a
+ * variant landed before rounds had ids. */
+const notes = (verb: string, n: number, of: number, source: string, round?: string, why = "Because.") =>
+  `${variantMarker({ verb, n, of, sourceId: source, ...(round === undefined ? {} : { round }) })}\n\n${why}`;
+
+const FRAUNCES = '@font-face { font-family: "Fraunces"; src: url(assets/x.woff2); }\n';
 
 function fan(): DreamItem[] {
   return [
     viewport("src", "white", { title: "Pricing", notes: "The source's own notes.", sourceUrl: "https://x" }),
     viewport("v1", "red", { title: "Pricing · bolder 1/3", notes: notes("bolder", 1, 3, "src") }),
-    viewport("v2", "blue", { title: "Pricing · bolder 2/3", notes: notes("bolder", 2, 3, "src") }, [
-      { "font-family": "Fraunces", src: "url(https://f/x.woff2)" },
-    ]),
+    viewport("v2", "blue", { title: "Pricing · bolder 2/3", notes: notes("bolder", 2, 3, "src") }, FRAUNCES),
     viewport("v3", "green", { title: "Pricing · bolder 3/3", notes: notes("bolder", 3, 3, "src") }),
     viewport("q1", "gray", { title: "Pricing · quieter 1/3", notes: notes("quieter", 1, 3, "src") }),
     viewport("other", "black", { title: "Docs" }),
@@ -51,6 +49,11 @@ describe("variants", () => {
     expect(parseVariantMarker(`${line}\n\nA serif display face.`)).toEqual({ verb: "typeset", n: 2, of: 3, sourceId: "vp_1" });
     // The older spelling still reads: variants landed before the rename.
     expect(parseVariantMarker("Glaser typeset · variant 2 of 3 of vp_1")).toEqual({ verb: "typeset", n: 2, of: 3, sourceId: "vp_1" });
+    // A round's id rides the line after the source's; a line without one
+    // is a variant landed before rounds had ids.
+    const round = variantMarker({ verb: "typeset", n: 2, of: 3, sourceId: "vp_1", round: "k3x9q2" });
+    expect(round).toBe("Impeccable typeset · variant 2 of 3 of vp_1 · round k3x9q2");
+    expect(parseVariantMarker(`${round}\n\nA serif display face.`)).toEqual({ verb: "typeset", n: 2, of: 3, sourceId: "vp_1", round: "k3x9q2" });
     expect(parseVariantMarker("A serif display face.\n" + line)).toBeNull();
     expect(parseVariantMarker(undefined)).toBeNull();
     expect(parseVariantMarker("")).toBeNull();
@@ -58,12 +61,36 @@ describe("variants", () => {
 
   test("sessionState reads what the page saved and nothing else", () => {
     expect(sessionState(undefined)).toEqual({ seq: 0, pick: null, exit: false });
-    expect(sessionState({ seq: 4, exit: true, pick: { verb: "bolder", viewportId: "v", elementId: null, at: 1 } })).toEqual({
+    expect(sessionState({ seq: 4, exit: true, pick: { verb: "bolder", viewportId: "v", element: null, round: "k3x9q2", at: 1 } })).toEqual({
       seq: 4,
       exit: true,
-      pick: { verb: "bolder", viewportId: "v", elementId: null, at: 1 },
+      pick: { verb: "bolder", viewportId: "v", element: null, round: "k3x9q2", at: 1 },
+    });
+    expect(sessionState({ seq: 1, pick: { verb: "bolder", viewportId: "v", element: "#card", round: "k3x9q2", at: 1 } }).pick).toEqual({
+      verb: "bolder",
+      viewportId: "v",
+      element: "#card",
+      round: "k3x9q2",
+      at: 1,
     });
     expect(sessionState({ seq: "x", pick: { verb: 1 } }).pick).toBeNull();
+    // A pick saved before picks carried their round is given one: the
+    // round is minted once, with the pick, and every variant carries it.
+    const unrounded = sessionState({ seq: 1, pick: { verb: "bolder", viewportId: "v", element: null, at: 1 } }).pick!;
+    expect(unrounded.round).toMatch(/^[a-z0-9]{6}$/);
+    // One that is no round a marker can carry is read as none.
+    expect(sessionState({ seq: 1, pick: { verb: "bolder", viewportId: "v", element: null, round: "Not one", at: 1 } }).pick!.round).toMatch(/^[a-z0-9]{6}$/);
+    // A pick saved before pages named its element by its id in the tree,
+    // which no page has: it is not read back, and the canvas is told so.
+    const legacy = { seq: 2, pick: { verb: "bolder", viewportId: "v", elementId: "el_1", at: 1 } };
+    expect(sessionState(legacy).pick).toBeNull();
+    expect(droppedLegacyPick(legacy)).toBe(true);
+    // One for the whole page loses nothing: read back as a page's.
+    const whole = { seq: 2, pick: { verb: "bolder", viewportId: "v", elementId: null, round: "k3x9q2", at: 1 } };
+    expect(sessionState(whole).pick).toEqual({ verb: "bolder", viewportId: "v", element: null, round: "k3x9q2", at: 1 });
+    expect(droppedLegacyPick(whole)).toBe(false);
+    expect(droppedLegacyPick({ seq: 1, pick: { verb: "bolder", viewportId: "v", element: "#card", at: 1 } })).toBe(false);
+    expect(droppedLegacyPick(undefined)).toBe(false);
   });
 });
 
@@ -80,27 +107,56 @@ describe("adopt", () => {
     expect(roundOf(fan().filter((i) => i.id !== "src"), "v2")).toBeNull();
   });
 
-  test("adopting keeps the source's envelope, meta and name, takes the variant's page and fonts, drops the round", () => {
-    const items = fan();
-    (items[0] as DreamViewport).payload.root.label = "Pricing";
-    (items[2] as DreamViewport).payload.root.label = "Pricing · bolder 2/3";
-    expect(adoptInto(items, "v2")).toBe(true);
-    expect(items.map((i) => i.id)).toEqual(["src", "q1", "other"]);
-    const src = items[0] as DreamViewport;
-    expect(src.position).toEqual({ x: 0, y: 0 });
-    expect(src.payload.meta).toEqual({ title: "Pricing", notes: "The source's own notes.", sourceUrl: "https://x" });
-    expect(src.payload.root.label).toBe("Pricing"); // the variant's name does not come along
-    expect(src.payload.root.children[0]!.styles["background"]).toBe("blue");
-    expect(src.payload.fonts).toEqual([{ "font-family": "Fraunces", src: "url(https://f/x.woff2)" }]);
+  test("a round is one run of the verb: two runs on one source are two rounds, and adopting from one leaves the other", () => {
+    const items: DreamItem[] = [
+      viewport("src", "white", { title: "Pricing" }),
+      viewport("a1", "red", { notes: notes("bolder", 1, 3, "src", "r1") }),
+      viewport("a2", "red", { notes: notes("bolder", 2, 3, "src", "r1") }),
+      viewport("a3", "red", { notes: notes("bolder", 3, 3, "src", "r1") }),
+      viewport("b1", "blue", { notes: notes("bolder", 1, 3, "src", "r2") }),
+      viewport("b2", "blue", { notes: notes("bolder", 2, 3, "src", "r2") }),
+      viewport("b3", "blue", { notes: notes("bolder", 3, 3, "src", "r2") }),
+      // Landed before rounds had ids: one round of their own, as before,
+      // and never part of a round that has one.
+      viewport("l1", "gray", { notes: notes("bolder", 1, 2, "src") }),
+      viewport("l2", "gray", { notes: notes("bolder", 2, 2, "src") }),
+    ];
+    expect(roundOf(items, "a2")!.variants.map((v) => v.id)).toEqual(["a1", "a2", "a3"]);
+    expect(roundOf(items, "b1")!.variants.map((v) => v.id)).toEqual(["b1", "b2", "b3"]);
+    expect(roundOf(items, "l2")!.variants.map((v) => v.id)).toEqual(["l1", "l2"]);
+    expect(adoptInto(items, "b2")).toBe(true);
+    expect(items.map((i) => i.id)).toEqual(["src", "a1", "a2", "a3", "l1", "l2"]);
+    expect((items[0] as DreamPage).payload.css).toBe("body { background: blue; }\n");
+    expect(adoptInto(items, "l1")).toBe(true);
+    expect(items.map((i) => i.id)).toEqual(["src", "a1", "a2", "a3"]);
   });
 
-  test("a variant without fonts clears the source's; a source without a name takes none from the variant", () => {
+  test("adopting keeps the source's envelope and meta — its title is its name — takes the variant's page, fonts included, and drops the round", () => {
     const items = fan();
-    (items[1] as DreamViewport).payload.root.label = "Pricing · bolder 1/3";
-    (items[0] as DreamViewport).payload.fonts = [{ "font-family": "Old", src: "url(https://f/o.woff2)" }];
+    const chosen = items[2] as DreamPage;
+    expect(adoptInto(items, "v2")).toBe(true);
+    expect(items.map((i) => i.id)).toEqual(["src", "q1", "other"]);
+    const src = items[0] as DreamPage;
+    expect(src.position).toEqual({ x: 0, y: 0 });
+    expect(src.frame).toEqual({ width: 960, height: 600 });
+    expect(src.payload).toEqual({
+      html: chosen.payload.html,
+      css: chosen.payload.css,
+      meta: { title: "Pricing", notes: "The source's own notes.", sourceUrl: "https://x" },
+    });
+    // A web font is an @font-face rule in the css: it comes with the page.
+    expect(src.payload.css).toContain('font-family: "Fraunces"');
+  });
+
+  test("a source without meta takes none from the variant; adopting twice finds nothing", () => {
+    const items = fan();
+    delete (items[0] as DreamPage).payload.meta;
+    (items[0] as DreamPage).payload.css = FRAUNCES + (items[0] as DreamPage).payload.css;
     adoptInto(items, "v1");
-    expect((items[0] as DreamViewport).payload.fonts).toBeUndefined();
-    expect((items[0] as DreamViewport).payload.root.label).toBeUndefined();
+    const src = items[0] as DreamPage;
+    expect(src.payload.meta).toBeUndefined();
+    expect("meta" in src.payload).toBe(false);
+    expect(src.payload.css).toBe("body { background: red; }\n"); // the source's own font went with its css
     expect(adoptInto(items, "v1")).toBe(false); // gone now
     expect(items.length).toBe(3);
   });

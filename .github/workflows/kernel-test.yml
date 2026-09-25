@@ -1,0 +1,80 @@
+# Every plugin's tests against the kernel it pins: the browser tests mount
+# Daydream's own shell harness and reach into its src/, so they run from a
+# kernel checkout (scripts/kernel-test.mjs), never from here alone. The
+# kernel repository is private: DAYDREAM_KERNEL_TOKEN is a fine-grained
+# token with read access to mbavio-phota/daydream's contents, and a pull
+# request from a fork, which gets no secrets, skips the run and says so.
+name: kernel-test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  kernel-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: the kernel commit the plugins pin
+        id: pin
+        env:
+          HAS_TOKEN: ${{ secrets.DAYDREAM_KERNEL_TOKEN != '' }}
+        run: |
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "No DAYDREAM_KERNEL_TOKEN here (a fork's pull request gets no secrets): the kernel cannot be checked out, so the plugins' kernel tests are skipped." >> "$GITHUB_STEP_SUMMARY"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Wherever the pin lives — each package.json, or one catalog
+          # entry in pnpm-workspace.yaml — it names one full commit.
+          sha=$(grep -rhoE 'mbavio-phota/daydream#[0-9a-f]{40}' \
+            package.json pnpm-workspace.yaml plugins/*/package.json 2>/dev/null \
+            | cut -d'#' -f2 | sort -u)
+          if [ "$(printf '%s\n' "$sha" | grep -c .)" != "1" ]; then
+            echo "expected exactly one pinned kernel commit, found: ${sha:-none}" >&2
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.pin.outputs.run == 'true'
+        with:
+          repository: mbavio-phota/daydream
+          ref: ${{ steps.pin.outputs.sha }}
+          token: ${{ secrets.DAYDREAM_KERNEL_TOKEN }}
+          path: kernel
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        if: steps.pin.outputs.run == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.pin.outputs.run == 'true'
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: kernel/pnpm-lock.yaml
+
+      - name: the kernel's dependencies
+        if: steps.pin.outputs.run == 'true'
+        working-directory: kernel
+        run: pnpm install --frozen-lockfile
+
+      - name: chromium for the browser tests
+        if: steps.pin.outputs.run == 'true'
+        working-directory: kernel
+        # As the kernel's own CI does: drop the runner's Google Chrome apt
+        # source, whose index flakes, then let Playwright install Chromium
+        # and its system libraries, twice if the mirrors need a moment.
+        run: |
+          sudo grep -rl dl.google.com /etc/apt/sources.list.d /etc/apt/sources.list 2>/dev/null \
+            | xargs -r sudo rm -f
+          pnpm exec playwright install --with-deps chromium \
+            || pnpm exec playwright install chromium
+
+      - name: every plugin against the kernel
+        if: steps.pin.outputs.run == 'true'
+        run: node scripts/kernel-test.mjs kernel

@@ -14,9 +14,10 @@ export default function activate(dd: DaydreamApi): void {
   const [draft, setDraft] = createSignal<DreamItem | null>(null);
 
   // The kind's CSS rides its registration: the kernel mounts it inside
-  // each item root, in the dream-plugin layer, below the seal — so a page
-  // element carrying `class="daydream-text-item"` gets none of it
-  // (decision #71). A <style> appended to the head, as before, was
+  // each item root, in the dream-plugin layer (decision #71) — and a page
+  // renders in its own shadow root, which no plugin rule crosses, so a
+  // page element carrying `class="daydream-text-item"` gets none of it
+  // (decision #76). A <style> appended to the head, as before, was
   // unlayered and outside any plugin root the kernel guards. The draft
   // overlay carries the same string: its root is mounted for as long as
   // the plugin is, and a <style> applies document-wide, so the sheet is

@@ -4,28 +4,34 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    '@daydream/plugin-testing':
+      specifier: github:mbavio-phota/daydream#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-testing
+      version: 0.1.0
+
 overrides:
-  '@daydream/plugin-api': github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api
+  '@daydream/plugin-api': github:mbavio-phota/daydream#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api
 
 importers:
 
   .:
     devDependencies:
       '@daydream/plugin-api':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: github:mbavio-phota/daydream#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       '@solidjs/vite-plugin':
-        specifier: 3.0.0-next.29
-        version: 3.0.0-next.29(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(vite@8.3.0(@types/node@24.13.4))
+        specifier: 3.0.0-next.44
+        version: 3.0.0-next.44(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(vite@8.3.0(@types/node@24.13.4))
       '@solidjs/web':
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0(solid-js@2.0.0-rc.0)
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9(solid-js@2.0.0-rc.9)
       '@types/node':
         specifier: ^24.13.4
         version: 24.13.4
       solid-js:
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
       typescript:
         specifier: ^5.9.0
         version: 5.9.3
@@ -36,24 +42,24 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
       zod:
-        specifier: ^4.6.5
+        specifier: ^4.5.4
         version: 4.6.5
 
   plugins/mrbavio.css-author:
     dependencies:
       '@daydream/plugin-api':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: github:mbavio-phota/daydream#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       '@solidjs/web':
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0(solid-js@2.0.0-rc.0)
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
     devDependencies:
       '@daydream/plugin-testing':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: 'catalog:'
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
@@ -61,18 +67,18 @@ importers:
   plugins/mrbavio.grid:
     dependencies:
       '@daydream/plugin-api':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: github:mbavio-phota/daydream#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       '@solidjs/web':
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0(solid-js@2.0.0-rc.0)
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
     devDependencies:
       '@daydream/plugin-testing':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: 'catalog:'
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
@@ -98,21 +104,21 @@ importers:
         specifier: ^6.43.9
         version: 6.43.11
       '@daydream/plugin-api':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: github:mbavio-phota/daydream#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       '@lezer/highlight':
         specifier: ^1.2.3
         version: 1.2.3
       '@solidjs/web':
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0(solid-js@2.0.0-rc.0)
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
     devDependencies:
       '@daydream/plugin-testing':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: 'catalog:'
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
@@ -120,18 +126,18 @@ importers:
   plugins/mrbavio.html-paste:
     dependencies:
       '@daydream/plugin-api':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: github:mbavio-phota/daydream#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       '@solidjs/web':
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0(solid-js@2.0.0-rc.0)
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
     devDependencies:
       '@daydream/plugin-testing':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: 'catalog:'
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
@@ -139,21 +145,21 @@ importers:
   plugins/mrbavio.impeccable:
     dependencies:
       '@daydream/plugin-api':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: github:mbavio-phota/daydream#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       '@solidjs/web':
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0(solid-js@2.0.0-rc.0)
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
       zod:
-        specifier: ^4.6.5
+        specifier: ^4.5.4
         version: 4.6.5
     devDependencies:
       '@daydream/plugin-testing':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: 'catalog:'
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
@@ -161,18 +167,18 @@ importers:
   plugins/mrbavio.notes:
     dependencies:
       '@daydream/plugin-api':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: github:mbavio-phota/daydream#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       '@solidjs/web':
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0(solid-js@2.0.0-rc.0)
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
     devDependencies:
       '@daydream/plugin-testing':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: 'catalog:'
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
@@ -180,18 +186,18 @@ importers:
   plugins/mrbavio.text:
     dependencies:
       '@daydream/plugin-api':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: github:mbavio-phota/daydream#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       '@solidjs/web':
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0(solid-js@2.0.0-rc.0)
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9(solid-js@2.0.0-rc.9)
       solid-js:
-        specifier: 2.0.0-rc.0
-        version: 2.0.0-rc.0
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
     devDependencies:
       '@daydream/plugin-testing':
-        specifier: github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing
-        version: git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
+        specifier: 'catalog:'
+        version: git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
       vitest:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
@@ -310,71 +316,32 @@ packages:
   '@codemirror/view@6.43.11':
     resolution: {integrity: sha512-2+esucbQX6wB2JYi1eDvdCPFTA31BN8oSy6xCmk3G6CloV11yOvEjYk+gH7kLrP0MuHG94E8WDhjs5oMiu3+Wg==}
 
-  '@daydream/plugin-api@git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api':
-    resolution: {commit: b51770e46b9df68a5800b86102d62b9a65e028d5, path: packages/plugin-api, repo: git@github.com:mbavio-phota/daydream.git, type: git}
+  '@daydream/plugin-api@git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api':
+    resolution: {commit: a1b52ab370bc3788b2315fce515a3f84469e7ef9, path: packages/plugin-api, repo: https://github.com/mbavio-phota/daydream.git, type: git}
     version: 0.1.0
     peerDependencies:
-      '@solidjs/web': 2.0.0-rc.0
-      solid-js: 2.0.0-rc.0
+      '@solidjs/web': 2.0.0-rc.9
+      solid-js: 2.0.0-rc.9
       zod: ^4.5.4
     peerDependenciesMeta:
       zod:
         optional: true
 
-  '@daydream/plugin-testing@git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing':
-    resolution: {commit: b51770e46b9df68a5800b86102d62b9a65e028d5, path: packages/plugin-testing, repo: git@github.com:mbavio-phota/daydream.git, type: git}
+  '@daydream/plugin-testing@git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-testing':
+    resolution: {commit: a1b52ab370bc3788b2315fce515a3f84469e7ef9, path: packages/plugin-testing, repo: https://github.com/mbavio-phota/daydream.git, type: git}
     version: 0.1.0
     peerDependencies:
-      '@solidjs/web': 2.0.0-rc.0
-      solid-js: 2.0.0-rc.0
+      '@solidjs/web': 2.0.0-rc.9
+      solid-js: 2.0.0-rc.9
 
-  '@dom-expressions/babel-plugin-jsx@0.50.0-next.44':
-    resolution: {integrity: sha512-f1kx6TeMQgaLVkGfuxMn0BkH0+HvsycFf1qPHbYoBqmBQd6Ag/EXOxkSpfcaC+UOBMSaF4BKXegGDchRNTWKrg==}
-    peerDependencies:
-      '@babel/core': ^7.20.12
+  '@emnapi/core@1.11.3':
+    resolution: {integrity: sha512-zLpS5asjEb7lq8jYLq37N6XKaE41DIexlY1rF/z4/tIl3wo13Sqm28fRyfIsKZD+NZ8mM5RoKkpW/rBcuoSZSg==}
 
-  '@dom-expressions/compiler-darwin-arm64@0.50.0-next.40':
-    resolution: {integrity: sha512-+3aXdhw4SVt08fvgAsEM56ky/wdCVPXT0Wtxo164Cchgg7sapPsRqo8Gwwn0UU5AhVcEp3CIhdB5+pMoUicKFg==}
-    cpu: [arm64]
-    os: [darwin]
+  '@emnapi/runtime@1.11.3':
+    resolution: {integrity: sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA==}
 
-  '@dom-expressions/compiler-darwin-x64@0.50.0-next.40':
-    resolution: {integrity: sha512-Tbjg6ZQEIhKLKGd/Ep6MKqD76arPdV6SE2d3fkrP4qooIv2gYvAkvUw90qNdZxVHcuyjutrbJE0WpXYY9nSIIQ==}
-    cpu: [x64]
-    os: [darwin]
-
-  '@dom-expressions/compiler-linux-arm64-gnu@0.50.0-next.40':
-    resolution: {integrity: sha512-tIJMY8dPyjiYNSL5uc4JA5l88Sw0WoMwoAilqTTHpGYdCL5GwzGq6ZOV1bndw8XKEYFYfnTr276FDHyYpLtRYQ==}
-    cpu: [arm64]
-    os: [linux]
-    libc: [glibc]
-
-  '@dom-expressions/compiler-linux-x64-gnu@0.50.0-next.40':
-    resolution: {integrity: sha512-H/K/3Ykk8aCSNuKDlv/sgbPdSks+zqFxZ4mzqaGJmlDqEfeaWYXan5fsvwQbACdNDJeKoKLO4GhnlnKlKWjiJg==}
-    cpu: [x64]
-    os: [linux]
-    libc: [glibc]
-
-  '@dom-expressions/compiler-wasm32-wasi@0.50.0-next.40':
-    resolution: {integrity: sha512-2SAfc35FEvvxkUz2yeh/4aNx0s9waZnce4KS64oUMlVpYEFtNBdfnZKCB/bgzJFvTxXjMs+HcU6OInGltH5jHA==}
-    engines: {node: '>=14.0.0'}
-
-  '@dom-expressions/compiler-win32-x64-msvc@0.50.0-next.40':
-    resolution: {integrity: sha512-bBdHMxdfUHtIrS5xrt9udqdGRnGKdYQgKxJNIts+Il3Fs8QGyNwaZpi0tjnlRjYa0+GdWEC3Gw1Pmq/HFXzFeQ==}
-    cpu: [x64]
-    os: [win32]
-
-  '@dom-expressions/compiler@0.50.0-next.40':
-    resolution: {integrity: sha512-RI/kHU+QkLOHo4CQyqLTn9c7sAfl/GEULMsOpS1YqkPJgy7R8MCPWXFN4sI0QDBbM6ePtEyuW+2bsdsXqyxkzQ==}
-
-  '@emnapi/core@1.11.2':
-    resolution: {integrity: sha512-TC8MkTuZUtcTSiFeuC0ksCh9QIJ5+F21MvZ4Wn4ORfYaFJ/0dsiudv5tVkejgwZlwQ39jL9WWDe2lz8x0WglOA==}
-
-  '@emnapi/runtime@1.11.2':
-    resolution: {integrity: sha512-kyOl3X0DuTiT1h2ft8r2fYO8JYtU9a9Xis/zBSiGArNaagCOWx90N1k2wxp18czFDH+OgcWGb5ZP/XMt3dcyPA==}
-
-  '@emnapi/wasi-threads@1.2.2':
-    resolution: {integrity: sha512-c95qOXkHdydNKhscBTebqEC1CVAZpyqOfVfBzQ1qgzyl3gfeldUjIggDbIZgDKsHLgnsM+igH7TJ/eAasaVuMA==}
+  '@emnapi/wasi-threads@1.2.3':
+    resolution: {integrity: sha512-ELEBe8PsLvvJ6QMr0zLt8ffvOHW/dc1m3CEzNMg7aJUv3bMaoDtw2TXyDAwkYBuroxxuHEwhRTLJSe5sya547g==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -522,24 +489,73 @@ packages:
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
 
-  '@solidjs/signals@2.0.0-rc.0':
-    resolution: {integrity: sha512-oKZSfvsCcKw1uJjOGbUkJ+OqlhXLHtZ+rShSyu9KH0lUH7UUwfMfsKeh81JPiQxDDg4YLhEwI38hg0JkwzTdvA==}
-
-  '@solidjs/vite-plugin@3.0.0-next.29':
-    resolution: {integrity: sha512-Vc0pC968jq+ePssfM0XiBowRDYun0LlEv3ql8ie/Eb1kicp4+3oWFn89rQZPQF4AjBxQ6tfIWpiMQXxKSr7nEw==}
+  '@solidjs/babel-plugin@2.0.0-rc.9':
+    resolution: {integrity: sha512-Qd+qY9UCB3gYCWQSS3p9DETHx9igOnQWFo0xqqyFWO9xT0mo3SmAyfHbQXOLlpuwpPC2DJjzjtWqiT/HQHPYYQ==}
     peerDependencies:
-      '@solidjs/web': ^2.0.0-rc.0
-      '@testing-library/jest-dom': ^5.16.6 || ^5.17.0 || ^6.*
-      solid-js: ^2.0.0-rc.0
-      vite: ^6.0.0 || ^7.0.0 || ^8.0.0
+      '@babel/core': ^7.20.12
+      '@tsrx/core': 0.1.63
     peerDependenciesMeta:
+      '@tsrx/core':
+        optional: true
+
+  '@solidjs/compiler-darwin-arm64@2.0.0-rc.9':
+    resolution: {integrity: sha512-pFEu7BYhEuCkwgAdveTkkOTYpkq4IMbGYTwLqOprk6Ts+65rHjrV7Pm+hkoETqaRzX66n1vThsSG/j1NPU8FsA==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@solidjs/compiler-darwin-x64@2.0.0-rc.9':
+    resolution: {integrity: sha512-bxJnKYUvqKyV/hzbgDi2VThb9D8NStr9+RFv1l4rjI8pXZxlqNSPGbISAdzk4DbbXNQdKHNl2ne0M1uuhXPpjA==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@solidjs/compiler-linux-arm64-gnu@2.0.0-rc.9':
+    resolution: {integrity: sha512-UzugKIkZDfMUJR4GqEeYX5bj5N4xl3TvnsxYhPfkDlulszw6RXpnya0l5xrPKY0woXKz4+rPnvUrA8zJjwJKdA==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@solidjs/compiler-linux-x64-gnu@2.0.0-rc.9':
+    resolution: {integrity: sha512-vejdMmYyozeFmOK7uZ/THfIiASqMUYeNOsG8Gcve8LtSUgcGHYxVxcVvw7Aaf2bGyPCjv0AEKblbn/F9Bk1rlw==}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@solidjs/compiler-wasm32-wasi@2.0.0-rc.9':
+    resolution: {integrity: sha512-MvRfGiJhEzn7PJumX8hzKjZjwhmLLa5yym3aG67rG9vs9EB3q2XO+syNUkmBXMMw9WQy3kc/jXh5xmrJz/N3Bg==}
+    engines: {node: '>=14.0.0'}
+
+  '@solidjs/compiler-win32-x64-msvc@2.0.0-rc.9':
+    resolution: {integrity: sha512-u+Jh/5QA5jJf+VXInq/nQ7RINDIZXLI0WgErbeIIpdY0v01SdZ12wqi9P9iQSWIflF9ef0Pwa5MFde3E23xszQ==}
+    cpu: [x64]
+    os: [win32]
+
+  '@solidjs/compiler@2.0.0-rc.9':
+    resolution: {integrity: sha512-TzxMcJDhVswSEL3UtXuUWfFzIyNBx0LN6KAJZ6ryvlElAEdq2T2mpaw/Vn5fMjXcv0bCqas8CVADBhrkDVfPMg==}
+
+  '@solidjs/signals@2.0.0-rc.9':
+    resolution: {integrity: sha512-o3pqiTgpH5NR2DstiKrt9s/6+0YOFtv+MfvLONwLsS247I+EWMMyTu9BkRcgd35UR5Pa1DM16lI1/5uaIMY6Gw==}
+    engines: {node: '>=22.12.0'}
+
+  '@solidjs/vite-plugin@3.0.0-next.44':
+    resolution: {integrity: sha512-P/jIo9khECJft0eS2VCYJq16/JPtqoeBqaw/33VAlov8DSkd/6DU605wUTTZ3ZzpB0BFjDrwlyInjKNxFH0oLQ==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    peerDependencies:
+      '@solidjs/start-devtools': ^1.0.0-next.2
+      '@solidjs/web': ^2.0.0-rc.9
+      '@testing-library/jest-dom': ^5.16.6 || ^5.17.0 || ^6.0.0 || ^7.0.0
+      solid-js: ^2.0.0-rc.9
+      vite: ^8.0.0 || ^9.0.0
+    peerDependenciesMeta:
+      '@solidjs/start-devtools':
+        optional: true
       '@testing-library/jest-dom':
         optional: true
 
-  '@solidjs/web@2.0.0-rc.0':
-    resolution: {integrity: sha512-pYSaA9+dH8H1h/d/ZF/P2kR6omfzFGNcdzKhWTcg9fJghXhn8+5UrXUr2iYxDdYNOXZzxxFQhYHSJ7P4HKDqgw==}
+  '@solidjs/web@2.0.0-rc.9':
+    resolution: {integrity: sha512-pfiWoLDnLc+QYWc7UyLqO+5QrPEf3oTiNmmRC+C+uM6AZ5VH0bZMNPtLM5rJ29LKPiTwQitKV843IQDf/oeyhQ==}
+    engines: {node: '>=22.12.0'}
     peerDependencies:
-      solid-js: ^2.0.0-rc.0
+      solid-js: ^2.0.0-rc.9
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
@@ -603,15 +619,6 @@ packages:
   assertion-error@2.0.1:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
     engines: {node: '>=12'}
-
-  babel-preset-solid@2.0.0-rc.2:
-    resolution: {integrity: sha512-Venq++Aa6+RzGIAyS5vSo3kX1fE8zRreEPCh1eTh5DTjlTft9qZGIG14RSZDv/sjVxT8x5Gs9+21PzxuLe8U+g==}
-    peerDependencies:
-      '@babel/core': ^7.0.0
-      solid-js: ^2.0.0-rc.2
-    peerDependenciesMeta:
-      solid-js:
-        optional: true
 
   baseline-browser-mapping@2.11.23:
     resolution: {integrity: sha512-le521dGVfxM7yRX0EikCoSz+rOK+hHzdDt/E7mG1jOJB/6WAAUuwVroLwaB7ApaUsz5Q0kFlDXLSA9MheUIfRQ==}
@@ -837,21 +844,22 @@ packages:
     resolution: {integrity: sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA==}
     hasBin: true
 
-  seroval-plugins@1.5.6:
-    resolution: {integrity: sha512-HXuLAX2pu/UByPpaeo/TaMfvMIi+1QqIoPJYCcAtU8QkVNwgR6MPlGuCQTErV1JwraaMbYaWVIBX7mppzGLATQ==}
+  seroval-plugins@1.6.7:
+    resolution: {integrity: sha512-4Nk35ttD3DTDJW4hgw5StsVAPeU6qnDFnULAouw6tQ7oLTV/ICXrWpsXo2EE52eSP2joUMazbVf52mFEcADqRw==}
     engines: {node: '>=10'}
     peerDependencies:
       seroval: ^1.0
 
-  seroval@1.5.6:
-    resolution: {integrity: sha512-rVQVWjjSvlINzaQPZH5JFqsqEsIWdTxY3iJZCnTL/5gQbXIRooVZKI60tVCkOVfzcRPejboxO2t0P89dg5mQaA==}
+  seroval@1.6.7:
+    resolution: {integrity: sha512-AeDcLh0yO2SFm9W71essgnSzLV9DI8ZH0x0knXn2DMnUZj728mpLbxjlbB6IqKCmqh8JA3cEqRyGoNkt584JcQ==}
     engines: {node: '>=10'}
 
   siginfo@2.0.0:
     resolution: {integrity: sha512-ybx0WO1/8bSBLEWXZvEd7gMW3Sn3JFlW3TvX1nREbDLRNQNaeNN8WK0meBwPdAaOI7TtRRRJn/Es1zhrrCHu7g==}
 
-  solid-js@2.0.0-rc.0:
-    resolution: {integrity: sha512-3enTJ71VL69nM5p/it2InVBDBt316Cqfij+F0S7VuHZLITc8YV7Rvavjoy52nAKKxYWXM+BcXh2K7KcLTf1zdQ==}
+  solid-js@2.0.0-rc.9:
+    resolution: {integrity: sha512-J/oHWnWqe7S0FeIEdIRKDvyyo+HY/TYKr2PrIB8VlePMWuErDg78QHqdsAV7f6HKa9qhWR/23eqzR/ZRV9ep0g==}
+    engines: {node: '>=22.12.0'}
 
   source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
@@ -897,9 +905,6 @@ packages:
     hasBin: true
     peerDependencies:
       browserslist: '>= 4.21.0'
-
-  validate-html-nesting@1.2.4:
-    resolution: {integrity: sha512-doQi7e8EJ2OWneSG1aZpJluS6A49aZM0+EICXWKm1i6WvqTLmq0tpUcImc4KTWG50mORO0C4YDBtOCSYvElftw==}
 
   vite@8.3.0:
     resolution: {integrity: sha512-lhZBVvEHefgE+HQZC9O7EBJgCU/nVzFNl7vkS4RE0APtWLP02/8QVIkQtzBxPquh7lq5/78NHipTj7ODQ6XuyQ==}
@@ -1195,74 +1200,33 @@ snapshots:
       style-mod: 4.1.3
       w3c-keyname: 2.2.8
 
-  '@daydream/plugin-api@git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)':
+  '@daydream/plugin-api@git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)':
     dependencies:
-      '@solidjs/web': 2.0.0-rc.0(solid-js@2.0.0-rc.0)
-      solid-js: 2.0.0-rc.0
+      '@solidjs/web': 2.0.0-rc.9(solid-js@2.0.0-rc.9)
+      solid-js: 2.0.0-rc.9
     optionalDependencies:
       zod: 4.6.5
 
-  '@daydream/plugin-testing@git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)':
+  '@daydream/plugin-testing@git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)':
     dependencies:
-      '@daydream/plugin-api': git+https://git@github.com:mbavio-phota/daydream.git#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(zod@4.6.5)
-      '@solidjs/web': 2.0.0-rc.0(solid-js@2.0.0-rc.0)
-      solid-js: 2.0.0-rc.0
+      '@daydream/plugin-api': git+https://github.com/mbavio-phota/daydream.git#a1b52ab370bc3788b2315fce515a3f84469e7ef9&path:packages/plugin-api(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
+      '@solidjs/web': 2.0.0-rc.9(solid-js@2.0.0-rc.9)
+      solid-js: 2.0.0-rc.9
     transitivePeerDependencies:
       - zod
 
-  '@dom-expressions/babel-plugin-jsx@0.50.0-next.44(@babel/core@7.29.7)':
+  '@emnapi/core@1.11.3':
     dependencies:
-      '@babel/core': 7.29.7
-      '@babel/helper-module-imports': 7.18.6
-      '@babel/plugin-syntax-jsx': 7.29.7(@babel/core@7.29.7)
-      '@babel/types': 7.29.8
-      html-entities: 2.3.3
-      parse5: 7.3.0
-      validate-html-nesting: 1.2.4
-
-  '@dom-expressions/compiler-darwin-arm64@0.50.0-next.40':
-    optional: true
-
-  '@dom-expressions/compiler-darwin-x64@0.50.0-next.40':
-    optional: true
-
-  '@dom-expressions/compiler-linux-arm64-gnu@0.50.0-next.40':
-    optional: true
-
-  '@dom-expressions/compiler-linux-x64-gnu@0.50.0-next.40':
-    optional: true
-
-  '@dom-expressions/compiler-wasm32-wasi@0.50.0-next.40':
-    dependencies:
-      '@emnapi/core': 1.11.2
-      '@emnapi/runtime': 1.11.2
-      '@napi-rs/wasm-runtime': 1.2.4(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)
-    optional: true
-
-  '@dom-expressions/compiler-win32-x64-msvc@0.50.0-next.40':
-    optional: true
-
-  '@dom-expressions/compiler@0.50.0-next.40':
-    optionalDependencies:
-      '@dom-expressions/compiler-darwin-arm64': 0.50.0-next.40
-      '@dom-expressions/compiler-darwin-x64': 0.50.0-next.40
-      '@dom-expressions/compiler-linux-arm64-gnu': 0.50.0-next.40
-      '@dom-expressions/compiler-linux-x64-gnu': 0.50.0-next.40
-      '@dom-expressions/compiler-wasm32-wasi': 0.50.0-next.40
-      '@dom-expressions/compiler-win32-x64-msvc': 0.50.0-next.40
-
-  '@emnapi/core@1.11.2':
-    dependencies:
-      '@emnapi/wasi-threads': 1.2.2
+      '@emnapi/wasi-threads': 1.2.3
       tslib: 2.8.1
     optional: true
 
-  '@emnapi/runtime@1.11.2':
+  '@emnapi/runtime@1.11.3':
     dependencies:
       tslib: 2.8.1
     optional: true
 
-  '@emnapi/wasi-threads@1.2.2':
+  '@emnapi/wasi-threads@1.2.3':
     dependencies:
       tslib: 2.8.1
     optional: true
@@ -1316,10 +1280,10 @@ snapshots:
 
   '@marijn/find-cluster-break@1.0.4': {}
 
-  '@napi-rs/wasm-runtime@1.2.4(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)':
+  '@napi-rs/wasm-runtime@1.2.4(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)':
     dependencies:
-      '@emnapi/core': 1.11.2
-      '@emnapi/runtime': 1.11.2
+      '@emnapi/core': 1.11.3
+      '@emnapi/runtime': 1.11.3
       '@tybys/wasm-util': 0.10.4
     optional: true
 
@@ -1372,28 +1336,69 @@ snapshots:
 
   '@rolldown/pluginutils@1.0.1': {}
 
-  '@solidjs/signals@2.0.0-rc.0': {}
+  '@solidjs/babel-plugin@2.0.0-rc.9(@babel/core@7.29.7)':
+    dependencies:
+      '@babel/core': 7.29.7
+      '@babel/helper-module-imports': 7.18.6
+      '@babel/plugin-syntax-jsx': 7.29.7(@babel/core@7.29.7)
+      '@babel/types': 7.29.8
+      html-entities: 2.3.3
+      parse5: 7.3.0
 
-  '@solidjs/vite-plugin@3.0.0-next.29(@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0))(solid-js@2.0.0-rc.0)(vite@8.3.0(@types/node@24.13.4))':
+  '@solidjs/compiler-darwin-arm64@2.0.0-rc.9':
+    optional: true
+
+  '@solidjs/compiler-darwin-x64@2.0.0-rc.9':
+    optional: true
+
+  '@solidjs/compiler-linux-arm64-gnu@2.0.0-rc.9':
+    optional: true
+
+  '@solidjs/compiler-linux-x64-gnu@2.0.0-rc.9':
+    optional: true
+
+  '@solidjs/compiler-wasm32-wasi@2.0.0-rc.9':
+    dependencies:
+      '@emnapi/core': 1.11.3
+      '@emnapi/runtime': 1.11.3
+      '@napi-rs/wasm-runtime': 1.2.4(@emnapi/core@1.11.3)(@emnapi/runtime@1.11.3)
+    optional: true
+
+  '@solidjs/compiler-win32-x64-msvc@2.0.0-rc.9':
+    optional: true
+
+  '@solidjs/compiler@2.0.0-rc.9':
+    optionalDependencies:
+      '@solidjs/compiler-darwin-arm64': 2.0.0-rc.9
+      '@solidjs/compiler-darwin-x64': 2.0.0-rc.9
+      '@solidjs/compiler-linux-arm64-gnu': 2.0.0-rc.9
+      '@solidjs/compiler-linux-x64-gnu': 2.0.0-rc.9
+      '@solidjs/compiler-wasm32-wasi': 2.0.0-rc.9
+      '@solidjs/compiler-win32-x64-msvc': 2.0.0-rc.9
+
+  '@solidjs/signals@2.0.0-rc.9': {}
+
+  '@solidjs/vite-plugin@3.0.0-next.44(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(vite@8.3.0(@types/node@24.13.4))':
     dependencies:
       '@ampproject/remapping': 2.3.0
       '@babel/core': 7.29.7
-      '@dom-expressions/compiler': 0.50.0-next.40
-      '@solidjs/web': 2.0.0-rc.0(solid-js@2.0.0-rc.0)
+      '@solidjs/babel-plugin': 2.0.0-rc.9(@babel/core@7.29.7)
+      '@solidjs/compiler': 2.0.0-rc.9
+      '@solidjs/web': 2.0.0-rc.9(solid-js@2.0.0-rc.9)
       '@types/babel__core': 7.20.5
-      babel-preset-solid: 2.0.0-rc.2(@babel/core@7.29.7)(solid-js@2.0.0-rc.0)
       merge-anything: 5.1.7
-      solid-js: 2.0.0-rc.0
+      solid-js: 2.0.0-rc.9
       vite: 8.3.0(@types/node@24.13.4)
       vitefu: 1.1.3(vite@8.3.0(@types/node@24.13.4))
     transitivePeerDependencies:
+      - '@tsrx/core'
       - supports-color
 
-  '@solidjs/web@2.0.0-rc.0(solid-js@2.0.0-rc.0)':
+  '@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9)':
     dependencies:
-      seroval: 1.5.6
-      seroval-plugins: 1.5.6(seroval@1.5.6)
-      solid-js: 2.0.0-rc.0
+      seroval: 1.6.7
+      seroval-plugins: 1.6.7(seroval@1.6.7)
+      solid-js: 2.0.0-rc.9
 
   '@standard-schema/spec@1.1.0': {}
 
@@ -1478,13 +1483,6 @@ snapshots:
       tinyrainbow: 3.1.1
 
   assertion-error@2.0.1: {}
-
-  babel-preset-solid@2.0.0-rc.2(@babel/core@7.29.7)(solid-js@2.0.0-rc.0):
-    dependencies:
-      '@babel/core': 7.29.7
-      '@dom-expressions/babel-plugin-jsx': 0.50.0-next.44(@babel/core@7.29.7)
-    optionalDependencies:
-      solid-js: 2.0.0-rc.0
 
   baseline-browser-mapping@2.11.23: {}
 
@@ -1653,20 +1651,20 @@ snapshots:
 
   semver@6.3.1: {}
 
-  seroval-plugins@1.5.6(seroval@1.5.6):
+  seroval-plugins@1.6.7(seroval@1.6.7):
     dependencies:
-      seroval: 1.5.6
+      seroval: 1.6.7
 
-  seroval@1.5.6: {}
+  seroval@1.6.7: {}
 
   siginfo@2.0.0: {}
 
-  solid-js@2.0.0-rc.0:
+  solid-js@2.0.0-rc.9:
     dependencies:
-      '@solidjs/signals': 2.0.0-rc.0
+      '@solidjs/signals': 2.0.0-rc.9
       csstype: 3.2.3
-      seroval: 1.5.6
-      seroval-plugins: 1.5.6(seroval@1.5.6)
+      seroval: 1.6.7
+      seroval-plugins: 1.6.7(seroval@1.6.7)
 
   source-map-js@1.2.1: {}
 
@@ -1699,8 +1697,6 @@ snapshots:
       browserslist: 4.28.9
       escalade: 3.2.0
       picocolors: 1.1.1
-
-  validate-html-nesting@1.2.4: {}
 
   vite@8.3.0(@types/node@24.13.4):
     dependencies:

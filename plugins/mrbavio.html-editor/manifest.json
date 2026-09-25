@@ -1,8 +1,8 @@
 {
   "id": "mrbavio.html-editor",
   "name": "HTML editor",
-  "version": "0.1.2",
-  "minCore": "0.1.21",
+  "version": "0.2.0",
+  "minCore": "0.1.38",
   "contributes": {
     "panels": [
       "html-editor"
@@ -10,11 +10,15 @@
     "commands": [
       "mrbavio.html-editor.blur",
       "mrbavio.html-editor.undo",
-      "mrbavio.html-editor.delete-element"
+      "mrbavio.html-editor.redo",
+      "mrbavio.html-editor.delete-element",
+      "mrbavio.html-editor.save-over"
     ],
     "shortcuts": {
       "Escape": "mrbavio.html-editor.blur",
       "Mod+Z": "mrbavio.html-editor.undo",
+      "Shift+Mod+Z": "mrbavio.html-editor.redo",
+      "Mod+S": "mrbavio.html-editor.save-over",
       "Delete": "mrbavio.html-editor.delete-element",
       "Backspace": "mrbavio.html-editor.delete-element"
     }

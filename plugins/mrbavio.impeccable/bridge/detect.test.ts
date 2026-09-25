@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
-import { detect, type RunProcess } from "./detect.ts";
+import { detect, fileSafe, type RunProcess } from "./detect.ts";
 
 const FINDINGS = [
   { antipattern: "low-contrast", name: "Low contrast text", severity: "warning", category: "quality", snippet: "3.5:1 (need 4.5:1) — text #767676 on #1b2515", description: "long", file: "/x", line: 0 },
@@ -28,26 +28,74 @@ describe("impeccable_detect's core", () => {
     };
     const report = await detect({
       viewportId: "vp1",
-      element: "el9",
       skillDir: "/skill",
       dir,
       run,
       html: async (input) => {
         calls.push(input);
-        return { viewportId: "vp1", html: "<!doctype html><html></html>", bytes: 29, target: { id: "el9", kept: 3, pruned: 7 } };
+        return { viewportId: "vp1", html: "<!doctype html><html></html>", bytes: 29 };
       },
     });
-    expect(calls[0]).toEqual({ viewport: "vp1", element: "el9" });
-    const file = path.join(dir, "vp1-el9.html");
+    expect(calls[0]).toEqual({ viewport: "vp1" });
+    const file = path.join(dir, "vp1.html");
     expect(calls[1]).toEqual(["/skill/scripts/impeccable", ["detect", "--json", "--no-config", file]]);
+    expect(calls).toHaveLength(2);
     expect(await readFile(file, "utf8")).toBe("<!doctype html><html></html>");
     expect(report).toEqual({
       viewportId: "vp1",
       file,
-      target: { id: "el9", kept: 3, pruned: 7 },
       count: 3,
       byRule: { "tiny-text": 2, "low-contrast": 1 },
       findings: FINDINGS.map(({ antipattern, name, severity, category, snippet }) => ({ antipattern, name, severity, category, snippet })),
+    });
+  });
+
+  test("with an element, the whole page is scanned and scanned again without the target: only what the target adds is answered", async () => {
+    // Elsewhere on the page: a side tab, and a second 10px text like one
+    // of the target's.
+    const SIDE_TAB = { antipattern: "side-tab", name: "Side tab", severity: "warning", category: "slop", snippet: "border-left: 4px", file: "/x", line: 9 };
+    const calls: unknown[] = [];
+    const run: RunProcess = async (file, args) => {
+      calls.push([file, args]);
+      const baseline = String(args.at(-1)).endsWith(".baseline.html");
+      // Line numbers move when the target is taken out; they never count.
+      const found = baseline ? [{ ...FINDINGS[1]!, line: 3 }, SIDE_TAB] : [...FINDINGS, SIDE_TAB];
+      return { code: 2, stdout: JSON.stringify(found), stderr: "" };
+    };
+    // The element is a CSS selector (decision #76); the file is named by a
+    // file-safe spelling of it.
+    const report = await detect({
+      viewportId: "vp1",
+      element: "main > .card:nth-of-type(2)",
+      skillDir: "/skill",
+      dir,
+      run,
+      html: async (input) => {
+        calls.push(input);
+        return {
+          viewportId: "vp1",
+          html: "<!doctype html><html>whole</html>",
+          bytes: 34,
+          target: { selector: "main > .card:nth-of-type(2)", kept: 3 },
+          baseline: "<!doctype html><html>without</html>",
+        };
+      },
+    });
+    expect(calls[0]).toEqual({ viewport: "vp1", element: "main > .card:nth-of-type(2)", baseline: true });
+    const file = path.join(dir, "vp1-main_card_nth-of-type_2.html");
+    const baselineFile = path.join(dir, "vp1-main_card_nth-of-type_2.baseline.html");
+    expect(calls[1]).toEqual(["/skill/scripts/impeccable", ["detect", "--json", "--no-config", file]]);
+    expect(calls[2]).toEqual(["/skill/scripts/impeccable", ["detect", "--json", "--no-config", baselineFile]]);
+    // The page stays for the agent to open; the baseline goes.
+    expect(await readFile(file, "utf8")).toBe("<!doctype html><html>whole</html>");
+    await expect(readFile(baselineFile, "utf8")).rejects.toThrow();
+    expect(report).toEqual({
+      viewportId: "vp1",
+      file,
+      target: { selector: "main > .card:nth-of-type(2)", kept: 3, outside: 2 },
+      count: 2,
+      byRule: { "low-contrast": 1, "tiny-text": 1 },
+      findings: [FINDINGS[0]!, FINDINGS[1]!].map(({ antipattern, name, severity, category, snippet }) => ({ antipattern, name, severity, category, snippet })),
     });
   });
 
@@ -63,5 +111,13 @@ describe("impeccable_detect's core", () => {
       detect({ viewportId: "vp1", skillDir: "/s", dir, html, run: async () => ({ code: 2, stdout: "not json", stderr: "" }) }),
     ).rejects.toThrow(/answered no JSON/);
     await expect(detect({ viewportId: "vp1", skillDir: "/s", dir, html: async () => ({}), run: async () => ({ code: 0, stdout: "[]", stderr: "" }) })).rejects.toThrow(/no page/);
+  });
+
+  test("a selector becomes a file-name part: no separators, never empty, kept short", () => {
+    expect(fileSafe("#hero")).toBe("hero");
+    expect(fileSafe("body > section.pricing:nth-of-type(3)")).toBe("body_section_pricing_nth-of-type_3");
+    expect(fileSafe("../../etc/passwd")).toBe("etc_passwd");
+    expect(fileSafe(">>>")).toBe("element");
+    expect(fileSafe("a".repeat(200))).toHaveLength(80);
   });
 });

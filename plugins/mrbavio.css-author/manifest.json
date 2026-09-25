@@ -1,8 +1,8 @@
 {
   "id": "mrbavio.css-author",
   "name": "CSS author",
-  "version": "0.1.4",
-  "minCore": "0.1.21",
+  "version": "0.1.6",
+  "minCore": "0.1.38",
   "contributes": {
     "gates": [
       "static",
@@ -11,7 +11,7 @@
     "resources": [
       "procedures"
     ],
-    "instructions": "The css-author plugin judges every landing with two BLOCKING gates after the format gate: the static lint (facts from the JSON alone \u2014 a length with no unit, a restated initial value, a container query no ancestor can answer, a font face nothing names) and the necessity lint (each declaration removed in the rendered page and restored; one that changes no element's geometry or computed style at the viewport's width nor at a sweep of other widths is dead). Treat their findings as the Core tools section says. A viewport is authored as a draft the user watches take shape: draft_open is the FIRST call of the task \u2014 the frame, the title and the html \u203a body skeleton with its page background (never a page without one), sent before knowledge_bundle, before any reading, before planning \u2014 then knowledge_bundle {query: <the task in a few words>} ONCE (it returns the format rules with the example nearest the task), then one visual group per draft_append as each is written \u2014 a rule the group shares goes in first, ahead of its elements \u2014 then draft_finalize, which alone lands it. The layout procedures (which formatting context, whether a declaration is needed at all, where in the cascade it goes) are this plugin's: read them once per task with knowledge_read {path: \"mrbavio.css-author/procedures.md\"} (or the `procedures` resource) and judge every declaration by them. The author \u2192 land \u2192 fix workflow is Daydream's own dream-author prompt: start every document task from it.",
+    "instructions": "The css-author plugin judges every landing with two BLOCKING gates after the format gate: the static lint (facts from the page's html and css \u2014 a length with no unit, a restated initial value, a font face nothing names, a class no rule names \u2014 and what matching the page decides: a rule that matches nothing, a declaration another already makes, a container query no ancestor can answer) and the necessity lint (each declaration removed in the rendered page and restored; one that changes no element's geometry or computed style at the viewport's width nor at a sweep of other widths is dead). Their findings name an element by its unique selector and a rule by its selector as written. Treat their findings as the Core tools section says. A viewport is authored as a draft the user watches take shape: draft_open is the FIRST call of the task \u2014 the frame, the title and the html \u203a body skeleton with its page background (never a page without one), sent before knowledge_bundle, before any reading, before planning \u2014 then knowledge_bundle {query: <the task in a few words>} ONCE (it returns the format rules with the example nearest the task), then one visual group per draft_append as each is written \u2014 its markup and the css it needs, a rule the group shares sent with it \u2014 then draft_finalize, which alone lands it. The layout procedures (which formatting context, whether a declaration is needed at all, where in the cascade it goes) are this plugin's: read them once per task with knowledge_read {path: \"mrbavio.css-author/procedures.md\"} (or the `procedures` resource) and judge every declaration by them. The author \u2192 land \u2192 fix workflow is Daydream's own dream-author prompt: start every document task from it.",
     "knowledge": "knowledge"
   },
   "built": "dist/index.js"

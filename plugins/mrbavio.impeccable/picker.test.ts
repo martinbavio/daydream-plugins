@@ -26,9 +26,9 @@ describe("the picker's line: first word the verb, the rest the brief", () => {
   });
 
   test("a pick carries its brief, or none", () => {
-    expect(sessionState({ seq: 1, exit: false, pick: { verb: "bolder", viewportId: "v", elementId: null, brief: "louder", at: 1 } }).pick).toEqual({
-      verb: "bolder", viewportId: "v", elementId: null, brief: "louder", at: 1,
+    expect(sessionState({ seq: 1, exit: false, pick: { verb: "bolder", viewportId: "v", element: null, brief: "louder", round: "r1", at: 1 } }).pick).toEqual({
+      verb: "bolder", viewportId: "v", element: null, brief: "louder", round: "r1", at: 1,
     });
-    expect(sessionState({ seq: 1, exit: false, pick: { verb: "bolder", viewportId: "v", elementId: null, brief: 3, at: 1 } }).pick).toBeNull();
+    expect(sessionState({ seq: 1, exit: false, pick: { verb: "bolder", viewportId: "v", element: null, brief: 3, at: 1 } }).pick).toBeNull();
   });
 });

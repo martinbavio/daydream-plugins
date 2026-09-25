@@ -1,30 +1,23 @@
 // The necessity lint against real layout (docs/agent-css-knowledge-prd.md,
-// "Testing Decisions", seam 1): a document goes in, findings come out, and
+// "Testing Decisions", seam 1): a page goes in, findings come out, and
 // every assertion is on the findings' shape and words — never on how the
 // lint decided. Real Chromium only (vite.config.ts): the lint removes
-// declarations inside a live iframe core mounts (`dd.mountViewport`) and
+// declarations from a live iframe core mounts (`dd.mountViewport`) and
 // reads the CSS engine's answer back. The API object is a test kernel's.
 import { afterAll, afterEach, describe, expect, test } from "vitest";
+import { commands } from "vitest/browser";
 
-import type {
-  ConditionalLayer,
-  DreamDocument,
-  DreamElement,
-  DreamViewport,
-  Finding,
-  StyleRule,
-} from "@daydream/plugin-api";
+import type { DreamDocument, Finding } from "@daydream/plugin-api";
 import {
-  createElement,
+  coreApi,
+  createPageItem,
   createTestKernel,
-  createViewportItem,
-  viewportItems,
 } from "@daydream/plugin-testing";
 
 import {
   isExemptProperty,
   necessityLint as lintWith,
-  probeWidths as probeWidthsWith,
+  probeWidths,
   SWEEP_WIDTHS,
   widthsText,
   type NecessityOptions,
@@ -38,66 +31,33 @@ const necessityLint = (
   options?: NecessityOptions,
 ): Promise<Finding[]> => lintWith(kernel.dd, doc, options);
 
-/** The sweep for a viewport rendered at its own frame width. */
-const probeWidths = (vp: DreamViewport): number[] =>
-  probeWidthsWith(kernel.dd.core, vp, vp.frame!.width);
-
 afterEach(() => {
   // Every lint disposes its own iframe; a leftover is a bug, not a
   // fixture to clean.
   expect(document.querySelectorAll("iframe")).toHaveLength(0);
 });
 
-interface Spec {
-  id?: string;
-  tag?: string;
-  label?: string;
-  text?: string;
-  styles?: Record<string, string>;
-  layers?: ConditionalLayer[];
-  children?: DreamElement[];
-  /** Real HTML attributes — a rule's selector hook (decision #71),
-   * never the kernel id `id` already addresses above. */
-  attrs?: Record<string, string>;
-}
-
-function build(spec: Spec): DreamElement {
-  const element = createElement({
-    tag: spec.tag ?? "div",
-    styles: spec.styles ?? {},
-    children: spec.children ?? [],
-    ...(spec.attrs === undefined ? {} : { attrs: spec.attrs }),
-  });
-  if (spec.id !== undefined) element.id = spec.id;
-  if (spec.label !== undefined) element.label = spec.label;
-  if (spec.text !== undefined) element.text = spec.text;
-  if (spec.layers !== undefined) element.conditionals = spec.layers;
-  return element;
-}
-
-/** html › body (margin 0) › children, in one viewport of the given frame,
- * with an optional `sheet` (decision #71, plan phase 9). */
+/** One page: html › body (its own style `margin: 0` unless given) › the
+ * markup, the css, a frame, an id (`v1` unless given). */
 function makeDocument(
-  frame: { width: number; height?: number },
-  bodyChildren: DreamElement[],
-  bodyStyles: Record<string, string> = { margin: "0" },
-  sheet?: StyleRule[],
+  frame: { width: number; height?: number } | undefined,
+  body: string,
+  css = "",
+  options: { bodyStyle?: string; id?: string } = {},
 ): DreamDocument {
-  const vp: DreamViewport = createViewportItem(
-    build({
-      tag: "html",
-      children: [
-        build({
-          tag: "body",
-          label: "Body",
-          styles: bodyStyles,
-          children: bodyChildren,
-        }),
-      ],
-    }),
-    { frame, ...(sheet === undefined ? {} : { sheet }) },
-  );
-  return { version: 6, items: [vp] };
+  const bodyStyle = options.bodyStyle ?? "margin: 0";
+  return {
+    version: 7,
+    items: [
+      createPageItem(
+        {
+          html: `<!doctype html><html><head><title>t</title></head><body style="${bodyStyle}">${body}</body></html>`,
+          css,
+        },
+        { id: options.id ?? "v1", ...(frame === undefined ? {} : { frame }) },
+      ),
+    ],
+  };
 }
 
 const FRAME = { width: 400, height: 300 };
@@ -114,356 +74,545 @@ function properties(findings: Finding[]): string[] {
   return findings.map((f) => f.property ?? "");
 }
 
+/** Where a test serves a web font from, written for the test and removed
+ * after it (a path from the checkout's root, as `commands` takes it and
+ * the test server serves it). */
+const SERVED_FONT = "plugins/mrbavio.css-author/necessity-test-font.ttf";
+
+/** A TrueType font, base64: every printable ASCII character is one glyph
+ * (a triangle) 1000 units wide, so text in it is wider than in any
+ * fallback. Only the tables the browser's font sanitizer requires. */
+function wideFont(): string {
+  const u16 = (...values: number[]): number[] =>
+    values.flatMap((v) => [(v >> 8) & 255, v & 255]);
+  const u32 = (...values: number[]): number[] =>
+    values.flatMap((v) => u16((v >>> 16) & 0xffff, v & 0xffff));
+  const names = ["Wide", "Regular", "Wide Regular", "Wide-Regular"];
+  const records: number[] = [];
+  let at = 0;
+  for (const [i, name] of names.entries()) {
+    records.push(...u16(3, 1, 0x409, [1, 2, 4, 6][i]!, name.length * 2, at));
+    at += name.length * 2;
+  }
+  // Glyph 1 is the triangle; 0 (.notdef) and 2–95 are empty, and take
+  // the last advance, 1000.
+  const glyph = [
+    ...u16(1, 0, 0, 500, 700, 2, 0),
+    1, 1, 1,
+    ...u16(0, 500, -250, 0, 0, 700),
+    0,
+  ];
+  const tables: Record<string, number[]> = {
+    "OS/2": [
+      ...u16(4, 1000, 400, 5, 0, 650, 700, 0, 140, 650, 700, 0, 480, 50, 250, 0),
+      ...new Array<number>(10).fill(0),
+      ...u32(1, 0, 0, 0),
+      ...Array.from("NONE", (c) => c.charCodeAt(0)),
+      ...u16(0x40, 0x20, 0x7e, 800, -200, 0, 800, 200),
+      ...u32(1, 0),
+      ...u16(500, 700, 0, 0x20, 1),
+    ],
+    // Format 4: 0x20–0x7e onto glyphs 1–95.
+    cmap: [
+      ...u16(0, 1, 3, 1),
+      ...u32(12),
+      ...u16(4, 32, 0, 4, 4, 1, 0, 0x7e, 0xffff, 0, 0x20, 0xffff, 1 - 0x20, 1, 0, 0),
+    ],
+    glyf: glyph,
+    head: [
+      ...u32(0x10000, 0x10000, 0, 0x5f0f3cf5),
+      ...u16(0x000b, 1000),
+      ...u32(0, 0, 0, 0),
+      ...u16(0, 0, 500, 700, 0, 8, 2, 0, 0),
+    ],
+    hhea: [...u32(0x10000), ...u16(800, -200, 0, 1000, 0, 0, 500, 1, 0, 0, 0, 0, 0, 0, 0, 2)],
+    hmtx: u16(500, 0, 1000, 0, ...new Array<number>(94).fill(0)),
+    loca: u16(0, 0, ...new Array<number>(95).fill(glyph.length / 2)),
+    maxp: [...u32(0x10000), ...u16(96, 3, 1, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0)],
+    name: [
+      ...u16(0, names.length, 6 + records.length),
+      ...records,
+      ...names.flatMap((name) => u16(...Array.from(name, (c) => c.charCodeAt(0)))),
+    ],
+    post: [...u32(0x30000, 0), ...u16(-100, 50), ...u32(0, 0, 0, 0, 0)],
+  };
+  const tags = Object.keys(tables).sort();
+  const directory = [
+    ...u32(0x10000),
+    ...u16(tags.length, 128, 3, tags.length * 16 - 128),
+  ];
+  const body: number[] = [];
+  let offset = 12 + tags.length * 16;
+  for (const tag of tags) {
+    const data = tables[tag]!;
+    while (data.length % 4 !== 0) data.push(0);
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      sum = (sum + ((data[i]! << 24) | (data[i + 1]! << 16) | (data[i + 2]! << 8) | data[i + 3]!)) >>> 0;
+    }
+    directory.push(...Array.from(tag, (c) => c.charCodeAt(0)), ...u32(sum, offset, data.length));
+    body.push(...data);
+    offset += data.length;
+  }
+  return btoa(String.fromCharCode(...directory, ...body));
+}
+
 describe("dead and live declarations", () => {
   test("a redundant position: static is dead; a width that sizes a box is live", async () => {
-    const box = build({
-      id: "box",
-      label: "Box",
-      styles: { position: "static", width: "120px", height: "40px" },
-    });
-    const findings = await necessityLint(makeDocument(FRAME, [box]));
+    const findings = await necessityLint(
+      makeDocument(FRAME, '<div id="box" style="position: static; width: 120px; height: 40px"></div>'),
+    );
     expect(findings).toEqual([
       {
         tier: "necessity",
         severity: "blocking",
-        elementId: "box",
+        elementId: "#box",
         property: "position",
-        message: `position: static on Box changes nothing (in base) at ${sweptAt(400)}`,
+        message: `position: static on \`#box\` changes nothing at ${sweptAt(400)}`,
       },
     ]);
   });
 
   test("a color on a parent that a child inherits is live", async () => {
-    const child = build({ id: "child", text: "hello" });
-    const parent = build({
-      id: "parent",
-      styles: { color: "rgb(200, 0, 0)" },
-      children: [child],
-    });
-    const findings = await necessityLint(makeDocument(FRAME, [parent]));
+    const findings = await necessityLint(
+      makeDocument(FRAME, '<div id="parent" style="color: rgb(200, 0, 0)"><div id="child">hello</div></div>'),
+    );
     expect(findings).toEqual([]);
   });
 
   test("a custom property nobody reads is dead; one a child reads is live", async () => {
-    const reader = build({
-      id: "reader",
-      styles: { width: "var(--w)", height: "20px" },
-    });
-    const parent = build({
-      id: "parent",
-      styles: { "--w": "150px", "--unused": "1" },
-      children: [reader],
-    });
-    const findings = await necessityLint(makeDocument(FRAME, [parent]));
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div id="parent" style="--w: 150px; --unused: 1"><div id="reader" style="width: var(--w); height: 20px"></div></div>',
+      ),
+    );
     expect(properties(findings)).toEqual(["--unused"]);
     expect(findings[0]!.message).toBe(
-      `--unused: 1 on div#parent changes nothing (in base) at ${sweptAt(400)}`,
+      `--unused: 1 on \`#parent\` changes nothing at ${sweptAt(400)}`,
     );
   });
 
-  test("a media layer for a width the frame is not at is live (the sweep reaches its breakpoint); one no width can satisfy is dead", async () => {
-    const box = build({
-      id: "box",
-      label: "Box",
-      styles: { height: "20px" },
-      layers: [
-        { condition: "@media (width >= 300px)", styles: { width: "200px" } },
-        { condition: "@media (width >= 900px)", styles: { width: "300px" } },
-        { condition: "@media print", styles: { width: "10px" } },
-      ],
-    });
-    const findings = await necessityLint(makeDocument(FRAME, [box]));
-    expect(findings).toEqual([
-      {
-        tier: "necessity",
-        severity: "blocking",
-        elementId: "box",
-        property: "width",
-        layer: "@media print",
-        message: `width: 10px on Box changes nothing (in @media print) at ${sweptAt(400, 300, 900)}`,
-      },
-    ]);
-  });
-
-  test("a base a matching layer overrides is judged WITH the layer, so it is live", async () => {
-    const box = build({
-      id: "box",
-      styles: { width: "100px", height: "20px" },
-      layers: [
-        { condition: "@media (width >= 300px)", styles: { width: "200px" } },
-      ],
-    });
-    const findings = await necessityLint(makeDocument(FRAME, [box]));
+  test("a media rule for a width the frame is not at is live (the sweep reaches its breakpoint); one for print, which neither the frame nor a swept width is, is not judged", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div id="box" style="height: 20px"></div>',
+        `@media (width >= 300px) { #box { width: 200px; } }
+@media (width >= 900px) { #box { width: 300px; } }
+@media print { #box { width: 10px; } }`,
+      ),
+    );
     expect(findings).toEqual([]);
   });
 
-  test("a base that is initial anyway stays dead even when a dead layer restates the property", async () => {
-    const box = build({
-      id: "box",
-      styles: { position: "static", height: "20px" },
-      layers: [{ condition: "@media print", styles: { position: "relative" } }],
-    });
-    const findings = await necessityLint(makeDocument(FRAME, [box]));
-    expect(findings.map((f) => [f.property, f.layer])).toEqual([
-      ["position", undefined],
-      ["position", "@media print"],
-    ]);
+  test("a rule under a height, orientation or preference query that neither the frame nor a swept width meets is not judged; one they meet is", async () => {
+    // The frame is 400 × 300, and every swept width is wider than 300: a
+    // landscape window at every one of them, never 2000px tall, and the
+    // test browser prefers light.
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div id="box" style="height: 20px"></div>',
+        `@media (min-height: 2000px) { #box { position: static; } }
+@media (orientation: portrait) { #box { position: static; } }
+@media (prefers-color-scheme: dark) { #box { position: static; } }
+@media (max-height: 1000px) { #box { position: static; } }
+#box { @media (height > 1000px) { position: static; } }`,
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([[3, "position"]]);
   });
 
-  test("a base paired with a layer the sweep reaches is live: the base is the other branch", async () => {
-    const box = build({
-      id: "box",
-      styles: { position: "static", height: "20px" },
-      layers: [
-        {
-          condition: "@media (width >= 900px)",
-          styles: { position: "relative" },
-        },
-      ],
-    });
-    expect(await necessityLint(makeDocument(FRAME, [box]))).toEqual([]);
+  test("a rule under an @supports this browser fails is not judged; one it passes is", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div id="box" style="height: 20px"></div>',
+        `@supports not (display: grid) { #box { position: static; } }
+@supports (display: grid) { #box { position: static; } }`,
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([[1, "position"]]);
   });
 
-  test("a container-layer declaration that matches is live", async () => {
-    const card = build({
-      id: "card",
-      styles: { height: "20px" },
-      layers: [
-        { condition: "@container (width >= 200px)", styles: { width: "50%" } },
-      ],
-    });
-    const holder = build({
-      id: "holder",
-      styles: { "container-type": "inline-size", width: "300px" },
-      children: [card],
-    });
-    const findings = await necessityLint(makeDocument(FRAME, [holder]));
+  test("@starting-style declarations are never judged: they apply before an element's first style, which no removal and re-read can see", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div class="a" style="height: 20px"></div><p class="b">b</p>',
+        `.a { opacity: 0.5; transition: opacity 1s; }
+@starting-style { .a { opacity: 0; } }
+.b { color: red; @starting-style { color: blue; } }`,
+      ),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  test("a base a matching conditional branch of the same selector overrides is judged WITH the branch, so it is live", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div id="box"></div>',
+        "#box { width: 100px; height: 20px; }\n@media (width >= 300px) { #box { width: 200px; } }",
+      ),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  test("a base an @supports branch overrides at every width is judged with it — a nested branch too — so a fallback stays", async () => {
+    expect(
+      await necessityLint(
+        makeDocument(
+          FRAME,
+          '<div id="box" style="height: 20px"><p>a</p><p>b</p></div>',
+          "#box { display: block; @supports (display: grid) { display: grid; gap: 4px; } }",
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a base that is initial anyway stays dead even when a branch that never applies restates the property", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div id="box"></div>',
+        "#box { position: static; height: 20px; }\n@media print { #box { position: relative; } }",
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([[0, "position"]]);
+  });
+
+  test("a base paired with a branch the sweep reaches is live: the base is the other branch", async () => {
+    expect(
+      await necessityLint(
+        makeDocument(
+          FRAME,
+          '<div id="box"></div>',
+          "#box { position: static; height: 20px; }\n@media (width >= 900px) { #box { position: relative; } }",
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a container-query declaration that matches is live", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div id="holder" style="container-type: inline-size; width: 300px"><div id="card" style="height: 20px"></div></div>',
+        "@container (width >= 200px) { #card { width: 50%; } }",
+      ),
+    );
     expect(findings).toEqual([]);
   });
 
   test("an exempt transition, animation or cursor is never reported, dead or not", async () => {
-    const box = build({
-      id: "box",
-      styles: {
-        transition: "width 200ms",
-        "transition-delay": "10ms",
-        animation: "none",
-        cursor: "pointer",
-        height: "20px",
-      },
-    });
-    const findings = await necessityLint(makeDocument(FRAME, [box]));
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div id="box" style="transition: width 200ms; transition-delay: 10ms; animation: none; cursor: pointer; height: 20px"></div>',
+      ),
+    );
     expect(findings).toEqual([]);
     expect(isExemptProperty("-webkit-transition")).toBe(true);
     expect(isExemptProperty("animation-name")).toBe(true);
     expect(isExemptProperty("cursor")).toBe(true);
-    for (const live of [
-      "will-change",
-      "pointer-events",
-      "user-select",
-      "width",
-    ]) {
+    for (const live of ["will-change", "pointer-events", "user-select", "width"]) {
       expect(isExemptProperty(live), live).toBe(false);
     }
   });
 
   test("a transition on the element never makes its other declarations read dead", async () => {
-    const box = build({
-      id: "box",
-      styles: {
-        transition: "all 200ms",
-        opacity: ".5",
-        padding: "10px",
-        color: "rgb(0, 100, 0)",
-        height: "20px",
-      },
-    });
-    const parent = build({
-      id: "parent",
-      styles: {
-        "transition-property": "all",
-        "transition-duration": "1s",
-        gap: "9px",
-        display: "grid",
-      },
-      children: [box],
-    });
-    const findings = await necessityLint(makeDocument(FRAME, [parent]));
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div id="parent" style="transition-property: all; transition-duration: 1s; gap: 9px; display: grid"><div id="box" style="transition: all 200ms; opacity: .5; padding: 10px; color: rgb(0, 100, 0); height: 20px"></div></div>',
+      ),
+    );
     expect(findings).toEqual([]);
   });
 
-  test("a dropped prelude is skipped, not reported", async () => {
-    const box = build({
-      id: "box",
-      styles: { height: "20px" },
-      layers: [{ condition: "&:visited", styles: { width: "1px" } }],
-    });
-    const findings = await necessityLint(makeDocument(FRAME, [box]));
+  test("a rule whose selector the browser refuses is skipped, not reported: it is the static gate's dead rule", async () => {
+    const findings = await necessityLint(
+      makeDocument(FRAME, '<div id="box" style="height: 20px"></div>', "#box:nope { width: 1px; }"),
+    );
     expect(findings).toEqual([]);
   });
 
-  test("a state layer is never judged: nothing hovers a measured page (decision #53)", async () => {
-    const box = build({
-      id: "box",
-      styles: { height: "20px" },
-      layers: [{ condition: "&:hover", styles: { width: "1px" } }],
-    });
-    const findings = await necessityLint(makeDocument(FRAME, [box]));
-    expect(findings).toEqual([]);
+  test("a state rule is never judged: nothing hovers a measured page (decision #53), nested or not", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div id="box" style="height: 20px"></div>',
+        "#box:hover { width: 1px; }\n#box { &:focus-within { width: 2px; } }",
+      ),
+    );
+    expect(findings.map((f) => f.message)).toEqual([]);
   });
 
   test("declarations on the skeleton (html, body) are checked too", async () => {
-    const doc = makeDocument(FRAME, [build({ styles: { height: "10px" } })], {
-      margin: "0",
-      display: "block",
-    });
-    const findings = await necessityLint(doc);
+    const findings = await necessityLint(
+      makeDocument(FRAME, '<div style="height: 10px"></div>', "", {
+        bodyStyle: "margin: 0; display: block",
+      }),
+    );
     expect(properties(findings)).toEqual(["display"]);
-    expect(findings[0]!.message).toMatch(/on Body changes nothing/);
+    expect(findings[0]!.message).toMatch(/^display: block on `body` changes nothing/);
+  });
+
+  test("two declarations of one property in a block are one judgement: the earlier is a fallback, and where both agree neither is dead alone", async () => {
+    expect(
+      await necessityLint(
+        makeDocument(FRAME, '<div id="box"></div>', "#box { height: 100vh; height: 100dvh; }"),
+      ),
+    ).toEqual([]);
+    // Judged together, a pair that changes nothing is named by its last.
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div id="box" style="height: 20px; position: relative; position: static"></div>',
+      ),
+    );
+    expect(findings.map((f) => f.message)).toEqual([
+      `position: static on \`#box\` changes nothing at ${sweptAt(400)}`,
+    ]);
+  });
+
+  test("a declaration the parser drops is dead; another engine's prefixed property is not judged", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div id="box" style="height: 20px"></div>',
+        "#box { colr: red; -moz-appearance: none; }",
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([[0, "colr"]]);
+  });
+
+  test("a page's web font survives every removal: the reads stay on the loaded face", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<p id="text">Some words in the face</p>',
+        '@font-face { font-family: "Local Face"; src: local("Arial"); }\n#text { font-family: "Local Face", serif; position: static; }',
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([[0, "position"]]);
+  });
+
+  test("an element's own declaration a layered or scoped rule restates is judged with that rule, as a plain one is: the match lint's redundancy, not a dead line", async () => {
+    for (const css of [
+      ".card { color: red; }",
+      "@layer base { .card { color: red; } }",
+      "@scope (body) { .card { color: red; } }",
+    ]) {
+      const findings = await necessityLint(
+        makeDocument(FRAME, '<p class="card" style="color: red">x</p>', css),
+      );
+      expect(findings, css).toEqual([]);
+    }
+  });
+
+  test("a served web font survives every removal: declared at the top or inside a group rule, on a page with a layer or without", async () => {
+    // Served `no-cache`, as the test server serves it: a face dropped and
+    // asked for again arrives later, and a read in between would see the
+    // fallback face. A sheet parsed again drops the faces it holds; with
+    // an `@layer` in the page, every face of the page.
+    await commands.writeFile(SERVED_FONT, wideFont(), "base64");
+    try {
+      const url = new URL(`/${SERVED_FONT}`, location.href).href;
+      const face = `@font-face { font-family: "Wide"; src: url(${url}); }`;
+      for (const css of [
+        face,
+        `@media (width >= 1px) { ${face} }`,
+        `@supports (display: grid) { ${face} }`,
+        `@layer fonts { ${face} }`,
+        `${face}\n@layer base;`,
+      ]) {
+        const findings = await necessityLint(
+          makeDocument(
+            FRAME,
+            '<p id="text">Some words in the face</p>',
+            `${css}\n#text { font-family: "Wide", serif; position: static; }`,
+          ),
+        );
+        expect(findings.map((f) => [f.rule, f.property]), css).toEqual([[0, "position"]]);
+      }
+    } finally {
+      await commands.removeFile(SERVED_FONT);
+    }
+  });
+
+  test("a `<style>` the markup keeps in a noscript is never taken for the page's css", async () => {
+    // The kernel keeps a noscript's stylesheet in the markup, and the
+    // measurer's copy (no scripting there) parses it as a `<style>` in the
+    // head, before the page's own.
+    const findings = await necessityLint({
+      version: 7,
+      items: [
+        createPageItem(
+          {
+            html: '<!doctype html><html><head><noscript><style>#box { color: red; }</style></noscript></head><body style="margin: 0"><div id="box" style="height: 20px"></div></body></html>',
+            css: "#box { position: static; }",
+          },
+          { id: "v1", frame: FRAME },
+        ),
+      ],
+    });
+    expect(findings.map((f) => [f.rule, f.property, f.message])).toEqual([
+      [
+        0,
+        "position",
+        `position: static in rule \`#box\` of viewport v1 changes nothing at ${sweptAt(400)}`,
+      ],
+    ]);
+  });
+
+  test("an element is named by its selector in the stored markup, which still holds an element the safety walk removed", async () => {
+    // The mount drops the `<script>`, so `#box` is unique there; in the
+    // markup an agent reads and addresses, it is not.
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<script id="box"></script><div id="box" style="position: static; height: 40px"></div>',
+      ),
+    );
+    expect(findings.map((f) => [f.elementId, f.message])).toEqual([
+      ["div", `position: static on \`div\` changes nothing at ${sweptAt(400)}`],
+    ]);
+  });
+});
+
+describe("an image the lint's copy could not load", () => {
+  // `assets/…` with no asset base is a url the test server answers 404:
+  // the image is complete with natural width 0, laid out as its alt text,
+  // whose box no width or height asked of it changes.
+  const broken = (style: string): string =>
+    `<img src="assets/missing.png" alt="missing" style="${style}">`;
+
+  test("its sizing and object-* declarations, its own or a rule's, are not judged, and one advisory says so", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        `<div id="frame">${broken("position: static; height: 50vh; object-fit: cover; object-position: 50% 40%")}</div>`,
+        "img { width: 100%; max-height: 80vh; }",
+      ),
+    );
+    expect(findings).toEqual([
+      {
+        tier: "necessity",
+        severity: "blocking",
+        elementId: "img",
+        property: "position",
+        message: `position: static on \`img\` changes nothing at ${sweptAt(400)}`,
+      },
+      {
+        tier: "necessity",
+        severity: "advisory",
+        message:
+          "An image could not be loaded in the necessity lint's copy of viewport v1 (`img`), so its sizing and object-* declarations were not judged",
+      },
+    ]);
+  });
+
+  test("one advisory per viewport, naming the first three images and counting the rest", async () => {
+    const findings = await necessityLint(
+      makeDocument(FRAME, Array.from({ length: 5 }, () => broken("height: 40px")).join("")),
+    );
+    expect(findings.map((f) => [f.severity, f.message])).toEqual([
+      [
+        "advisory",
+        "5 images could not be loaded in the necessity lint's copy of viewport v1 (`img:nth-of-type(1)`, `img:nth-of-type(2)`, `img:nth-of-type(3)` and 2 more), so their sizing and object-* declarations were not judged",
+      ],
+    ]);
   });
 });
 
 /** A container-typed holder (full width, or the given one) around a
- * two-item grid whose base is one column and whose container layer is two.
- * `justify-content: start` keeps the base observable: a stretching grid's
- * implicit auto column is as wide as an explicit `1fr` one, and the
- * browser would (rightly) call that base dead. */
-function responsiveGrid(holderWidth?: string, labels = true): DreamElement {
-  const grid = build({
-    id: "grid",
-    ...(labels ? { label: "Grid" } : {}),
-    styles: {
-      display: "grid",
-      "justify-content": "start",
-      "grid-template-columns": "1fr",
-    },
-    layers: [
-      {
-        condition: "@container (width >= 400px)",
-        styles: { "grid-template-columns": "1fr 1fr" },
-      },
-    ],
-    children: [
-      build({ id: "a", text: "a", styles: { height: "10px" } }),
-      build({ id: "b", text: "b", styles: { height: "10px" } }),
-    ],
-  });
-  return build({
-    id: "holder",
-    ...(labels ? { label: "Holder" } : {}),
-    styles: {
-      "container-type": "inline-size",
-      ...(holderWidth === undefined ? {} : { width: holderWidth }),
-    },
-    children: [grid],
-  });
-}
-
-/** Fresh ids for a second copy of the same tree (ids are unique across a
- * document; correspondence never uses them). */
-function reid(el: DreamElement, suffix: string): DreamElement {
-  el.id = `${el.id}-${suffix}`;
-  el.children.forEach((child) => reid(child, suffix));
-  return el;
+ * two-item grid whose base is one column and whose `@container` branch is
+ * two. `justify-content: start` keeps the base observable: a stretching
+ * grid's implicit auto column is as wide as an explicit `1fr` one, and
+ * the browser would (rightly) call that base dead. */
+function responsiveGrid(holderWidth?: string): { body: string; css: string } {
+  const width = holderWidth === undefined ? "" : `; width: ${holderWidth}`;
+  return {
+    body: `<div id="holder" style="container-type: inline-size${width}"><div class="grid"><div style="height: 10px">a</div><div style="height: 10px">b</div></div></div>`,
+    css: `.grid { display: grid; justify-content: start; grid-template-columns: 1fr; }
+@container (width >= 400px) { .grid { grid-template-columns: 1fr 1fr; } }`,
+  };
 }
 
 function twoViewports(
   widths: [number, number],
-  content: (width: number) => DreamElement,
+  content: (width: number) => { body: string; css: string },
 ): DreamDocument {
-  const doc = makeDocument({ width: widths[0], height: 300 }, [
-    content(widths[0]),
-  ]);
-  const second = makeDocument({ width: widths[1], height: 300 }, [
-    reid(content(widths[1]), "2"),
-  ]);
-  doc.items.push(second.items[0]!);
+  const first = content(widths[0]);
+  const second = content(widths[1]);
+  const doc = makeDocument({ width: widths[0], height: 300 }, first.body, first.css);
+  doc.items.push(
+    makeDocument({ width: widths[1], height: 300 }, second.body, second.css, { id: "v2" })
+      .items[0]!,
+  );
   return doc;
 }
 
-describe("a correct conditional document lands", () => {
-  test("single 900-wide viewport: a base the container layer overrides is live", async () => {
-    const doc = makeDocument({ width: 900, height: 300 }, [responsiveGrid()]);
-    expect(await necessityLint(doc)).toEqual([]);
+describe("a correct conditional page lands", () => {
+  test("single 900-wide viewport: a base the container branch overrides is live", async () => {
+    const { body, css } = responsiveGrid();
+    expect(await necessityLint(makeDocument({ width: 900, height: 300 }, body, css))).toEqual([]);
   });
 
-  test("the layer never matching: the layer is dead, the base live", async () => {
-    const doc = makeDocument({ width: 900, height: 300 }, [
-      responsiveGrid("300px"),
-    ]);
-    expect(await necessityLint(doc)).toEqual([
+  test("the branch never matching: the branch is dead, the base live", async () => {
+    const { body, css } = responsiveGrid("300px");
+    expect(await necessityLint(makeDocument({ width: 900, height: 300 }, body, css))).toEqual([
       {
         tier: "necessity",
         severity: "blocking",
-        elementId: "grid",
+        rule: 1,
         property: "grid-template-columns",
-        layer: "@container (width >= 400px)",
-        message: `grid-template-columns: 1fr 1fr on Grid changes nothing (in @container (width >= 400px)) at ${sweptAt(900)}`,
+        message: `grid-template-columns: 1fr 1fr in rule \`.grid\` in \`@container (width >= 400px)\` of viewport v1 changes nothing at ${sweptAt(900)}`,
       },
     ]);
   });
 
-  test("two viewports (360/900) of the same labelled tree: no findings", async () => {
-    const doc = twoViewports([360, 900], () => responsiveGrid());
-    expect(await necessityLint(doc)).toEqual([]);
+  test("two viewports (360/900) of the same page: no findings", async () => {
+    expect(await necessityLint(twoViewports([360, 900], () => responsiveGrid()))).toEqual([]);
   });
 
   test("a declaration dead in both viewports is one finding, named from the first", async () => {
-    const doc = twoViewports([360, 900], () =>
-      build({
-        id: "box",
-        label: "Box",
-        styles: { position: "static", height: "10px" },
-      }),
-    );
-    expect(await necessityLint(doc)).toEqual([
+    const box = () => ({ body: '<div id="box" style="position: static; height: 10px"></div>', css: "" });
+    expect(await necessityLint(twoViewports([360, 900], box))).toEqual([
       {
         tier: "necessity",
         severity: "blocking",
-        elementId: "box",
+        elementId: "#box",
         property: "position",
-        message: `position: static on Box changes nothing (in base) at ${sweptAt(360)}`,
+        message: `position: static on \`#box\` changes nothing at ${sweptAt(360)}`,
       },
     ]);
   });
 
-  test("without labels, elements correspond by tree path", async () => {
-    // Dead in both → one finding; the layer dead at 360 but live at 900 →
-    // none: both decided by path alone.
-    const dead = twoViewports([360, 900], () =>
-      build({ id: "box", styles: { position: "static", height: "10px" } }),
-    );
-    expect((await necessityLint(dead)).map((f) => f.elementId)).toEqual([
-      "box",
-    ]);
-    const responsive = twoViewports([360, 900], () =>
-      responsiveGrid(undefined, false),
-    );
-    expect(await necessityLint(responsive)).toEqual([]);
+  test("elements without ids correspond by their unique selector", async () => {
+    // Dead in both → one finding; the branch dead at 360 but live at 900
+    // → none.
+    const dead = twoViewports([360, 900], () => ({
+      body: '<div style="position: static; height: 10px"></div>',
+      css: "",
+    }));
+    expect((await necessityLint(dead)).map((f) => f.elementId)).toEqual(["div"]);
+    expect(await necessityLint(twoViewports([360, 900], () => responsiveGrid()))).toEqual([]);
   });
 
-  test("a duplicated label falls back to the path, so siblings are not conflated", async () => {
-    // Two "Item" siblings: the first dead in both viewports, the second
-    // live in the second only. Conflated by label, the second's live
-    // verdict would hide the first's; by path, exactly one finding.
-    const doc = twoViewports([360, 900], (width) =>
-      build({
-        id: "row",
-        children: [
-          build({
-            id: "i1",
-            label: "Item",
-            styles: { position: "static", height: "10px" },
-          }),
-          build({
-            id: "i2",
-            label: "Item",
-            styles: { position: width === 360 ? "static" : "relative" },
-          }),
-        ],
-      }),
-    );
-    expect((await necessityLint(doc)).map((f) => f.elementId)).toEqual(["i1"]);
+  test("same-looking siblings stay apart: each is its own selector, so one's live verdict never hides the other's", async () => {
+    // Two `.item` siblings: the first dead in both viewports, the second
+    // live in the second only.
+    const doc = twoViewports([360, 900], (width) => ({
+      body: `<div class="row"><div class="item" style="position: static; height: 10px"></div><div class="item" style="position: ${width === 360 ? "static" : "relative"}"></div></div>`,
+      css: "",
+    }));
+    expect((await necessityLint(doc)).map((f) => f.elementId)).toEqual([
+      "div.item:nth-of-type(1)",
+    ]);
   });
 });
 
@@ -473,93 +622,106 @@ describe("the width sweep (a page is not a photo)", () => {
    * either way, so the line changes nothing THERE; at 360 the auto column
    * grows to the child's 500px min-content and `minmax(0, 1fr)` holds it
    * at 360 — the declaration exists for the width the frame is not at. */
-  function boundedColumn(frameWidth: number): DreamDocument {
-    const main = build({
-      id: "main",
-      children: [
-        build({ id: "wide", styles: { width: "500px", height: "10px" } }),
-      ],
-    });
-    return makeDocument({ width: frameWidth, height: 300 }, [main], {
-      margin: "0",
-      display: "grid",
-      "grid-template-columns": "minmax(0, 1fr)",
+  function boundedColumn(frame: { width: number; height?: number } | undefined): DreamDocument {
+    return makeDocument(frame, '<main><div style="width: 500px; height: 10px"></div></main>', "", {
+      bodyStyle: "margin: 0; display: grid; grid-template-columns: minmax(0, 1fr)",
     });
   }
 
   test("a declaration dead at the frame but live at a swept width is live", async () => {
-    expect(await necessityLint(boundedColumn(900))).toEqual([]);
+    expect(await necessityLint(boundedColumn({ width: 900, height: 300 }))).toEqual([]);
   });
 
   test("the same declaration at a frame where it works is live without any probe", async () => {
-    expect(await necessityLint(boundedColumn(360))).toEqual([]);
+    expect(await necessityLint(boundedColumn({ width: 360, height: 300 }))).toEqual([]);
   });
 
   test("a declaration dead at every swept width names them all", async () => {
-    const box = build({
-      id: "box",
-      label: "Box",
-      styles: { position: "static", height: "10px" },
-      layers: [
-        { condition: "@media (width <= 600px)", styles: { height: "12px" } },
-      ],
-    });
     const findings = await necessityLint(
-      makeDocument({ width: 768, height: 300 }, [box]),
+      makeDocument(
+        { width: 768, height: 300 },
+        '<div id="box"></div>',
+        "#box { position: static; height: 10px; }\n@media (width <= 600px) { #box { height: 12px; } }",
+      ),
     );
     expect(findings.map((f) => f.message)).toEqual([
-      `position: static on Box changes nothing (in base) at ${sweptAt(768, 600)}`,
+      `position: static in rule \`#box\` of viewport v1 changes nothing at ${sweptAt(768, 600)}`,
     ]);
     expect(sweptAt(768, 600)).toBe("360, 599, 600, 601, 768, 1280 or 1920px");
   });
 
-  test("a full-page viewport (no frame height) sweeps as a full-page view", async () => {
+  test("a full-page viewport (no frame) sweeps as a full-page view", async () => {
     // 1024 wide by default; the finding names the default plus the sweep.
-    const doc = boundedColumn(900);
-    delete doc.items[0]!.frame;
-    expect(await necessityLint(doc)).toEqual([]);
-    const dead = makeDocument({ width: 1024 }, [
-      build({ id: "box", styles: { position: "static", height: "10px" } }),
-    ]);
-    delete dead.items[0]!.frame;
+    expect(await necessityLint(boundedColumn(undefined))).toEqual([]);
+    const dead = makeDocument(undefined, '<div id="box" style="position: static; height: 10px"></div>');
     expect((await necessityLint(dead)).map((f) => f.message)).toEqual([
-      `position: static on div#box changes nothing (in base) at ${sweptAt(1024)}`,
+      `position: static on \`#box\` changes nothing at ${sweptAt(1024)}`,
     ]);
   });
 
-  test("probeWidths: the fixed sweep plus one px either side of every media breakpoint, minus the frame", () => {
-    const plain = viewportItems(makeDocument(FRAME, []))[0]!;
-    expect(probeWidths(plain)).toEqual([360, 768, 1280, 1920]);
+  test("probeWidths: the fixed sweep plus one px either side of every media breakpoint in the css, minus the frame", () => {
+    const core = coreApi();
+    expect(probeWidths(core, "", 400)).toEqual([360, 768, 1280, 1920]);
+    expect(probeWidths(core, "", 768)).toEqual([360, 1280, 1920]);
+    expect(
+      probeWidths(
+        core,
+        `@media (width >= 900px) { .a { height: 1px } }
+.b { @media (360px < width < 1280px) { height: 2px } }
+@container (width >= 500px) { .c { height: 3px } }
+@media (width >= 50em) { .d { height: 4px } }`,
+        400,
+      ),
+    ).toEqual([359, 360, 361, 768, 799, 800, 801, 899, 900, 901, 1279, 1280, 1281, 1920]);
+  });
 
-    const atSweep = viewportItems(
-      makeDocument({ width: 768, height: 300 }, []),
-    )[0]!;
-    expect(probeWidths(atSweep)).toEqual([360, 1280, 1920]);
-
-    const layered = viewportItems(
-      makeDocument(FRAME, [
-        build({
-          styles: { height: "10px" },
-          layers: [
-            { condition: "@media (width >= 900px)", styles: { height: "1px" } },
-            {
-              condition: "@media (360px < width < 1280px)",
-              styles: { height: "2px" },
-            },
-            // A container breakpoint is the container's width, not the window's.
-            {
-              condition: "@container (width >= 500px)",
-              styles: { height: "3px" },
-            },
-            // em/rem convert at the initial font size (50em = 800px).
-            { condition: "@media (width >= 50em)", styles: { height: "4px" } },
-          ],
-        }),
-      ]),
-    )[0]!;
-    expect(probeWidths(layered)).toEqual([
-      359, 360, 361, 768, 799, 800, 801, 899, 900, 901, 1279, 1280, 1281, 1920,
+  test("the sweep stops at the lint's deadline: a line it could not sweep is advisory, naming the widths it read and those it did not", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        { width: 768, height: 300 },
+        '<div id="box"></div>',
+        "#box { position: static; height: 10px; }",
+      ),
+      { deadline: Date.now() },
+    );
+    expect(findings).toEqual([
+      {
+        tier: "necessity",
+        severity: "advisory",
+        rule: 0,
+        property: "position",
+        message:
+          "position: static in rule `#box` of viewport v1 changes nothing at 768px (the lint ran out of time before it could read 360, 1280 or 1920px)",
+      },
     ]);
+  });
+
+  test("the sweep mounts no width once the answer is known: a line live in an earlier viewport is not swept in a later one", async () => {
+    // `#box`'s red is live under the blue parent of v1 and reads dead
+    // under the red parent of v2: dead in only one viewport, it is never
+    // a finding, so v2 has nothing to sweep.
+    const doc = makeDocument(
+      FRAME,
+      '<div style="color: blue"><p id="box" style="color: red">x</p></div>',
+    );
+    doc.items.push(
+      makeDocument(
+        FRAME,
+        '<div style="color: red"><p id="box" style="color: red">x</p></div>',
+        "",
+        { id: "v2" },
+      ).items[0]!,
+    );
+    let mounts = 0;
+    const counted = {
+      core: kernel.dd.core,
+      mountViewport: (...args: Parameters<typeof kernel.dd.mountViewport>) => {
+        mounts++;
+        return kernel.dd.mountViewport(...args);
+      },
+    };
+    expect(await lintWith(counted, doc)).toEqual([]);
+    expect(mounts).toBe(2);
   });
 
   test("widthsText", () => {
@@ -571,34 +733,23 @@ describe("the width sweep (a page is not a photo)", () => {
 
 describe("viewports and disposal", () => {
   test("viewportIds restricts the lint; an unknown id is an error", async () => {
-    const doc = makeDocument(FRAME, [
-      build({ id: "a", styles: { position: "static", height: "10px" } }),
-    ]);
-    const second: DreamViewport = structuredClone(viewportItems(doc)[0]!);
-    second.id = "other";
-    second.payload.root.id = "other-root";
-    second.payload.root.children[0]!.id = "other-body";
-    second.payload.root.children[0]!.children[0]!.id = "b";
-    doc.items.push(second);
-
-    // Both viewports hold the same path with the same dead declaration:
-    // ONE finding, named from the first viewport.
-    const all = await necessityLint(doc);
-    expect(all.map((f) => f.elementId)).toEqual(["a"]);
+    const doc = makeDocument(FRAME, '<div id="a" style="position: static; height: 10px"></div>');
+    doc.items.push(
+      makeDocument(FRAME, '<div id="b" style="position: static; height: 10px"></div>', "", {
+        id: "other",
+      }).items[0]!,
+    );
+    expect((await necessityLint(doc)).map((f) => f.elementId)).toEqual(["#a", "#b"]);
     const some = await necessityLint(doc, { viewportIds: ["other"] });
-    expect(some.map((f) => f.elementId)).toEqual(["b"]);
+    expect(some.map((f) => f.elementId)).toEqual(["#b"]);
     await expect(necessityLint(doc, { viewportIds: ["nope"] })).rejects.toThrow(
       "No such viewport: nope",
     );
   });
 
   test("disposal leaves no iframe behind, findings or none", async () => {
-    const clean = makeDocument(FRAME, [
-      build({ id: "a", styles: { height: "10px" } }),
-    ]);
-    const dirty = makeDocument(FRAME, [
-      build({ id: "b", styles: { position: "static", height: "10px" } }),
-    ]);
+    const clean = makeDocument(FRAME, '<div id="a" style="height: 10px"></div>');
+    const dirty = makeDocument(FRAME, '<div id="b" style="position: static; height: 10px"></div>');
     expect(await necessityLint(clean)).toEqual([]);
     expect(document.querySelectorAll("iframe")).toHaveLength(0);
     expect(await necessityLint(dirty)).toHaveLength(1);
@@ -607,179 +758,167 @@ describe("viewports and disposal", () => {
 });
 
 describe("cost", () => {
-  test("a 40-element fixture: one finding per dead declaration, nothing else", async () => {
+  test("a 40-element page: one finding per dead declaration, nothing else", async () => {
     // 40 boxes in a grid, each with three live declarations and one dead
-    // (position: static) — 160 removals over 43 measured elements.
-    const boxes = Array.from({ length: 40 }, (_, i) =>
-      build({
-        id: `b${i}`,
-        text: `box ${i}`,
-        styles: {
-          padding: "4px",
-          background: `rgb(${(i * 6) % 255}, 120, 120)`,
-          "min-height": "24px",
-          position: "static",
-        },
-      }),
+    // (position: static) — 160 removals over 43 elements.
+    const boxes = Array.from(
+      { length: 40 },
+      (_, i) =>
+        `<div style="padding: 4px; background: rgb(${(i * 6) % 255}, 120, 120); min-height: 24px; position: static">box ${i}</div>`,
+    ).join("");
+    const doc = makeDocument(
+      { width: 800, height: 600 },
+      `<div id="grid" style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px">${boxes}</div>`,
     );
-    const grid = build({
-      id: "grid",
-      styles: {
-        display: "grid",
-        "grid-template-columns": "repeat(5, 1fr)",
-        gap: "8px",
-      },
-      children: boxes,
-    });
-    const doc = makeDocument({ width: 800, height: 600 }, [grid]);
     const findings = await necessityLint(doc);
     expect(findings).toHaveLength(40);
     expect(new Set(properties(findings))).toEqual(new Set(["position"]));
   });
 });
 
-describe("necessity on rules (decision #71, plan phase 9)", () => {
-  test("a rule's custom property nobody reads is dead, reported at sheet[i]", async () => {
-    const box = build({ id: "box", attrs: { class: "a" }, text: "hi" });
-    const doc = makeDocument(FRAME, [box], undefined, [
-      { selector: ".a", styles: { "--unused": "1px" } },
-    ]);
-    const vpId = doc.items[0]!.id;
-    const findings = await necessityLint(doc);
+describe("necessity on rules", () => {
+  test("a rule's custom property nobody reads is dead, reported at the rule's index", async () => {
+    const findings = await necessityLint(
+      makeDocument(FRAME, '<div class="a">hi</div>', ".a { --unused: 1px; }"),
+    );
     expect(findings).toEqual([
       {
         tier: "necessity",
         severity: "blocking",
         rule: 0,
         property: "--unused",
-        message: `--unused: 1px in rule .a (sheet[0]) of viewport ${vpId} changes nothing at ${sweptAt(400)}`,
+        message: `--unused: 1px in rule \`.a\` of viewport v1 changes nothing at ${sweptAt(400)}`,
       },
     ]);
   });
 
-  test("a pseudo-element rule's declaration is necessary when nothing else sets it: the baseline reads getComputedStyle(node, '::before') too", async () => {
-    // .card::before is neither a state pseudo-class (hasStatePseudo is for
-    // :hover and its kin, never a pseudo-ELEMENT) nor media-inactive, so
-    // judgeRules creates a candidate for it same as any other rule — and
-    // since pseudoElementsInSheet finds a ::before selector here, the
-    // baseline also snapshots getComputedStyle(node, "::before"), so
-    // removing the declaration is observable even though the pseudo-
-    // element has no `[data-dream-id]` node of its own to enumerate.
-    const card = build({ id: "card", attrs: { class: "card" } });
-    const doc = makeDocument(FRAME, [card], undefined, [
-      { selector: ".card::before", styles: { content: '""', color: "red" } },
+  test("a rule after the legacy marker `<!--` is judged and named by its own selector, the marker no part of it", async () => {
+    const findings = await necessityLint(
+      makeDocument(FRAME, '<div class="a">hi</div>', "<!--\n.a { --unused: 1px; }\n-->"),
+    );
+    expect(findings.map((f) => f.message)).toEqual([
+      `--unused: 1px in rule \`.a\` of viewport v1 changes nothing at ${sweptAt(400)}`,
     ]);
-    expect(await necessityLint(doc)).toEqual([]);
   });
 
-  test("a pseudo-element declaration a later rule on the same pseudo-element always overrides is dead, reported at its own sheet[i]", async () => {
+  test("a pseudo-element rule's declaration is necessary when nothing else sets it: the baseline reads getComputedStyle(node, '::before') too", async () => {
+    expect(
+      await necessityLint(
+        makeDocument(FRAME, '<div class="card"></div>', '.card::before { content: ""; color: red; }'),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a pseudo-element declaration a later rule on the same pseudo-element always overrides is dead, reported at its own index", async () => {
     // Two unconditional .card::before rules at the same specificity: the
-    // later one always wins the cascade regardless of the earlier one's
-    // presence, so removing rule 0's color changes nothing — genuinely
-    // dead, and the finding is addressed at sheet[0], never sheet[1] (rule
-    // 1's own color is what the page actually shows, and removing IT
-    // would reveal rule 0's — necessary, no finding for it).
-    const card = build({ id: "card", attrs: { class: "card" } });
-    const doc = makeDocument(FRAME, [card], undefined, [
-      { selector: ".card::before", styles: { content: '""', color: "red" } },
-      { selector: ".card::before", styles: { color: "blue" } },
-    ]);
-    const vpId = doc.items[0]!.id;
-    const findings = await necessityLint(doc);
+    // later one always wins, so removing rule 0's color changes nothing —
+    // genuinely dead, and the finding is addressed at rule 0, never rule 1
+    // (removing rule 1's would reveal rule 0's).
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div class="card"></div>',
+        '.card::before { content: ""; color: red; }\n.card::before { color: blue; }',
+      ),
+    );
     expect(findings).toEqual([
       {
         tier: "necessity",
         severity: "blocking",
         rule: 0,
         property: "color",
-        message: `color: red in rule .card::before (sheet[0]) of viewport ${vpId} changes nothing at ${sweptAt(400)}`,
+        message: `color: red in rule \`.card::before\` of viewport v1 changes nothing at ${sweptAt(400)}`,
       },
     ]);
   });
 
   test("a rule's width that sizes its matched element is live", async () => {
-    const box = build({ id: "box", attrs: { class: "a" }, styles: { height: "20px" } });
-    const doc = makeDocument(FRAME, [box], undefined, [
-      { selector: ".a", styles: { width: "120px" } },
-    ]);
-    expect(await necessityLint(doc)).toEqual([]);
+    expect(
+      await necessityLint(
+        makeDocument(FRAME, '<div class="a" style="height: 20px"></div>', ".a { width: 120px; }"),
+      ),
+    ).toEqual([]);
   });
 
-  test("a rule's declaration every matched element also shadows inline is judged WITH the shadow, so it is not falsely dead — that shape is the redundancy finding's, not this one's", async () => {
-    const box = build({
-      id: "box",
-      attrs: { class: "a" },
-      text: "hi",
-      styles: { color: "red" },
-    });
-    const doc = makeDocument(FRAME, [box], undefined, [
-      { selector: ".a", styles: { color: "red" } },
-    ]);
+  test("a rule's declaration every matched element also shadows in its own style is judged WITH the shadow, so it is not falsely dead — that shape is the redundancy finding's", async () => {
     // Removed alone, the rule's declaration would read dead (the inline
     // copy keeps the element red); removed together with the element's
     // own shadowing declaration (the paired check), color really does
     // change — so the rule is alive, and the element's own line is the
     // redundancy finding's story (matchLint.ts), never necessity's.
-    expect(await necessityLint(doc)).toEqual([]);
+    expect(
+      await necessityLint(
+        makeDocument(FRAME, '<div class="a" style="color: red">hi</div>', ".a { color: red; }"),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a rule inside an @scope reaches its elements from the scope's root, so the ones shadowing it in their own style are judged with it", async () => {
+    // `:scope > .a` asked of `.a` itself would match nothing, the rule's
+    // color would be removed alone, and the element's own blue would keep
+    // the page unchanged.
+    expect(
+      await necessityLint(
+        makeDocument(
+          FRAME,
+          '<div class="card"><p class="a" style="color: blue">hi</p></div>',
+          "@scope (.card) { :scope > .a { color: red; } }",
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("@scope and @layer gate nothing by themselves: a dead declaration in either is found", async () => {
+    const findings = await necessityLint(
+      makeDocument(
+        FRAME,
+        '<div class="card"><p class="a">hi</p></div>',
+        "@scope (.card) { :scope > .a { position: static; } }\n@layer base { .a { float: none; } }",
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([
+      [0, "position"],
+      [1, "float"],
+    ]);
   });
 
   test("a rule under a state pseudo-class is never judged — in a rule, :hover belongs to the selector", async () => {
-    const box = build({ id: "box", attrs: { class: "a" } });
-    const doc = makeDocument(FRAME, [box], undefined, [
-      { selector: ".a:hover", styles: { color: "red" } },
-    ]);
-    expect(await necessityLint(doc)).toEqual([]);
+    expect(
+      await necessityLint(makeDocument(FRAME, '<div class="a"></div>', ".a:hover { color: red; }")),
+    ).toEqual([]);
   });
 
-  test("a rule under an @media condition inactive at the frame is left alone: the generated sheet never marks it here to judge", async () => {
-    const box = build({ id: "box", attrs: { class: "a" } });
-    const doc = makeDocument(FRAME, [box], undefined, [
-      {
-        selector: ".a",
-        conditions: ["@media (min-width: 2000px)"],
-        styles: { color: "red" },
-      },
-    ]);
-    expect(await necessityLint(doc)).toEqual([]);
+  test("a rule under an @media the frame is not at is judged where it applies: the sweep reaches its breakpoint", async () => {
+    expect(
+      await necessityLint(
+        makeDocument(FRAME, '<div class="a">hi</div>', "@media (min-width: 2000px) { .a { color: red; } }"),
+      ),
+    ).toEqual([]);
   });
 
   test("rule verdicts intersect across viewports by selector and conditions, never by index — dead in one, live in the other, stays alive overall", async () => {
-    const dead = makeDocument(
-      { width: 360 },
-      [build({ id: "n", attrs: { class: "a" } })],
-      undefined,
-      [{ selector: ".a", styles: { "--unused": "1px" } }],
+    const doc = makeDocument({ width: 360 }, '<div class="a"></div>', ".a { --unused: 1px; }");
+    doc.items.push(
+      makeDocument(
+        { width: 1280 },
+        '<div class="a" style="width: var(--unused); height: 10px"></div>',
+        ".a { --unused: 1px; }",
+        { id: "v2" },
+      ).items[0]!,
     );
-    const alive = makeDocument(
-      { width: 1280 },
-      [build({ id: "w", attrs: { class: "a" }, styles: { width: "var(--unused)", height: "10px" } })],
-      undefined,
-      [{ selector: ".a", styles: { "--unused": "1px" } }],
-    );
-    const doc: DreamDocument = { version: 6, items: [...dead.items, ...alive.items] };
-    // The first viewport's element reads nothing from --unused (dead
-    // there); the second's `width: var(--unused)` does (live there). The
-    // SAME rule (same selector, same conditions — both empty) is dead
-    // only where dead EVERYWHERE it exists, so the intersection reports
-    // nothing.
+    // The first page's element reads nothing from --unused (dead there);
+    // the second's `width: var(--unused)` does (live there). The SAME
+    // rule is dead only where dead EVERYWHERE it exists, so the
+    // intersection reports nothing.
     expect(await necessityLint(doc)).toEqual([]);
   });
 
   test("the same rule's declaration dead in every viewport it exists in is reported once", async () => {
-    const a = makeDocument(
-      { width: 360 },
-      [build({ id: "n1", attrs: { class: "a" } })],
-      undefined,
-      [{ selector: ".a", styles: { "--unused": "1px" } }],
+    const doc = makeDocument({ width: 360 }, '<div class="a"></div>', ".a { --unused: 1px; }");
+    doc.items.push(
+      makeDocument({ width: 1280 }, '<div class="a"></div>', ".a { --unused: 1px; }", { id: "v2" })
+        .items[0]!,
     );
-    const b = makeDocument(
-      { width: 1280 },
-      [build({ id: "n2", attrs: { class: "a" } })],
-      undefined,
-      [{ selector: ".a", styles: { "--unused": "1px" } }],
-    );
-    const doc: DreamDocument = { version: 6, items: [...a.items, ...b.items] };
-    const findings = await necessityLint(doc);
-    expect(findings.map((f) => f.property)).toEqual(["--unused"]);
+    expect(properties(await necessityLint(doc))).toEqual(["--unused"]);
   });
 });

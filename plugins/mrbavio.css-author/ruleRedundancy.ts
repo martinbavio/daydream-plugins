@@ -14,8 +14,8 @@
 // longhands cascade together: `margin-top: 4px` sitting between two
 // `margin: 0` rules is exactly what A's line holds off, and removing it
 // would change the page. Redundant only when, for every reached element,
-// that rule is CERTAIN — unconditional and free of state pseudo-classes,
-// so it applies whenever A does — carries p at the identical verbatim
+// that rule is CERTAIN (certain.ts: it applies wherever it matches, so
+// whenever A does) — carries p at the identical verbatim
 // value, and declares nothing else related to p (a `margin: 0` beside a
 // `margin-top: 4px` in the same rule is not the same margin). Any element
 // where the next declarer beneath is conditional, a state rule, absent,
@@ -33,7 +33,18 @@
 // A's p makes A's line dead, which the necessity lint (removal, re-read)
 // reports as such.
 
-import type { StyleRule } from "@daydream/plugin-api";
+import { isCertain } from "./certain";
+import type { PageScope } from "./pageCss";
+
+/** A rule as the judgment reads it: its selector, the at-rules and the
+ * `@scope`s it sits inside (what certain.ts asks), and its declarations
+ * as a map, later wins (pageCss.ts `declarationMap` over a page rule). */
+export interface RedundancyRule {
+  selector: string;
+  conditions?: readonly string[];
+  scopes?: readonly PageScope[];
+  styles: Record<string, string>;
+}
 
 /** One rule matching one element, in the element's winner-first list
  * (matchLint.ts's own ranking: specificity descending, then later index
@@ -89,18 +100,14 @@ export function relatedProperties(property: string, other: string): boolean {
 }
 
 /** Every redundant rule declaration in `sheet`, given each mounted
- * element's ranked matches (`matches`: element id → winner-first list)
- * and the state-pseudo-class test (statePseudo.ts's `hasStatePseudo`,
- * handed in so this file stays free of any selector reading). */
+ * element's ranked matches (`matches`: element → winner-first list, the
+ * key only telling the elements apart). */
 export function ruleRestatements(
-  sheet: readonly StyleRule[],
-  matches: ReadonlyMap<string, readonly RankedMatch[]>,
-  hasState: (selector: string) => boolean,
+  sheet: readonly RedundancyRule[],
+  matches: ReadonlyMap<unknown, readonly RankedMatch[]>,
 ): RuleRestatement[] {
   const out: RuleRestatement[] = [];
-  const uncertain = (rule: StyleRule): boolean =>
-    (rule.conditions !== undefined && rule.conditions.length > 0) ||
-    hasState(rule.selector);
+  const uncertain = (rule: RedundancyRule): boolean => !isCertain(rule);
 
   sheet.forEach((rule, index) => {
     if (uncertain(rule)) return;

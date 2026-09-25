@@ -13,18 +13,37 @@ export interface VariantMarker {
   of: number;
   /** The source viewport item's id. */
   sourceId: string;
+  /** Which run of the verb over the source the variant is from: the same
+   * verb run twice on one source is two rounds, and adopting from one
+   * leaves the other. Absent on a variant landed before rounds had ids —
+   * those keep to themselves, one round per source and verb. */
+  round?: string;
 }
 
 /** The line, and the older spelling a canvas may still carry from before
- * the plugin took Impeccable's name. */
-const MARKER = /^(?:Impeccable|Glaser) ([a-z]+) · variant (\d+) of (\d+) of (\S+)\s*$/;
+ * the plugin took Impeccable's name; ` · round <id>` after the source is
+ * absent from a line written before rounds had ids. */
+const MARKER =
+  /^(?:Impeccable|Glaser) ([a-z]+) · variant (\d+) of (\d+) of (\S+)(?: · round ([a-z0-9]+))?\s*$/;
+
+/** What a round id may be: what the marker line reads back. */
+export const ROUND_ID = /^[a-z0-9]{1,32}$/;
+
+/** A fresh round id: six lowercase letters and digits — enough that two
+ * rounds over one source never share one. Minted once per round, with
+ * the pick that starts it (session.ts), or by impeccable_verb when it is
+ * called with no pick's round. */
+export function roundId(): string {
+  return Math.random().toString(36).slice(2, 8).padEnd(6, "0");
+}
 
 /** The line; `n` may be the letter, for a prompt describing every
  * variant at once. */
 export function variantMarker(
   m: Omit<VariantMarker, "n"> & { n: number | "n" },
 ): string {
-  return `Impeccable ${m.verb} · variant ${m.n} of ${m.of} of ${m.sourceId}`;
+  const round = m.round === undefined ? "" : ` · round ${m.round}`;
+  return `Impeccable ${m.verb} · variant ${m.n} of ${m.of} of ${m.sourceId}${round}`;
 }
 
 /** The marker on the first line of a notes text, or null. */
@@ -40,6 +59,7 @@ export function parseVariantMarker(
     n: Number(match[2]),
     of: Number(match[3]),
     sourceId: match[4]!,
+    ...(match[5] === undefined ? {} : { round: match[5] }),
   };
 }
 
@@ -58,11 +78,19 @@ export interface SessionState {
 export interface Pick {
   verb: string;
   viewportId: string;
-  /** The element inside it, or null for the whole page. */
-  elementId: string | null;
+  /** The element inside it as a CSS selector matching it alone in the
+   * page's stored markup — what get_viewport `element` and the draft
+   * tools take (decision #76) — or null for the whole page. Never the
+   * canvas's render-time id, which dies with the page's mount. */
+  element: string | null;
   /** What the user typed after the verb — the brief, which outranks the
    * playbook's defaults; absent when nothing was typed. */
   brief?: string;
+  /** The round the pick starts (VariantMarker.round), minted with it:
+   * impeccable_pick answers it, impeccable_verb writes it on every
+   * variant's marker — a retried call too — and the caption and adopt
+   * both know the round by it alone. */
+  round: string;
   /** Epoch ms. */
   at: number;
 }
@@ -72,21 +100,55 @@ export const EMPTY_SESSION: SessionState = { seq: 0, pick: null, exit: false };
 export function sessionState(raw: unknown): SessionState {
   if (typeof raw !== "object" || raw === null) return EMPTY_SESSION;
   const r = raw as Record<string, unknown>;
-  const pick = r["pick"];
+  const pick = legacyWholePage(r["pick"]);
   return {
     seq: typeof r["seq"] === "number" ? r["seq"] : 0,
-    pick: isPick(pick) ? pick : null,
+    pick: isPick(pick) ? withRound(pick) : null,
     exit: r["exit"] === true,
   };
 }
 
-function isPick(raw: unknown): raw is Pick {
+/** A pick saved before picks carried their round, or with one no marker
+ * can carry, is given one now: whatever lands for it lands under that. */
+function withRound(pick: Omit<Pick, "round"> & { round?: unknown }): Pick {
+  const { round } = pick;
+  return typeof round === "string" && ROUND_ID.test(round) ? { ...pick, round } : { ...pick, round: roundId() };
+}
+
+/** A pick saved before pages (decision #76) named its element by
+ * `elementId`, the element's id in the document's tree — which a page
+ * does not have, so nothing names that element now. Such a pick for an
+ * element is not read back; this says one was there, for the canvas to
+ * note. One for the whole page (`elementId: null`) loses nothing and is
+ * read back as `element: null`. */
+export function droppedLegacyPick(raw: unknown): boolean {
+  if (typeof raw !== "object" || raw === null) return false;
+  const pick = (raw as Record<string, unknown>)["pick"];
+  return (
+    typeof pick === "object" &&
+    pick !== null &&
+    !("element" in pick) &&
+    typeof (pick as Record<string, unknown>)["elementId"] === "string"
+  );
+}
+
+/** A legacy whole-page pick as a page's; anything else as it is. */
+function legacyWholePage(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null) return raw;
+  const r = raw as Record<string, unknown>;
+  if ("element" in r || r["elementId"] !== null) return raw;
+  const page: Record<string, unknown> = { ...r, element: null };
+  delete page["elementId"];
+  return page;
+}
+
+function isPick(raw: unknown): raw is Omit<Pick, "round"> & { round?: unknown } {
   if (typeof raw !== "object" || raw === null) return false;
   const r = raw as Record<string, unknown>;
   return (
     typeof r["verb"] === "string" &&
     typeof r["viewportId"] === "string" &&
-    (typeof r["elementId"] === "string" || r["elementId"] === null) &&
+    (typeof r["element"] === "string" || r["element"] === null) &&
     (r["brief"] === undefined || typeof r["brief"] === "string") &&
     typeof r["at"] === "number"
   );

@@ -7,22 +7,23 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc",
     "test": "vitest run",
+    "test:kernel": "node scripts/kernel-test.mjs",
     "ship": "node scripts/ship.mjs"
   },
   "devDependencies": {
-    "@daydream/plugin-api": "github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api",
-    "@solidjs/vite-plugin": "3.0.0-next.29",
-    "@solidjs/web": "2.0.0-rc.0",
+    "@daydream/plugin-api": "catalog:",
+    "@solidjs/vite-plugin": "3.0.0-next.44",
+    "@solidjs/web": "2.0.0-rc.9",
     "@types/node": "^24.13.4",
-    "solid-js": "2.0.0-rc.0",
+    "solid-js": "2.0.0-rc.9",
     "typescript": "^5.9.0",
     "vite": "^8.2.1",
     "vitest": "^4.1.11",
-    "zod": "^4.6.5"
+    "zod": "^4.5.4"
   },
   "pnpm": {
     "overrides": {
-      "@daydream/plugin-api": "github:mbavio-phota/daydream#b51770e46b9df68a5800b86102d62b9a65e028d5&path:packages/plugin-api"
+      "@daydream/plugin-api": "catalog:"
     }
   }
 }
