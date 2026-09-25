@@ -47,7 +47,10 @@ for the two packages as `catalog:`, and the root's `pnpm.overrides` pins
 `@daydream/plugin-api` the same way, so every plugin resolves one copy.
 To move to another kernel, change the commit on both catalog lines and
 run `pnpm install`. `pnpm test:kernel` warns when the checkout it is
-given is at another commit.
+given is at another commit. While a change here needs kernel API that is
+not released yet, the pin names the head of the kernel branch that adds
+it, so the two are reviewed together; once that kernel is tagged, the pin
+moves to the tagged commit, and a plugin's `minCore` names that release.
 
 ## Ship
 
