@@ -445,7 +445,7 @@ describe("landing", () => {
   test("an image-only HTML paste still goes to Media", async () => {
     const shell = await mount();
     paste(document.body, {
-      "text/html": '<img src="/assets/browser-paste.png">',
+      "text/html": '<img src="assets/browser-paste.png">',
       "text/plain": "fallback",
     });
     await vi.waitFor(() => expect(shell.store.document.items).toHaveLength(1), {
@@ -453,7 +453,7 @@ describe("landing", () => {
     });
     expect(shell.store.document.items[0]).toMatchObject({
       kind: "daydream.image",
-      payload: { src: "/assets/browser-paste.png" },
+      payload: { src: "assets/browser-paste.png" },
     });
   });
 
@@ -572,7 +572,7 @@ describe("what could run is cut from the stored text, and said", () => {
     );
     expect(shadow.querySelector("p")?.textContent).toBe("Kept");
     expect(infoLines(info)).toEqual([
-      `[${PLUGIN}] landed 7 elements; paste.html: removed <script>, the attribute a[href] ×2 and the attribute button[onclick] — a page stores nothing that could run, no <base>, and no url that is not https, assets/… or a #fragment (a link may also go to http: or mailto:); the rest landed as written`,
+      `[${PLUGIN}] landed 7 elements; paste.html: removed <script>, the attribute a[href] ×2 and the attribute button[onclick] — a page stores nothing that could run, no <base>, and no url that is not https, assets/… or a #fragment (a link may also go to http: or mailto:, and an image, a video, an audio or a track may be an inline data url); the rest landed as written`,
     ]);
   });
 
@@ -602,7 +602,7 @@ describe("data: images", () => {
     // The two names differ past their slash, so the page's is the host's
     // pageSrc and not one the paste made from src.
     const vendorFile = vi.fn(async (file: File) => ({
-      src: `/assets/media-${file.name}`,
+      src: `assets/media-${file.name}`,
       pageSrc: `assets/page-${file.name}`,
     }));
     const shell = await mount({
@@ -630,10 +630,10 @@ describe("data: images", () => {
     ]);
   });
 
-  test("a data: image a css url() names is vendored too, its copy's name written inside the url(); a data: url in css that is no image is emptied by the cleaning, which says so", async () => {
+  test("a data: image a css url() names is vendored too, its copy's name written inside the url(); a data: url in css that is no image is kept as written, as the cleaning keeps a data: url wherever it only loads a resource", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
     const vendorFile = vi.fn(async (file: File) => ({
-      src: `/assets/media-${file.name}`,
+      src: `assets/media-${file.name}`,
       pageSrc: `assets/page-${file.name}`,
     }));
     const shell = await mount({
@@ -654,17 +654,15 @@ describe("data: images", () => {
       'style="border-image: url(assets/page-pasted-image.png) 1"',
     );
     expect(css).toBe(
-      `.hero { background: url("assets/page-pasted-image.png") } @font-face { font-family: F; src: url() }`,
+      `.hero { background: url("assets/page-pasted-image.png") } @font-face { font-family: F; src: url(${font}) }`,
     );
-    expect(infoLines(info).at(-1)).toContain(
-      `paste.css: emptied url(${font}) in a <style> block`,
-    );
+    expect(infoLines(info).at(-1)).not.toContain("emptied");
   });
 
   test("a data: image in a subtree the cleaning removes is never stored — a <script>'s, an SVG <script>'s, an <object>'s fallback — and one in a <noscript>, which the page keeps, is", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
     const vendorFile = vi.fn(async (file: File) => ({
-      src: `/assets/media-${file.name}`,
+      src: `assets/media-${file.name}`,
       pageSrc: `assets/page-${file.name}`,
     }));
     const shell = await mount({
@@ -697,7 +695,7 @@ describe("data: images", () => {
   test("a document loaded while the paste is cleaned abandons it before any image is stored", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
     const vendorFile = vi.fn(async (file: File) => ({
-      src: `/assets/media-${file.name}`,
+      src: `assets/media-${file.name}`,
       pageSrc: `assets/page-${file.name}`,
     }));
     const shell = await mount({
@@ -719,7 +717,7 @@ describe("data: images", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const vendorFile = vi.fn(async (file: File) => ({
-        src: `/assets/media-${file.name}`,
+        src: `assets/media-${file.name}`,
         pageSrc: `assets/page-${file.name}`,
       }));
       // The plugin's API with a mutateItems that refuses.
@@ -767,7 +765,7 @@ describe("data: images", () => {
     await vi.waitFor(() => expect(vendorFile).toHaveBeenCalledTimes(1));
     shell.store.loadDocument(createEmptyDocument(), { slug: null });
     flush();
-    release({ src: "/assets/late.png", pageSrc: "assets/late.png" });
+    release({ src: "assets/late.png", pageSrc: "assets/late.png" });
     await vi.waitFor(() =>
       expect(infoLines(info!)).toEqual([
         `[${PLUGIN}] paste abandoned: another document was loaded before it landed; the 1 image stored for it is left unused, since the host has no call to take a stored file back`,
@@ -780,13 +778,14 @@ describe("data: images", () => {
     paste(document.body, { "text/html": dataImage });
     await vi.waitFor(() => expect(bare.store.document.items).toHaveLength(1));
     const { id, html } = await landedPage(bare);
-    expect(html).not.toContain("data:");
+    // The host could not store it, so the page keeps it inline, as written:
+    // an image's data url is one the page may keep.
     const img = pageNode(id, "img");
-    expect(img?.hasAttribute("src")).toBe(false);
+    expect(img?.getAttribute("src")).toMatch(/^data:image\//);
+    expect(html).toContain(`src="${img?.getAttribute("src")}"`);
     expect(img?.getAttribute("alt")).toBe("One dot");
-    // Why the paste could not store it, then the cleaning's removal.
     expect(infoLines(info).at(-1)).toBe(
-      `[${PLUGIN}] landed 5 elements; the host could not store a data: image (File import requires local storage); paste.html: removed the attribute img[src] — a page stores nothing that could run, no <base>, and no url that is not https, assets/… or a #fragment (a link may also go to http: or mailto:); the rest landed as written`,
+      `[${PLUGIN}] landed 5 elements; the host could not store a data: image (File import requires local storage)`,
     );
   });
 });
