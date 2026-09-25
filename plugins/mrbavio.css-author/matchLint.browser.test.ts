@@ -374,6 +374,30 @@ describe("matchLint", () => {
       ],
     ]);
   });
+
+  test("a layered or scoped rule applies wherever it matches: an element's own declaration it already makes is redundancy", async () => {
+    for (const css of [
+      "@layer base { .card { color: red; } }",
+      "@scope (body) { .card { color: red; } }",
+    ]) {
+      const findings = await matchLint(
+        page(css, '<div class="card" style="color: red"></div>'),
+      );
+      expect(findings.map((f) => [f.elementId, f.rule, f.property]), css).toEqual([
+        ["div.card", 0, "color"],
+      ]);
+    }
+  });
+
+  test("a layered rule beneath restates a rule's declaration as an unlayered one does", async () => {
+    const findings = await matchLint(
+      page(
+        "@layer base { .card { color: #333; } }\n.card.featured { color: #333; border: 1px solid; }",
+        '<div class="card featured"></div>',
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.property])).toEqual([[1, "color"]]);
+  });
 });
 
 // A container query with no container to ask. On a tree this was the

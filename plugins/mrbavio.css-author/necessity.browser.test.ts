@@ -316,6 +316,19 @@ describe("dead and live declarations", () => {
     expect(findings.map((f) => [f.rule, f.property])).toEqual([[0, "position"]]);
   });
 
+  test("an element's own declaration a layered or scoped rule restates is judged with that rule, as a plain one is: the match lint's redundancy, not a dead line", async () => {
+    for (const css of [
+      ".card { color: red; }",
+      "@layer base { .card { color: red; } }",
+      "@scope (body) { .card { color: red; } }",
+    ]) {
+      const findings = await necessityLint(
+        makeDocument(FRAME, '<p class="card" style="color: red">x</p>', css),
+      );
+      expect(findings, css).toEqual([]);
+    }
+  });
+
   test("a `<style>` the markup keeps in a noscript is never taken for the page's css", async () => {
     // The kernel keeps a noscript's stylesheet in the markup, and the
     // measurer's copy (no scripting there) parses it as a `<style>` in the

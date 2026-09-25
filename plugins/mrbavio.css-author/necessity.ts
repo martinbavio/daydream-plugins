@@ -68,8 +68,9 @@
 //    branch's declaration is still judged on its own. The same pairing
 //    joins a rule's declaration with the elements it matches that set P
 //    in their own style (the inline copy would hide the rule's), and an
-//    element's own declaration with the unconditional rules restating it
-//    verbatim (that shape is matchLint.ts's redundancy finding).
+//    element's own declaration with the certain rules (certain.ts)
+//    restating it verbatim (that shape is matchLint.ts's redundancy
+//    finding).
 // 2. WIDTH SWEEP (#46). A page is not a photo: `minmax(0, 1fr)`, a
 //    `flex-wrap`, a rule for a breakpoint the frame is not at, all change
 //    nothing at THIS width and everything at another. So a declaration
@@ -108,6 +109,7 @@ import type {
   MountedViewport,
 } from "@daydream/plugin-api";
 
+import { isCertain } from "./certain";
 import {
   atKeyword,
   mediaPreludes,
@@ -454,8 +456,9 @@ function judgeAll(
     candidates.push(candidate);
   };
 
-  // An element's own declarations, paired with the unconditional rules
-  // that restate them verbatim (rule 1, mirrored from redundancy).
+  // An element's own declarations, paired with the certain rules
+  // (certain.ts) that restate them verbatim (rule 1, mirrored from
+  // redundancy).
   prepared.own.forEach(({ declarations }, node) => {
     declarations.forEach((declaration, at) => {
       if (!isChecked(declaration, declarations, at)) return;
@@ -464,7 +467,7 @@ function judgeAll(
         ...fallbacks(declarations, at, (k) => ({ node, at: k })),
       ];
       rules.forEach((rule, r) => {
-        if (rule.conditions.length > 0 || hasStatePseudo(rule.selector)) return;
+        if (!isCertain(rule)) return;
         if (!reached[r]!.includes(node)) return;
         const last = lastOf(rule.declarations, declaration.property);
         if (last === -1) return;

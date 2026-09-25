@@ -27,18 +27,19 @@
 // named by its unique selector in the page's stored markup (pageDom.ts
 // storedNames), not in the mounted copy.
 //
-// REDUNDANCY: an element's own declaration a matched, unconditional rule
-// already sets with the identical value — the element's line does nothing
-// a rule does not already do, so the finding names it as the one to
-// remove. Sharing a value is not enough: the cascade decides what the
-// element gets without its line (an `!important` elsewhere, a layer, a
-// later rule), so the claim is MEASURED — the line cut from the copy, the
-// element's computed style read, the line put back, as the necessity lint
-// removes a declaration — and holds only when nothing changed. What the
-// frame cannot show is refused outright: a rule reaching the element that
-// touches the property under an `@media`, `@container`, `@supports` or
-// `@starting-style`, or a state pseudo-class, could win without the line
-// at another width or in another state.
+// REDUNDANCY: an element's own declaration a matched rule that applies
+// wherever it matches (certain.ts: under no `@media`, `@supports`,
+// `@container` or `@starting-style`, in no state; a layer or a scope
+// gates nothing) already sets with the identical value — the element's
+// line does nothing a rule does not already do, so the finding names it
+// as the one to remove. Sharing a value is not enough: the cascade
+// decides what the element gets without its line (an `!important`
+// elsewhere, a layer, a later rule), so the claim is MEASURED — the line
+// cut from the copy, the element's computed style read, the line put
+// back, as the necessity lint removes a declaration — and holds only when
+// nothing changed. What the frame cannot show is refused outright: a rule
+// reaching the element that touches the property and is not certain could
+// win without the line at another width or in another state.
 //
 // AN EXPLICIT INITIAL VALUE (rule 2 of the static gate): a declaration
 // restating its property's initial value (initialValues.ts) — an
@@ -91,6 +92,7 @@ import type {
   Finding,
 } from "@daydream/plugin-api";
 
+import { isCertain } from "./certain";
 import {
   emptyContainerDeclaration,
   mergeContainerDeclaration,
@@ -241,7 +243,7 @@ interface RuleMatch {
  * matches as though the state were in effect (state-stripped): nobody
  * hovers the mount, but the redundancy questions must see the rule that
  * would win once somebody does — and never take it for a certain one
- * (`varies`). Every condition is ignored the same way. */
+ * (certain.ts). Every condition is ignored the same way. */
 function matchedRulesFor(
   core: CoreApi,
   read: MountedPage,
@@ -328,8 +330,9 @@ function boxMatches(
 }
 
 /** Whether one of `matched` could win without a line of `property` at
- * another width or in another state (`varies`) and touches the property:
- * the frame cannot say the line changes nothing there. */
+ * another width or in another state (it is not certain, certain.ts) and
+ * touches the property: the frame cannot say the line changes nothing
+ * there. */
 function contested(
   read: MountedPage,
   matched: readonly RuleMatch[],
@@ -339,7 +342,7 @@ function contested(
     const rule = read.rules[match.index];
     return (
       rule !== undefined &&
-      varies(rule) &&
+      !isCertain(rule) &&
       rule.declarations.some((d) => relatedProperties(property, d.property))
     );
   });
@@ -415,10 +418,9 @@ function lintRedundancy(
       // declaration is the one worth naming.
       for (const match of matched) {
         const rule = read.rules[match.index];
-        // A conditional or state rule may not apply everywhere the
-        // element does: only an unconditional one can restate it.
-        if (rule === undefined || rule.conditions.length > 0) continue;
-        if (hasStatePseudo(rule.selector)) continue;
+        // Only a rule that applies wherever the element is can restate
+        // its line (certain.ts).
+        if (rule === undefined || !isCertain(rule)) continue;
         if (maps[rule.index]?.[property] !== value) continue;
         // The cascade without the line may still pick another rule.
         const lines = allOf(own, property).map((d) => d.range);
@@ -451,9 +453,10 @@ function lintRuleRestatements(
   const sheet: RedundancyRule[] = read.rules.map((rule) => ({
     selector: rule.selector,
     conditions: rule.conditions,
+    scopes: rule.scopes,
     styles: declarationMap(rule.declarations),
   }));
-  for (const hit of ruleRestatements(sheet, ranked, hasStatePseudo)) {
+  for (const hit of ruleRestatements(sheet, ranked)) {
     const rule = read.rules[hit.rule];
     if (rule === undefined) continue;
     // Measured: the rule's line cut from the copy, every element it
@@ -476,19 +479,6 @@ function lintRuleRestatements(
       message: `${hit.property}: ${hit.value} in rule ${ruleName(rule)} of viewport ${read.page.id} restates ${hit.restates.length === 1 ? "rule" : "rules"} ${beneath} for every element it reaches; remove it from ${ruleName(rule)}`,
     });
   }
-}
-
-/** Whether a rule may apply at one width or in one state and not at
- * another: under an at-rule that gates it (`@layer` and `@scope` do not
- * — they hold at every width), or with a state pseudo-class. */
-function varies(rule: PageRule): boolean {
-  return (
-    hasStatePseudo(rule.selector) ||
-    rule.conditions.some((condition) => {
-      const keyword = atKeyword(condition);
-      return keyword !== "layer" && keyword !== "scope";
-    })
-  );
 }
 
 function allOf(
