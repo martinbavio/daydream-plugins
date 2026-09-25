@@ -97,9 +97,9 @@ for inspection, and `pnpm test:kernel <daydream-checkout> --clean` removes
 them after — every copy at once, since they share the lockfile, so
 `--clean` takes no plugin folders. Any other flag is refused. While a run
 is going it holds a lock in the checkout (`.kernel-test.lock`, its pid and
-start time): a second run says one is in progress and stops, and `--clean`
-waits for it too; a lock whose process is gone is a killed run's leftover,
-which `--clean` removes.
+start time): a second run, or `--clean`, says one is in progress and stops
+with exit status 2 — it never waits; a lock whose process is gone is a
+killed run's leftover, which `--clean` removes.
 
 A plugin may not import the kernel's source, so a function it needs to the
 letter is copied, with a one-line marker above it naming where it came
@@ -112,7 +112,9 @@ from, and `test:kernel` checks each against the kernel it runs on
 ```
 
 `mirrors:` (or `mirrors-exact:`) promises the copy is the kernel's function
-as written, comments and formatting aside: the two are compared, and a
+as written, comments and formatting aside: the two are compared token by
+token as TypeScript's scanner reads them — so `a + ++b` is not `a++ + b`,
+and a line break that ends a statement (`return⏎x`) is not a space — and a
 difference fails the run, naming the line where it starts in each file.
 `mirrors-adapted:` is a copy changed on purpose — an import path, a type, a
 helper's name — so the two are never compared; the hash is the kernel

@@ -657,6 +657,79 @@ describe("mrbavio.html-editor", () => {
     expect(text()).toBe(edited("Old headline", "Kept"));
   });
 
+  test("a save the hidden dock deferred is dropped when another document loads, or an undo runs, before it lands", async () => {
+    const a = createPageItem({ html: HTML, css: CSS }, { id: "same", frame: { width: 600 } });
+    const m = await mountPage({ version: 7, items: [a] });
+    // The dock hidden is the shell's state: shown again whatever happens,
+    // as the next test expects to find it.
+    try {
+      select("same");
+      content().focus();
+      await typeAll(edited("Old headline", "Typed before the load"));
+      key(content(), { key: "\\", code: "Backslash", metaKey: true });
+      expect(m.panel()).toBeNull();
+      // Before the deferred save runs: the same document reopened — a page
+      // of the same id, the same text.
+      const b = createPageItem({ html: HTML, css: CSS }, { id: "same", frame: { width: 600 } });
+      m.store.loadDocument({ version: 7, items: [b] }, { slug: null });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flush();
+      expect(stored("same")).toBe(HTML);
+      expect(m.store.canUndo()).toBe(false);
+
+      // An undo before it runs: the typing belonged to the state undone.
+      key(window, { key: "\\", code: "Backslash", metaKey: true });
+      await waitMounted("same", "h1");
+      select("same");
+      content().focus();
+      const saved = edited("Old headline", "Saved");
+      await type(saved);
+      expect(stored("same")).toBe(saved);
+      await pause();
+      await typeAll(edited("Body copy", "Pending", saved));
+      key(content(), { key: "\\", code: "Backslash", metaKey: true });
+      expect(m.panel()).toBeNull();
+      m.kernel.commands.runCommand("core.undo");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flush();
+      expect(stored("same")).toBe(HTML);
+    } finally {
+      if (m.panel() === null) key(window, { key: "\\", code: "Backslash", metaKey: true });
+    }
+  });
+
+  test("a write that throws keeps the typing, as a draft with the reason, and the next save carries it", async () => {
+    let failing = true;
+    // The plugin's API with a writePage that throws while `failing`.
+    const entry: typeof activate = (dd) => {
+      const api = Object.create(dd) as typeof dd;
+      Object.defineProperty(api, "writePage", {
+        value: (edit: Parameters<typeof dd.writePage>[0]) => {
+          if (failing) throw new Error("the disk is full");
+          return dd.writePage(edit);
+        },
+      });
+      activate(api);
+    };
+    const item = createPageItem({ html: HTML, css: CSS }, { frame: { width: 960 } });
+    itemId = item.id;
+    mounted = await mountPlugin({ entry, manifest, document: { version: 7, items: [item] } });
+    await waitMounted(itemId, "h1");
+    select(itemId);
+    content().focus();
+    const typed = edited("Old headline", "Not lost");
+    await type(typed);
+    expect(text()).toBe(typed);
+    expect(stored()).toBe(HTML);
+    expect(message()).toContain("the disk is full");
+
+    failing = false;
+    const more = edited("Old headline", "Not lost, saved");
+    await type(more);
+    expect(message()).toBeNull();
+    expect(stored()).toBe(more);
+  });
+
   test("text typed over a page that changed elsewhere on the canvas is carried onto it and saved", async () => {
     await mountPage();
     select(itemId);

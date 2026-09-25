@@ -19,7 +19,7 @@ import type { DaydreamApi } from "@daydream/plugin-api";
 import { adoptInto, isViewport, markerOf, roundOf } from "./adopt";
 import { VERBS as VERB_SPECS } from "./bridge/verbs";
 import createCaption from "./Caption";
-import { absoluteUrls, markTarget, soleMatch, takeOut } from "./pageExport";
+import { absoluteUrls, markTarget, soleMatch, takeOut, withoutMountMarks } from "./pageExport";
 import createPicker, { type PickerEntry } from "./Picker";
 import { createSession, SESSION_KEY } from "./session";
 import { captionCss, pickerCss } from "./styles";
@@ -140,8 +140,10 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   // The viewport as one standalone HTML page, for a judge that reads
   // HTML — Impeccable's detector (the critique and audit verbs). The
   // kernel renders it: a live mount — the page's own text made safe, its
-  // css one <style> (decision #76) — its document read once, disposed.
-  // Root-relative urls (a page's `assets/<file>` pointed at this host's
+  // css one <style> (decision #76) — its document read once, disposed,
+  // with what the mount adds for its own reads taken back out (the
+  // measuring ids, the container probes), so the detector judges the
+  // page and nothing else. Root-relative urls (a page's `assets/<file>` pointed at this host's
   // route for its document) are made absolute so the file stands alone.
   dd.registerTool({
     name: HTML_TOOL,
@@ -171,9 +173,10 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
       const withBaseline = input["baseline"] === true;
       const viewport = dd.core.viewportItems(dd.document()).find((v) => v.id === id);
       if (viewport === undefined) throw new Error(`no viewport with id "${id}"`);
-      const mounted = await dd.mountViewport(viewport, { still: true });
+      const mounted = await dd.mountViewport(viewport);
       try {
         const doc = mounted.document();
+        withoutMountMarks(doc);
         const node = element === undefined ? null : soleMatch(doc, element, id);
         const target = node === null ? undefined : { selector: element!, kept: markTarget(node) };
         absoluteUrls(doc, window.location.origin);
@@ -199,10 +202,11 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
 
   // What the canvas can see of a round's progress (the agent's impeccable_done
   // is the explicit end). A VARIANTS round: every variant carries the
-  // source and the verb in its notes marker, so the count on the canvas
-  // against the marker's `of` is the progress, and reaching it is the end
-  // — counting only the variants that landed after the pick was taken, so
-  // an earlier round of the same verb on the same source is not this one's.
+  // source, the verb and the pick's round in its notes marker, so the
+  // count on the canvas against the marker's `of` is the progress, and
+  // reaching it is the end — the round known by its id alone, as adopt
+  // knows it, so another run of the verb on the same source, before or
+  // during, is not this one's.
   // An IN-PLACE round lands as one change to the source's page: its two
   // texts, compared before and after — a move, a rename or a meta edit
   // is not it.
@@ -212,19 +216,19 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     return JSON.stringify([item.payload.html, item.payload.css]);
   };
   let sourceBefore: string | null = null;
-  let variantsBefore: ReadonlySet<string> = new Set();
 
   dd.registerTool({
     name: PICK_TOOL,
     title: "Impeccable pick",
     description:
-      "Take the verb the user picked on the canvas: answers {pick: {verb, viewportId, element, brief?, at} | null, exit} — element a CSS selector naming the target in the viewport's page, null for the whole page — and clears it (the canvas shows the pick as building). Call it first on any Impeccable request and on every wake-up of a session's watch; then impeccable_verb with the pick's verb, viewport, element and — when present — brief, the user's own words about this round, which outrank the playbook's defaults. exit true means the user ended the session.",
+      "Take the verb the user picked on the canvas: answers {pick: {verb, viewportId, element, brief?, round, at} | null, exit} — element a CSS selector naming the target in the viewport's page, null for the whole page — and clears it (the canvas shows the pick as building). Call it first on any Impeccable request and on every wake-up of a session's watch; then impeccable_verb with the pick's verb, viewport, element, round — every variant's marker carries it, a retried call's too — and, when present, brief, the user's own words about this round, which outrank the playbook's defaults. exit true means the user ended the session.",
     inputSchema: { type: "object", properties: {}, required: [] },
     annotations: { idempotentHint: false, destructiveHint: false },
     run: () => {
       const taken = session.take();
-      sourceBefore = taken.pick === null ? null : pageText(taken.pick.viewportId);
-      variantsBefore = new Set(dd.items().filter((i) => markerOf(i) !== null).map((i) => i.id));
+      // The round's baseline, taken with its pick and only then: a call
+      // with nothing waiting leaves the round being built as it is.
+      if (taken.pick !== null) sourceBefore = pageText(taken.pick.viewportId);
       return taken;
     },
   });
@@ -245,13 +249,13 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   const trackBuilding = (): void => {
     const phase = untrack(session.phase);
     if (phase.kind !== "building") return;
-    const { verb, viewportId } = phase.pick;
+    const { verb, viewportId, round } = phase.pick;
     if (isVariantsVerb(verb)) {
       let landed = 0;
       let of: number | null = null;
       for (const item of dd.items()) {
         const m = markerOf(item);
-        if (m !== null && m.sourceId === viewportId && m.verb === verb && !variantsBefore.has(item.id)) {
+        if (m !== null && m.sourceId === viewportId && m.verb === verb && m.round === round) {
           landed += 1;
           of = Math.max(of ?? 0, m.of);
         }

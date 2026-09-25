@@ -25,6 +25,7 @@ import type { Target } from "./target";
 import {
   droppedLegacyPick,
   EMPTY_SESSION,
+  roundId,
   sessionState,
   type Pick,
   type SessionState,
@@ -81,7 +82,8 @@ export interface Session {
    * it as the brief (empty: none). */
   pick(verb: string, target: Target, brief?: string): void;
   /** An agent takes what waits (impeccable_pick): the pick and the exit flag,
-   * both cleared. */
+   * both cleared. With nothing waiting, nothing changes and nothing is
+   * written. */
   take(): { pick: Pick | null; exit: boolean };
   /** The user withdrew the pick (Escape, the cancel command). */
   cancel(): void;
@@ -104,15 +106,18 @@ export interface Session {
   check(): void;
 }
 
+// mirrors: src/render/parsePage.ts parsePage
 /** The page's stored markup as the browser reads it in STANDARDS mode —
- * the kernel's one parse of a page (render/parsePage.ts), which the
- * agent's tools resolve a selector against. A text with no doctype would
- * parse in quirks mode, where class and id selectors match
- * case-insensitively. */
+ * the kernel's one parse of a page, to the letter, which the agent's
+ * tools resolve a selector against; the plugin API has no call that
+ * answers it. A text with no doctype would parse in quirks mode, where
+ * class and id selectors match case-insensitively. */
 function parseMarkup(html: string): Document {
   const parser = new DOMParser();
   const parsed = parser.parseFromString(html, "text/html");
   if (parsed.compatMode === "CSS1Compat") return parsed;
+  // A second doctype is a parse error the parser ignores, so a page whose
+  // own doctype is a quirky one is read under this one instead.
   const standard = parser.parseFromString(`<!doctype html>${html}`, "text/html");
   if (parsed.doctype === null) standard.doctype?.remove();
   return standard;
@@ -123,9 +128,27 @@ export function createSession(dd: DaydreamApi): Session {
   let state: SessionState = EMPTY_SESSION;
   let watch: Watch = NONE;
 
+  /** Every change goes to the plugin's file, which is what an agent
+   * reads. A write the host refuses is said; a pick it refused is no
+   * longer waiting, since no agent can see it — the caption would
+   * otherwise wait for one forever. */
   const write = (next: Omit<SessionState, "seq">): void => {
     state = { ...next, seq: state.seq + 1 };
-    void dd.storage.set(SESSION_KEY, state);
+    const written = state;
+    dd.storage.set(SESSION_KEY, written).catch((error: unknown) => {
+      const reason = error instanceof Error ? error.message : String(error);
+      const what =
+        written.pick !== null
+          ? `the ${written.pick.verb} pick could not be saved to the plugin's file, where an agent looks for it, so it is not waiting for one: pick the verb again once the file can be written`
+          : `the session could not be saved to the plugin's file${written.exit ? ", so an agent watching it is not told the session ended" : ""}`;
+      console.error(`[${dd.plugin.id}] ${what}: ${reason}`);
+      const current = untrack(phase);
+      if (written.pick !== null && state.pick === written.pick && current.kind === "waiting") {
+        watch = NONE;
+        state = { ...state, pick: null };
+        setPhase({ kind: "idle" });
+      }
+    });
   };
   const pageHtml = (viewportId: string): string | null => {
     const item = untrack(dd.items).find((i) => i.id === viewportId);
@@ -214,6 +237,9 @@ export function createSession(dd: DaydreamApi): Session {
         viewportId: target.viewportId,
         element: target.element,
         ...(trimmed === "" ? {} : { brief: trimmed }),
+        // The round is minted here, once: whatever the agent lands for
+        // this pick carries it, however often it calls the verb.
+        round: roundId(),
         at: Date.now(),
       };
       // The element, while its mount lives: where the anchor was written.
@@ -223,6 +249,9 @@ export function createSession(dd: DaydreamApi): Session {
     },
     take() {
       check();
+      // Nothing waits: nothing to take, and nothing to write — a call
+      // mid-round leaves the round as it is.
+      if (state.pick === null && !state.exit) return { pick: null, exit: false };
       watch = NONE;
       const taken = { pick: state.pick, exit: state.exit };
       if (taken.pick !== null) {

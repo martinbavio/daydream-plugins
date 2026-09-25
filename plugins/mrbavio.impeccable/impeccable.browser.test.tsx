@@ -217,6 +217,10 @@ describe("mrbavio.impeccable in the shell", () => {
       pick: { verb: "bolder", viewportId: source.id, element: "div.grid", brief: "keep the photo, louder CTA" },
     });
     expect(JSON.stringify(waiting)).not.toContain(grid);
+    // The round is minted with the pick: every variant the agent lands
+    // for it carries this id, however many times it calls the verb.
+    const round = (waiting["pick"] as { round: string }).round;
+    expect(round).toMatch(/^[a-z0-9]{6}$/);
     await settle();
     expect(caption()!.textContent).toBe("bolder · waiting for an agent");
     expect(caption()!.dataset["phase"]).toBe("waiting");
@@ -225,7 +229,7 @@ describe("mrbavio.impeccable in the shell", () => {
 
     // The agent takes it: the pick is answered once and cleared.
     const taken = (await pickTool().run({})) as { pick: unknown; exit: boolean };
-    expect(taken).toMatchObject({ pick: { verb: "bolder", element: "div.grid", brief: "keep the photo, louder CTA" }, exit: false });
+    expect(taken).toMatchObject({ pick: { verb: "bolder", element: "div.grid", brief: "keep the photo, louder CTA", round }, exit: false });
     expect(await stored(files, 2)).toMatchObject({ pick: null, exit: false });
     await settle();
     expect(caption()!.textContent).toBe("bolder · building");
@@ -236,13 +240,13 @@ describe("mrbavio.impeccable in the shell", () => {
     mounted.store.landItems([page("white")]);
     await settle();
     expect(caption()!.textContent).toBe("bolder · building");
-    mounted.store.landItems([variantOf(source, "bolder", 1, 3)]);
+    mounted.store.landItems([variantOf(source, "bolder", 1, 3, round)]);
     await settle();
     expect(caption()!.textContent).toBe("bolder · 1 of 3");
-    mounted.store.landItems([variantOf(source, "bolder", 2, 3)]);
+    mounted.store.landItems([variantOf(source, "bolder", 2, 3, round)]);
     await settle();
     expect(caption()!.textContent).toBe("bolder · 2 of 3");
-    mounted.store.landItems([variantOf(source, "bolder", 3, 3)]);
+    mounted.store.landItems([variantOf(source, "bolder", 3, 3, round)]);
     await settle();
     expect(caption()).toBeNull();
   });
@@ -342,8 +346,8 @@ describe("mrbavio.impeccable in the shell", () => {
     // impeccable_done: the agent's word ends a round the canvas cannot see the
     // end of (a round that stopped short).
     await pickVerb("bolder");
-    await pickTool().run({});
-    mounted.store.landItems([variantOf(source, "bolder", 1, 3)]);
+    const { pick } = (await pickTool().run({})) as { pick: { round: string } };
+    mounted.store.landItems([variantOf(source, "bolder", 1, 3, pick.round)]);
     await settle();
     expect(caption()!.textContent).toBe("bolder · 1 of 3");
     expect(await tool(DONE_TOOL).run({})).toEqual({ done: true });
@@ -634,6 +638,62 @@ describe("mrbavio.impeccable in the shell", () => {
     expect(await stored(files, 4)).toMatchObject({ exit: false });
   });
 
+  test("impeccable_pick with nothing waiting is a no-op: nothing is written, and the round being built still ends when its source changes", async () => {
+    const { doc, source } = sourceDocument();
+    const { host, files } = fakeHost();
+    mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
+    await mountedId(source.id, ".grid");
+
+    // Nothing ever picked: nothing to write.
+    expect((await pickTool().run({})) as unknown).toEqual({ pick: null, exit: false });
+    await settle();
+    expect(files[manifest.id]).toBeUndefined();
+
+    select(source.id);
+    await pickVerb("polish");
+    await pickTool().run({});
+    expect(await stored(files, 2)).toMatchObject({ pick: null });
+    const saves = vi.mocked(host.storage!.savePluginData).mock.calls.length;
+    // A second call mid-round — an agent checking again — takes nothing.
+    expect((await pickTool().run({})) as unknown).toEqual({ pick: null, exit: false });
+    await settle();
+    expect(vi.mocked(host.storage!.savePluginData).mock.calls.length).toBe(saves);
+    expect((files[manifest.id]![SESSION_KEY] as { seq: number }).seq).toBe(2);
+    expect(caption()!.textContent).toBe("polish · building");
+    // The round's baseline is the one taken with the pick: the rework
+    // landing still ends it.
+    mounted.store.setDocument((d) => {
+      (d.items[0] as DreamPage).payload.css += "body { background: papayawhip; }\n";
+    });
+    await settle();
+    expect(caption()).toBeNull();
+  });
+
+  test("a pick the storage file refuses is said, and not left waiting for an agent who cannot see it", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { doc, source } = sourceDocument();
+      const { host } = fakeHost();
+      vi.mocked(host.storage!.savePluginData).mockRejectedValue(new Error("disk full"));
+      mounted = await mountPlugin({ entry: activate, manifest, document: doc, host });
+      await mountedId(source.id, ".grid");
+
+      select(source.id);
+      await pickVerb("polish");
+      await vi.waitFor(() =>
+        expect(error).toHaveBeenCalledWith(
+          expect.stringMatching(/^\[mrbavio\.impeccable\] the polish pick could not be saved.*: disk full$/),
+        ),
+      );
+      await settle();
+      expect(caption()).toBeNull();
+      // Nor does an agent's call take it: there is no pick.
+      expect((await pickTool().run({})) as unknown).toEqual({ pick: null, exit: false });
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   test("a waiting pick survives a reload, captioned above its element, found by selector; exit does not", async () => {
     const { doc, source } = sourceDocument();
     const { host } = fakeHost({
@@ -786,6 +846,35 @@ describe("mrbavio.impeccable in the shell", () => {
     expect(caption()).toBeNull();
   });
 
+  test("impeccable_html answers the page's own markup and css: nothing the mount put in for its reads — no motion pin, no container probes, no measuring ids", async () => {
+    const css = [
+      "main { container-type: inline-size; transition: color 200ms; }",
+      '.t::before { content: "{ @media all { }"; }',
+      "@container (width > 100px) { .t { color: rgb(1, 2, 3); } @media (width > 1px) { .t { font-size: 31px; } } }",
+      ".lead { & .x { @container (width > 5px) { color: red; } } }",
+      "",
+    ].join("\n");
+    const item = createPageItem(
+      {
+        html: '<!doctype html><html><head></head><body><main><p class="lead">a</p><p class="t">b</p></main></body></html>',
+        css,
+      },
+      { frame: { width: 640 } },
+    );
+    mounted = await mountPlugin({ entry: activate, manifest, document: { version: 7, items: [item] }, host: fakeHost().host });
+    const reply = (await tool(HTML_TOOL).run({ viewport: item.id, element: ".t", baseline: true })) as {
+      html: string;
+      baseline: string;
+    };
+    for (const html of [reply.html, reply.baseline]) {
+      expect(html).not.toContain("--dream-container");
+      expect(html).not.toContain("data-dream-");
+      expect(html).not.toContain("!important");
+      const page = new DOMParser().parseFromString(html, "text/html");
+      expect(Array.from(page.querySelectorAll("style"), (s) => s.textContent)).toEqual([css]);
+    }
+  });
+
   test("impeccable_html keeps the target as the page styles it: a rule that reaches it through a sibling still does", async () => {
     const item = createPageItem(
       {
@@ -863,7 +952,7 @@ describe("mrbavio.impeccable in the shell", () => {
     expect((mounted.store.document.items[0] as DreamPage).payload.css).toBe(second[1]!.payload.css);
   });
 
-  test("a second round of a verb on one source counts its own variants, not the first round's", async () => {
+  test("the caption counts the pick's round alone: another round of the verb on the source, landed before or during, is not this one's", async () => {
     const { doc, source } = sourceDocument("Pricing");
     doc.items.push(...[1, 2, 3].map((n) => variantOf(source, "bolder", n, 3, "r1")));
     mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
@@ -871,14 +960,44 @@ describe("mrbavio.impeccable in the shell", () => {
 
     select(source.id);
     await pickVerb("bolder");
-    await pickTool().run({});
+    const { pick } = (await pickTool().run({})) as { pick: { round: string } };
     await settle();
     expect(caption()!.textContent).toBe("bolder · building");
+    // A variant of some other run of the verb — a verb call that minted
+    // its own round — is not the pick's.
     mounted.store.landItems([variantOf(source, "bolder", 1, 3, "r2")]);
     await settle();
+    expect(caption()!.textContent).toBe("bolder · building");
+    mounted.store.landItems([variantOf(source, "bolder", 1, 3, pick.round)]);
+    await settle();
     expect(caption()!.textContent).toBe("bolder · 1 of 3");
-    mounted.store.landItems([variantOf(source, "bolder", 2, 3, "r2"), variantOf(source, "bolder", 3, 3, "r2")]);
+    mounted.store.landItems([variantOf(source, "bolder", 2, 3, pick.round), variantOf(source, "bolder", 3, 3, pick.round)]);
     await settle();
     expect(caption()).toBeNull();
+  });
+
+  test("a verb called twice for one pick is one round: adopt takes out every variant of it, the ones the caption counted", async () => {
+    const { doc, source } = sourceDocument("Pricing");
+    mounted = await mountPlugin({ entry: activate, manifest, document: doc, host: fakeHost().host });
+    await mountedId(source.id, ".grid");
+
+    select(source.id);
+    await pickVerb("bolder");
+    const { pick } = (await pickTool().run({})) as { pick: { round: string } };
+    // The first call's fan stopped at two; the retry landed a third, all
+    // under the pick's round.
+    const fan = [1, 2, 1].map((n) => variantOf(source, "bolder", n, 3, pick.round));
+    mounted.store.landItems(fan.slice(0, 2));
+    await settle();
+    expect(caption()!.textContent).toBe("bolder · 2 of 3");
+    mounted.store.landItems(fan.slice(2));
+    await settle();
+    expect(caption()).toBeNull();
+
+    const buttons = Array.from(mounted.host.querySelectorAll<HTMLElement>('[data-item-action="mrbavio.impeccable:adopt"]'));
+    expect(buttons.length).toBe(3);
+    buttons[2]!.click();
+    flush();
+    expect(mounted.store.document.items.map((i) => i.id)).toEqual([source.id]);
   });
 });

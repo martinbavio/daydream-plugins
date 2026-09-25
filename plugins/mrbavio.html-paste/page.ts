@@ -28,6 +28,25 @@ export function parseHtml(html: string): Document {
   return new DOMParser().parseFromString(html, "text/html");
 }
 
+/** How many elements a paste of `doc` would store, as the element cap
+ * counts them: every one in the head and the body — a `<meta>`, a
+ * `<style>` too — and every one in a `<template>`'s content, which is not
+ * in the tree and is stored all the same; not the `html`, `head` and
+ * `body` every page has. */
+export function pastedElements(doc: Document): number {
+  const count = (root: ParentNode): number => {
+    let n = 0;
+    for (const el of root.querySelectorAll("*")) {
+      n += 1;
+      if (el.localName === "template" && "content" in el) {
+        n += count((el as HTMLTemplateElement).content);
+      }
+    }
+    return n;
+  };
+  return count(doc.head) + count(doc.body);
+}
+
 /** Whether the parse produced any element in the body — the difference
  * between markup and text that happens to start with `<`. */
 export function hasElements(doc: Document): boolean {
@@ -309,6 +328,19 @@ export interface PastedPage {
   /** What the paste changed or could not keep, in order: the paste's own
    * sentences, then the cleaning's findings in the kernel's words. */
   said: string[];
+  /** How many image files the host stored for it. */
+  stored: number;
+}
+
+/** A paste cleaned, none of its images stored yet: what `storePaste`
+ * finishes once the landing is going ahead. */
+export interface CleanedPaste {
+  options: { id: string; position: { x: number; y: number }; said: string[] };
+  /** Each `data:` image the cleaning kept, as written, by the name it
+   * was cleaned under: the files `storePaste` stores. */
+  kept: Map<string, string>;
+  page: { html: string; css: string };
+  findings: string[];
 }
 
 /** Each distinct entry once, with `×n` when it repeats, in first-seen
@@ -335,24 +367,9 @@ function renamed(text: string, names: ReadonlyMap<string, string>): string {
 
 /**
  * The viewport `html` lands as, at `position`: the text cleaned exactly
- * as every landing cleans a page, and stored as the cleaning answers it.
- *
- * A page names its images by url, not by their bytes (decision #76). So
- * each `data:` image written in an `img`'s `src` or a css `url()` (a
- * `style` attribute, a `<style>`) goes through the cleaning under a name
- * of its own (`heldName`), and only those the cleaning kept — not one in
- * a subtree it removed — are stored through the host (`dd.vendorFile`),
- * the page's name for each copy written where the name was. One the host
- * cannot store is put back as written and the page cleaned again, as it
- * would have been: taken off an `img` (which stays, with its `alt`) and
- * kept in css, as the cleaning keeps any `data:` url there. With no
- * `data:` image and nothing to take out, the text lands byte for byte.
- *
- * `said` carries what was said before this point; the paste's own
- * sentences follow it, then the cleaning's findings. A clipboard carries
- * no address — no `<base>` or source-URL comment is read from it — so no
- * `sourceUrl` is passed: a relative stylesheet `href` resolves against
- * nothing, and the cleaning removes and reports it.
+ * as every landing cleans a page (`cleanPaste`), then its images stored
+ * (`storePaste`) — the two a paste runs apart, so that nothing is stored
+ * for a paste that is abandoned before it lands.
  */
 export async function pageFromPaste(
   dd: Pick<DaydreamApi, "cleanPage" | "vendorFile">,
@@ -363,7 +380,26 @@ export async function pageFromPaste(
     said: string[];
   },
 ): Promise<PastedPage> {
-  const said: string[] = [];
+  return storePaste(dd, await cleanPaste(dd, html, options));
+}
+
+/**
+ * `html` cleaned exactly as every landing cleans a page, nothing stored.
+ *
+ * A page names its images by url, not by their bytes (decision #76). So
+ * each `data:` image written in an `img`'s `src` or a css `url()` (a
+ * `style` attribute, a `<style>`) goes through the cleaning under a name
+ * of its own (`heldName`), and those the cleaning kept — not one in a
+ * subtree it removed — are the ones `storePaste` stores. A clipboard
+ * carries no address — no `<base>` or source-URL comment is read from it
+ * — so no `sourceUrl` is passed: a relative stylesheet `href` resolves
+ * against nothing, and the cleaning removes and reports it.
+ */
+export async function cleanPaste(
+  dd: Pick<DaydreamApi, "cleanPage">,
+  html: string,
+  options: CleanedPaste["options"],
+): Promise<CleanedPaste> {
   // Each data: image as written, by the name it is cleaned under.
   const held = new Map<string, string>();
   for (const url of writtenImageUrls(html)) {
@@ -374,16 +410,47 @@ export async function pageFromPaste(
     { html: withStoredImages(html, held), css: "" },
     { where: "paste" },
   );
-  const findings = cleaned.findings.map((finding) => finding.message);
+  const kept = new Map<string, string>();
+  for (const [url, name] of held) {
+    if (cleaned.html.includes(name) || cleaned.css.includes(name)) kept.set(url, name);
+  }
+  return {
+    options,
+    kept,
+    page: { html: cleaned.html, css: cleaned.css },
+    findings: cleaned.findings.map((finding) => finding.message),
+  };
+}
 
+/**
+ * A cleaned paste's images stored through the host (`dd.vendorFile`),
+ * the page's name for each copy written where its held name was, and the
+ * page it lands as. One the host cannot store is put back as written and
+ * the page cleaned again, as it would have been: taken off an `img`
+ * (which stays, with its `alt`) and kept in css, as the cleaning keeps
+ * any `data:` url there. With no `data:` image and nothing to take out,
+ * the text lands byte for byte. `progress.stored` counts the files
+ * stored as they are, so a caller whose landing fails can say how many
+ * it left.
+ *
+ * `said` carries what was said before this point; the paste's own
+ * sentences follow it, then the cleaning's findings.
+ */
+export async function storePaste(
+  dd: Pick<DaydreamApi, "cleanPage" | "vendorFile">,
+  cleaned: CleanedPaste,
+  progress: { stored: number } = { stored: 0 },
+): Promise<PastedPage> {
+  const said: string[] = [];
+  const findings = [...cleaned.findings];
   // What each kept name becomes: the stored copy's name, or the url as
   // written when the host could not store it.
   const names = new Map<string, string>();
   const unstored = new Set<string>();
-  for (const [url, name] of held) {
-    if (!cleaned.html.includes(name) && !cleaned.css.includes(name)) continue;
+  for (const [url, name] of cleaned.kept) {
     try {
       names.set(name, (await dd.vendorFile(fileFromDataUrl(url.trim())!)).pageSrc);
+      progress.stored += 1;
     } catch (error) {
       said.push(
         `the host could not store a data: image (${error instanceof Error ? error.message : String(error)})`,
@@ -393,8 +460,8 @@ export async function pageFromPaste(
     }
   }
   let page = {
-    html: renamed(cleaned.html, names),
-    css: renamed(cleaned.css, names),
+    html: renamed(cleaned.page.html, names),
+    css: renamed(cleaned.page.css, names),
   };
   if (unstored.size > 0) {
     const again = await dd.cleanPage(page, { where: "paste" });
@@ -413,6 +480,7 @@ export async function pageFromPaste(
     );
   }
 
+  const { options } = cleaned;
   const title = landed.title.trim();
   const item: DreamPage = {
     id: options.id,
@@ -428,6 +496,7 @@ export async function pageFromPaste(
     item,
     elements: landed.body.getElementsByTagName("*").length + 2,
     said: [...options.said, ...counted(said), ...findings],
+    stored: progress.stored,
   };
 }
 

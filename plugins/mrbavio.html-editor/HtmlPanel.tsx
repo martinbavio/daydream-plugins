@@ -269,6 +269,9 @@ export default function createHtmlPanel(state: PanelState) {
   // pending across an undo, a redo or a load belongs to the state they
   // reverted, and is dropped, never saved.
   let syncedHistory = -1;
+  // The text a write of the editor's is putting on the page, while it
+  // runs (write): the page's html is that before `synced` is.
+  let writing: string | null = null;
   // The draft ⌘Z last dropped, for ⇧⌘Z to bring back: cleared by typing,
   // by any other ⌘Z or ⇧⌘Z, and by an undo, a redo or a load.
   let dropped: { id: string; load: number; draft: Draft } | null = null;
@@ -303,10 +306,13 @@ export default function createHtmlPanel(state: PanelState) {
   };
 
   /**
-   * Write `next` over page `id`, whose html is `current`. `synced` is set
-   * before the write: the page remounts inside it, and what follows the
-   * page's html may run before it returns. A refusal puts it back to
-   * `base`, so the typing stays a change from the text it started from.
+   * Write `next` over page `id`, whose html is `current`. `synced` is
+   * set to it only once the write has landed; while it runs, `writing`
+   * names it: the page remounts inside the write, and what follows the
+   * page's html may run before it returns — it must take the page's new
+   * text for the editor's own, not an outside change. A refusal, or a
+   * write that throws, sets it to `base`, so the typing stays a change
+   * from the text it started from and is kept as a draft, never lost.
    */
   const write = (
     id: string,
@@ -318,16 +324,26 @@ export default function createHtmlPanel(state: PanelState) {
       synced = current;
       return { ok: true, text: current };
     }
+    let problem: string | null;
+    writing = next;
+    try {
+      problem = dd.writePage({
+        kind: "html",
+        viewportId: id,
+        expected: current,
+        html: next,
+      });
+    } catch (error) {
+      problem = `the page could not be saved: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      writing = null;
+    }
+    if (problem !== null) {
+      synced = base;
+      return { ok: false, kind: "refused", message: sentence(problem) };
+    }
     synced = next;
-    const problem = dd.writePage({
-      kind: "html",
-      viewportId: id,
-      expected: current,
-      html: next,
-    });
-    if (problem === null) return { ok: true, text: next };
-    synced = base;
-    return { ok: false, kind: "refused", message: sentence(problem) };
+    return { ok: true, text: next };
   };
 
   /** The draft a save of `text` that did not write leaves, held against
@@ -492,14 +508,20 @@ export default function createHtmlPanel(state: PanelState) {
 
   // The panel unmounting — the dock hidden (⌘\), the plugin unloading —
   // mid-edit: save what is pending the way blur would, after the disposal
-  // has run (never a write inside it).
+  // has run (never a write inside it). Only into the state the typing
+  // belongs to: a load or an undo, a redo, before the save runs — the
+  // same document reopened, a page of the same id — drops it, as the
+  // restore drops what is pending while the panel is up.
   onSettled(() => () => {
     clearDebounce();
     const ed = editor();
     const id = shown;
-    if (ed !== undefined && id !== null && dirty) {
+    const load = untrack(dd.loadVersion);
+    const history = untrack(dd.historyVersion);
+    if (ed !== undefined && id !== null && dirty && history === syncedHistory) {
       const text = ed.text();
       queueMicrotask(() => {
+        if (untrack(dd.loadVersion) !== load || untrack(dd.historyVersion) !== history) return;
         const result = saveText(id, text);
         if (!result.ok) drafts().set(id, draftOf(text, result));
       });
@@ -568,7 +590,7 @@ export default function createHtmlPanel(state: PanelState) {
         const page = openPage();
         if (ed === undefined || text === null || page === null) return;
         if (page !== shown) return;
-        if (!dirty && !drafts().has(page) && text !== synced) {
+        if (!dirty && !drafts().has(page) && text !== synced && text !== writing) {
           showPage(ed, page);
         }
         mark(ed, false);
