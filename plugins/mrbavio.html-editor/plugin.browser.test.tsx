@@ -698,6 +698,38 @@ describe("mrbavio.html-editor", () => {
     }
   });
 
+  test("a write that throws keeps the typing, as a draft with the reason, and the next save carries it", async () => {
+    let failing = true;
+    // The plugin's API with a writePage that throws while `failing`.
+    const entry: typeof activate = (dd) => {
+      const api = Object.create(dd) as typeof dd;
+      Object.defineProperty(api, "writePage", {
+        value: (edit: Parameters<typeof dd.writePage>[0]) => {
+          if (failing) throw new Error("the disk is full");
+          return dd.writePage(edit);
+        },
+      });
+      activate(api);
+    };
+    const item = createPageItem({ html: HTML, css: CSS }, { frame: { width: 960 } });
+    itemId = item.id;
+    mounted = await mountPlugin({ entry, manifest, document: { version: 7, items: [item] } });
+    await waitMounted(itemId, "h1");
+    select(itemId);
+    content().focus();
+    const typed = edited("Old headline", "Not lost");
+    await type(typed);
+    expect(text()).toBe(typed);
+    expect(stored()).toBe(HTML);
+    expect(message()).toContain("the disk is full");
+
+    failing = false;
+    const more = edited("Old headline", "Not lost, saved");
+    await type(more);
+    expect(message()).toBeNull();
+    expect(stored()).toBe(more);
+  });
+
   test("text typed over a page that changed elsewhere on the canvas is carried onto it and saved", async () => {
     await mountPage();
     select(itemId);
