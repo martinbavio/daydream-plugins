@@ -104,15 +104,18 @@ export interface Session {
   check(): void;
 }
 
+// mirrors: src/render/parsePage.ts parsePage
 /** The page's stored markup as the browser reads it in STANDARDS mode —
- * the kernel's one parse of a page (render/parsePage.ts), which the
- * agent's tools resolve a selector against. A text with no doctype would
- * parse in quirks mode, where class and id selectors match
- * case-insensitively. */
+ * the kernel's one parse of a page, to the letter, which the agent's
+ * tools resolve a selector against; the plugin API has no call that
+ * answers it. A text with no doctype would parse in quirks mode, where
+ * class and id selectors match case-insensitively. */
 function parseMarkup(html: string): Document {
   const parser = new DOMParser();
   const parsed = parser.parseFromString(html, "text/html");
   if (parsed.compatMode === "CSS1Compat") return parsed;
+  // A second doctype is a parse error the parser ignores, so a page whose
+  // own doctype is a quirky one is read under this one instead.
   const standard = parser.parseFromString(`<!doctype html>${html}`, "text/html");
   if (parsed.doctype === null) standard.doctype?.remove();
   return standard;

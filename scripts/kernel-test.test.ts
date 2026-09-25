@@ -496,6 +496,29 @@ describe("kernel-test's mirrors", () => {
     expect(r.stderr).not.toContain("tall differs");
   });
 
+  test("the Impeccable session's page parse is a marked copy of the kernel's, checked against it", () => {
+    const k = scratchKernel();
+    mkdirSync(path.join(k, "src", "render"), { recursive: true });
+    writeFileSync(
+      path.join(k, "src", "render", "parsePage.ts"),
+      [
+        "export function parsePage(html: string): Document {",
+        '  return new DOMParser().parseFromString(html, "text/html");',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const pnpm = fakePnpm({ vitest: " Tests  1 passed (1)\n" });
+    const r = spawnSync("node", [script, k, path.join(repo, "plugins", "mrbavio.impeccable")], {
+      encoding: "utf8",
+      env: pnpm.env,
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(
+      /mrbavio\.impeccable\/session\.ts:\d+: parseMarkup differs from the kernel's parsePage \(src\/render\/parsePage\.ts:1\)/,
+    );
+  });
+
   test("a marker naming what the kernel does not have fails", () => {
     const r = mirrorRun(
       [
