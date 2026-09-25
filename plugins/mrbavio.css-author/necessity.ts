@@ -11,9 +11,10 @@
 //
 // A PAGE (decision #76) is text, so a declaration is removed from the
 // TEXT: the mount is the caller's alone and nothing done to it is stored
-// (`MountedViewport.document()`), so the page's `<style>` in the mounted
+// (`BareMountedViewport.document()`), so the page's `<style>` in the mounted
 // copy has the declaration cut out of it — exactly the characters the
-// author wrote, found by the scanner (pageCss.ts) — and is put back after
+// author wrote, found by the kernel's scan (`dd.core.cssBlocks`, read by
+// pageCss.ts) — and is put back after
 // the read; an element's own declaration is cut from its `style`
 // attribute the same way. The browser parses what is left, so the answer
 // is the page without that line, whatever the line was: a shorthand, a
@@ -112,12 +113,13 @@
 // minus custom properties (see snapshotProperties for why).
 
 import type {
+  BareMountedViewport,
   CoreApi,
+  CssBlock,
   CssDeclaration,
   DreamDocument,
   DreamPage,
   Finding,
-  MountedViewport,
 } from "@daydream/plugin-api";
 
 import { isCertain } from "./certain";
@@ -291,7 +293,9 @@ async function lintViewport(
   // an element is named by its selector in the stored markup.
   const stored = dd.core.parsePage(page.payload.html);
   const { css } = page.payload;
-  const authored = pageRules(dd.core, css);
+  // Read once: the rules and the breakpoints swept are the same text's.
+  const blocks = dd.core.cssBlocks(css);
+  const authored = pageRules(blocks);
   const started = Date.now();
   let slowest = 0;
   const { own, naming, candidates, unloaded } = await withMount(dd, page, undefined, async (m) => {
@@ -323,7 +327,7 @@ async function lintViewport(
   // 3): it has nothing left to sweep.
   let pending = candidates.filter((c) => c.dead && !answered.has(c.key));
   const swept = [own];
-  const widths = probeWidths(dd.core, css, own);
+  const widths = probeWidths(dd.core, blocks, own);
   let next = 0;
   for (; next < widths.length && pending.length > 0; next++) {
     if (deadline !== undefined && Date.now() + slowest > deadline) break;
@@ -394,12 +398,12 @@ function isStartingStyle(rule: Pick<PageRule, "conditions">): boolean {
  * spaces. */
 async function prepare(
   core: CoreApi,
-  mounted: MountedViewport,
+  mounted: BareMountedViewport,
 ): Promise<Prepared> {
   const doc = mounted.document();
   const style = mountedStyle(doc);
   let base = style?.textContent ?? "";
-  const faces = fontFaceBlocks(core, base);
+  const faces = fontFaceBlocks(core.cssBlocks(base));
   if (style !== null && faces.length > 0) {
     const fonts = doc.createElement("style");
     fonts.setAttribute("data-css-author", "fonts");
@@ -425,7 +429,8 @@ async function prepare(
   return {
     doc,
     style,
-    rules: pageRules(core, base),
+    // The text with its faces blanked, read again: every offset holds.
+    rules: pageRules(core.cssBlocks(base)),
     nodes,
     own: nodes.map((node) => ({
       declarations: core.cssDeclarations(node.getAttribute("style") ?? ""),
@@ -436,15 +441,19 @@ async function prepare(
 /**
  * The widths rule 2 sweeps for a page rendered at `own`, ascending,
  * without `own` itself: SWEEP_WIDTHS plus one px either side of every px
- * breakpoint its css's `@media` preludes name (`(width >= 900px)` flips
+ * breakpoint its css's `@media` preludes name (`blocks`, the css read) (`(width >= 900px)` flips
  * between 899 and 900, `(width > 900px)` between 900 and 901, so all three
  * are probed). Container conditions name a container's width, not the
  * window's, and contribute nothing; em/rem breakpoints convert at the
  * initial font size.
  */
-export function probeWidths(core: CoreApi, css: string, own: number): number[] {
+export function probeWidths(
+  core: CoreApi,
+  blocks: readonly CssBlock[],
+  own: number,
+): number[] {
   const widths = new Set<number>(SWEEP_WIDTHS);
-  for (const prelude of mediaPreludes(core, css)) {
+  for (const prelude of mediaPreludes(blocks)) {
     for (const px of core.mediaPreludePxValues(prelude)) {
       widths.add(px - 1);
       widths.add(px);

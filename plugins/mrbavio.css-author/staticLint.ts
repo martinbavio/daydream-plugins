@@ -12,11 +12,13 @@
 // decision #48 P4); the OPINION that these are worth refusing a landing
 // for is this plugin's.
 //
-// A page (decision #76) is two texts. The markup is parsed by the
-// browser (`DOMParser`, pageDom.ts): an element's own declarations are
-// its `style` attribute, and it is named in a finding by its unique
-// selector (`dd.core.uniqueSelector`), as `measure` names it. The css is
-// scanned (pageCss.ts) so each declaration is judged as the author wrote it — the
+// A page (decision #76) is two texts. The markup is parsed as the kernel
+// parses it (`dd.core.parsePage`, the browser's parser in standards mode;
+// pageDom.ts walks it): an element's own declarations are its `style`
+// attribute, and it is named in a finding by its unique selector
+// (`dd.core.uniqueSelector`), as `measure` names it. The css is read once
+// by the kernel's scan (`dd.core.cssBlocks`, walked by pageCss.ts) so
+// each declaration is judged as the author wrote it — the
 // CSSOM drops `width: 100` before anyone could read it, which is the
 // point of rule 1 — and a rule finding carries the rule's position among
 // the page's rules in `rule`, the address the gate runner keys a
@@ -25,6 +27,7 @@
 
 import type {
   CoreApi,
+  CssBlock,
   CssDeclaration,
   DreamDocument,
   DreamPage,
@@ -32,7 +35,7 @@ import type {
 } from "@daydream/plugin-api";
 
 import {
-  fontFaces,
+  fontFaceBlocks,
   pageRules,
   ruleName,
   selectorPreludes,
@@ -50,7 +53,9 @@ export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
   for (const page of core.viewportItems(doc) as DreamPage[]) {
     const { css } = page.payload;
     const parsed = core.parsePage(page.payload.html);
-    const rules = pageRules(core, css);
+    // Read once: every walk below is over the same blocks.
+    const blocks = core.cssBlocks(css);
+    const rules = pageRules(blocks);
     const elements = lintElements(parsed);
     const names = new Map<Element, string>();
     const nameOf = (el: Element): string => {
@@ -66,10 +71,10 @@ export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
       if (own.length === 0) continue;
       lintUnitlessLengths(own, nameOf(el), findings);
     }
-    lintUnusedFontFaces(core, page, css, rules, elements, findings);
+    lintUnusedFontFaces(core, page, blocks, rules, elements, findings);
     lintUnitlessLengthsOnRules(rules, page.id, findings);
     lintUnreferencedClasses(
-      selectorPreludes(core, css),
+      selectorPreludes(blocks),
       elements,
       nameOf,
       page.id,
@@ -278,12 +283,12 @@ export function lintUnitlessLengthsOnRules(
 function lintUnusedFontFaces(
   core: CoreApi,
   page: DreamPage,
-  css: string,
+  blocks: readonly CssBlock[],
   rules: readonly PageRule[],
   elements: readonly Element[],
   findings: Finding[],
 ): void {
-  const faces = fontFaces(core, css);
+  const faces = fontFaceBlocks(blocks).map(({ block }) => block);
   if (faces.length === 0) return;
   const named = new Set<string>();
   /** Values searched by substring: `font` shorthands the browser could

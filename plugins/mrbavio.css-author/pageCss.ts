@@ -12,9 +12,10 @@
 // has no offsets, and a rule the browser refuses is simply absent, so
 // lining the CSSOM up with the text by counting drifts.
 //
-// DOM-free: what reads the text is handed in (`CssReader`, the plugin's
-// `dd.core`), and the rest is this file's own reading of what the scan
-// found.
+// DOM-free and scan-free: the caller reads a text once, with
+// `dd.core.cssBlocks`, and hands the blocks to every walk here, which is
+// this file's own reading of what the scan found — so a test builds the
+// blocks it needs by hand.
 //
 // THE RULES a lint judges (`pageRules`) are the style rules, in source
 // order, each with its declarations: a top-level rule, a rule nested in
@@ -28,10 +29,7 @@
 // `selector` and `scopes`; ruleMatch.ts matches it), and the `@scope`'s
 // own declarations style the root.
 
-import type { CoreApi, CssBlock, CssDeclaration } from "@daydream/plugin-api";
-
-/** What reads a css text: the kernel's scan (`dd.core`). */
-export type CssReader = Pick<CoreApi, "cssBlocks">;
+import type { CssBlock, CssDeclaration } from "@daydream/plugin-api";
 
 /** One style rule of a page, as the lints judge it. */
 export interface PageRule {
@@ -97,11 +95,12 @@ export function atKeyword(prelude: string): string | null {
   return match === null ? null : (match[1] as string).toLowerCase();
 }
 
-/** Every style rule of the text, in source order (see PageRule). The
- * blocks are walked with an explicit stack, as they were scanned, so no
- * nesting exhausts the call stack; a rule's lists of parents, conditions
- * and scopes are built only for a rule the walk keeps (`Chain`). */
-export function pageRules(reader: CssReader, css: string): PageRule[] {
+/** Every style rule of a css text's blocks (`dd.core.cssBlocks`), in
+ * source order (see PageRule). The blocks are walked with an explicit
+ * stack, as they were scanned, so no nesting exhausts the call stack; a
+ * rule's lists of parents, conditions and scopes are built only for a
+ * rule the walk keeps (`Chain`). */
+export function pageRules(blocks: readonly CssBlock[]): PageRule[] {
   const rules: PageRule[] = [];
   /** A list of sibling blocks being walked, and what they sit inside. */
   interface Level {
@@ -114,7 +113,7 @@ export function pageRules(reader: CssReader, css: string): PageRule[] {
   }
   const levels: Level[] = [
     {
-      blocks: reader.cssBlocks(css),
+      blocks,
       at: 0,
       conditions: null,
       parents: null,
@@ -325,23 +324,35 @@ function scopePrelude(
 }
 
 /** The index of the `)` closing the `(` that `text` opens with, outside
- * strings, or -1. */
+ * strings (`stringEnd`) and escapes, or -1. */
 function closingParen(text: string): number {
   let depth = 0;
-  let quote: string | null = null;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i] as string;
-    if (quote !== null) {
-      if (ch === "\\") i++;
-      else if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === '"' || ch === "'") quote = ch;
+    if (ch === '"' || ch === "'") i = stringEnd(text, i) - 1;
     else if (ch === "\\") i++;
     else if (ch === "(") depth++;
     else if (ch === ")" && --depth === 0) return i;
   }
   return -1;
+}
+
+/** Just past the string whose quote is at `i`, read as the CSS tokenizer
+ * reads one: an escape hides the character after it (an escaped newline
+ * continues the string), and a newline not escaped ends it — the
+ * tokenizer's bad string — as the end of the text does. The one string
+ * reader of every walk over a selector or a prelude here. */
+function stringEnd(text: string, i: number): number {
+  const quote = text[i];
+  let j = i + 1;
+  while (j < text.length) {
+    const ch = text[j];
+    if (ch === quote) return j + 1;
+    if (ch === "\n" || ch === "\r" || ch === "\f") return j;
+    if (ch !== "\\") j++;
+    else j += text.startsWith("\r\n", j + 1) ? 3 : 2;
+  }
+  return text.length;
 }
 
 /** Whether the selector names the `:scope` pseudo-class
@@ -357,22 +368,20 @@ export function hasScopePseudo(selector: string): boolean {
  * Chromium. */
 export function replaceScopePseudo(selector: string, by: string): string {
   let out = "";
-  let quote: string | null = null;
   let bracket = false;
   for (let i = 0; i < selector.length; i++) {
     const ch = selector[i] as string;
-    if (quote !== null) {
-      out += ch;
-      if (ch === "\\") out += selector[++i] ?? "";
-      else if (ch === quote) quote = null;
+    if (ch === '"' || ch === "'") {
+      const end = stringEnd(selector, i);
+      out += selector.slice(i, end);
+      i = end - 1;
       continue;
     }
     if (ch === "\\") {
       out += ch + (selector[++i] ?? "");
       continue;
     }
-    if (ch === '"' || ch === "'") quote = ch;
-    else if (ch === "[") bracket = true;
+    if (ch === "[") bracket = true;
     else if (ch === "]") bracket = false;
     else if (!bracket && ch === ":" && SCOPE_PSEUDO.test(selector.slice(i, i + 7))) {
       out += by;
@@ -388,33 +397,16 @@ export function replaceScopePseudo(selector: string, by: string): string {
  * name. */
 const SCOPE_PSEUDO = /^:scope(?![\w\\-]|[^\x00-\x7f])/i;
 
-/** Every `@font-face` block of the text, wherever a group rule holds it,
- * with its declarations. */
-export function fontFaces(reader: CssReader, css: string): CssBlock[] {
-  const out: CssBlock[] = [];
-  walkBlocks(reader.cssBlocks(css), (block) => {
-    if (block.statement) return false;
-    const keyword = atKeyword(block.prelude);
-    if (keyword === "font-face") {
-      out.push(block);
-      return false;
-    }
-    return keyword === null || GROUP_RULES.has(keyword);
-  });
-  return out;
-}
-
 /** Every `@font-face` block the browser reads as a face — at the top
- * level or inside group rules, never inside a style rule, where none is
- * one — with the preludes of the group rules around it, outermost first.
- * Walked with an explicit stack, as the rules are. */
+ * level or inside group rules, never inside a style rule, where Chromium
+ * drops one — with the preludes of the group rules around it, outermost
+ * first. Walked with an explicit stack, as the rules are. */
 export function fontFaceBlocks(
-  reader: CssReader,
-  css: string,
+  blocks: readonly CssBlock[],
 ): { block: CssBlock; within: string[] }[] {
   const out: { block: CssBlock; within: string[] }[] = [];
   const levels: { blocks: readonly CssBlock[]; at: number; within: Chain<string> }[] = [
-    { blocks: reader.cssBlocks(css), at: 0, within: null },
+    { blocks, at: 0, within: null },
   ];
   while (levels.length > 0) {
     const level = levels[levels.length - 1]!;
@@ -438,10 +430,11 @@ export function fontFaceBlocks(
   return out;
 }
 
-/** Every `@media` prelude of the text, nested ones included, as written. */
-export function mediaPreludes(reader: CssReader, css: string): string[] {
+/** Every `@media` prelude of the blocks, nested ones included, as
+ * written. */
+export function mediaPreludes(blocks: readonly CssBlock[]): string[] {
   const out: string[] = [];
-  walkBlocks(reader.cssBlocks(css), (block) => {
+  walkBlocks(blocks, (block) => {
     if (block.statement) return false;
     const keyword = atKeyword(block.prelude);
     if (keyword === "media") out.push(block.prelude);
@@ -450,12 +443,12 @@ export function mediaPreludes(reader: CssReader, css: string): string[] {
   return out;
 }
 
-/** Every selector-bearing prelude of the text — each style rule's
+/** Every selector-bearing prelude of the blocks — each style rule's
  * selector as written, nested ones included, and each `@scope`'s — what
  * the unreferenced-class rule reads for names (staticLint.ts). */
-export function selectorPreludes(reader: CssReader, css: string): string[] {
+export function selectorPreludes(blocks: readonly CssBlock[]): string[] {
   const out: string[] = [];
-  walkBlocks(reader.cssBlocks(css), (block) => {
+  walkBlocks(blocks, (block) => {
     if (block.statement) return false;
     const keyword = atKeyword(block.prelude);
     if (keyword === null || keyword === "scope") out.push(block.prelude);
@@ -486,41 +479,33 @@ function hasNestingSelector(selector: string): boolean {
 
 function replaceNestingSelector(selector: string, by: string): string {
   let out = "";
-  let quote: string | null = null;
   for (let i = 0; i < selector.length; i++) {
     const ch = selector[i] as string;
-    if (quote !== null) {
-      out += ch;
-      if (ch === "\\") out += selector[++i] ?? "";
-      else if (ch === quote) quote = null;
+    if (ch === '"' || ch === "'") {
+      const end = stringEnd(selector, i);
+      out += selector.slice(i, end);
+      i = end - 1;
       continue;
     }
     if (ch === "\\") {
       out += ch + (selector[++i] ?? "");
       continue;
     }
-    if (ch === '"' || ch === "'") quote = ch;
     out += ch === "&" ? by : ch;
   }
   return out;
 }
 
 /** The selector list's members, split at top-level commas — outside
- * parens, brackets and strings. */
+ * parens, brackets, escapes and strings (`stringEnd`). */
 export function splitTopLevelCommas(selector: string): string[] {
   const parts: string[] = [];
   let depth = 0;
-  let quote: string | null = null;
   let start = 0;
   for (let i = 0; i < selector.length; i++) {
     const ch = selector[i] as string;
-    if (quote !== null) {
-      if (ch === "\\") i++;
-      else if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === "\\") i++;
-    else if (ch === '"' || ch === "'") quote = ch;
+    if (ch === '"' || ch === "'") i = stringEnd(selector, i) - 1;
+    else if (ch === "\\") i++;
     else if (ch === "(" || ch === "[") depth++;
     else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
     else if (ch === "," && depth === 0) {

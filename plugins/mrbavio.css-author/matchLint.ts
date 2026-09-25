@@ -178,7 +178,7 @@ export async function matchLint(
     // Every question here is about a rule or a restated initial, so a
     // page with neither has nothing to ask and pays for no mount.
     const stored = dd.core.parsePage(page.payload.html);
-    const authored = pageRules(dd.core, page.payload.css);
+    const authored = pageRules(dd.core.cssBlocks(page.payload.css));
     const restated = lintElements(stored).some((el) =>
       dd.core.cssDeclarations(el.getAttribute("style") ?? "").some(restatesInitial),
     );
@@ -195,7 +195,7 @@ export async function matchLint(
         page,
         doc: mdoc,
         style,
-        rules: copied == null ? authored : pageRules(dd.core, copied),
+        rules: copied == null ? authored : pageRules(dd.core.cssBlocks(copied)),
         nodes,
         own: new Map(
           nodes.map((node) => [

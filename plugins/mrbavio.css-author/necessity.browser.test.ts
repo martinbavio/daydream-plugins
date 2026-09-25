@@ -20,6 +20,7 @@ import {
   probeWidths,
   SWEEP_WIDTHS,
   widthsText,
+  type NecessityHost,
   type NecessityOptions,
 } from "./necessity";
 
@@ -661,15 +662,15 @@ describe("the width sweep (a page is not a photo)", () => {
 
   test("probeWidths: the fixed sweep plus one px either side of every media breakpoint in the css, minus the frame", () => {
     const core = coreApi();
-    expect(probeWidths(core, "", 400)).toEqual([360, 768, 1280, 1920]);
-    expect(probeWidths(core, "", 768)).toEqual([360, 1280, 1920]);
+    expect(probeWidths(core, [], 400)).toEqual([360, 768, 1280, 1920]);
+    expect(probeWidths(core, [], 768)).toEqual([360, 1280, 1920]);
     expect(
       probeWidths(
         core,
-        `@media (width >= 900px) { .a { height: 1px } }
+        core.cssBlocks(`@media (width >= 900px) { .a { height: 1px } }
 .b { @media (360px < width < 1280px) { height: 2px } }
 @container (width >= 500px) { .c { height: 3px } }
-@media (width >= 50em) { .d { height: 4px } }`,
+@media (width >= 50em) { .d { height: 4px } }`),
         400,
       ),
     ).toEqual([359, 360, 361, 768, 799, 800, 801, 899, 900, 901, 1279, 1280, 1281, 1920]);
@@ -713,12 +714,13 @@ describe("the width sweep (a page is not a photo)", () => {
       ).items[0]!,
     );
     let mounts = 0;
-    const counted = {
+    const counted: NecessityHost = {
       core: kernel.dd.core,
-      mountViewport: (...args: Parameters<typeof kernel.dd.mountViewport>) => {
+      // One function behind the API's overloads, as the kernel's is.
+      mountViewport: ((...args: Parameters<NecessityHost["mountViewport"]>) => {
         mounts++;
         return kernel.dd.mountViewport(...args);
-      },
+      }) as NecessityHost["mountViewport"],
     };
     expect(await lintWith(counted, doc)).toEqual([]);
     expect(mounts).toBe(2);

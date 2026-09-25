@@ -1,7 +1,6 @@
 // What a container query NEEDS and what a declaration list PROVIDES — the
 // text half of "a container query with no container to ask"
-// (matchLint.ts). Pure; proved over declarations the kernel's scan reads
-// (containers.browser.test.ts).
+// (matchLint.ts). Pure, so it is proved under node (containers.test.ts).
 //
 // `@container` matches against the nearest ANCESTOR that is a query
 // container for what the condition asks (css-contain-3 §4.1, css-contain-4

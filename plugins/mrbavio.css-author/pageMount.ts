@@ -13,9 +13,9 @@
 // renders with.
 
 import type {
+  BareMountedViewport,
   DaydreamApi,
   DreamPage,
-  MountedViewport,
 } from "@daydream/plugin-api";
 
 import { atKeyword, withoutRanges } from "./pageCss";
@@ -36,7 +36,7 @@ export async function withMount<T>(
   dd: MountHost,
   page: DreamPage,
   width: number | undefined,
-  run: (mounted: MountedViewport) => Promise<T>,
+  run: (mounted: BareMountedViewport) => Promise<T>,
 ): Promise<T> {
   const mounted = await dd.mountViewport(page, {
     still: true,

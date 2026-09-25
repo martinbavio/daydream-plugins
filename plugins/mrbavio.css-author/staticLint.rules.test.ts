@@ -1,13 +1,13 @@
-// The static lint's rule-level checks, over a page's css text read into
-// rules (pageCss.ts, through the kernel's scan, so run from a Daydream
-// checkout) — no page parsed: unit-less lengths read a rule's
-// declarations exactly like an element's own (staticLint.ts). The full staticLint() over a page — the markup
-// parsed by the browser, the font faces, the classes — is
+// The static lint's rule-level checks, over a page's rules (pageCss.ts)
+// read from blocks written by hand (testBlocks.ts) — no page parsed:
+// unit-less lengths read a rule's declarations exactly like an element's
+// own (staticLint.ts). A comment in a value is the kernel's scan's to take
+// out (pageCss.kernel.test.ts). The full staticLint() over a page — the
+// markup parsed by the browser, the font faces, the classes — is
 // staticLint.browser.test.ts's, run from a Daydream checkout (README.md).
 import { describe, expect, test } from "vitest";
 
-import type { Finding } from "@daydream/plugin-api";
-import { coreApi } from "@daydream/plugin-testing";
+import type { CssBlock, Finding } from "@daydream/plugin-api";
 
 import { pageRules } from "./pageCss";
 import {
@@ -15,16 +15,17 @@ import {
   lintUnitlessLengthsOnRules,
   referencedClasses,
 } from "./staticLint";
+import { block } from "./testBlocks";
 
-function unitless(css: string): Finding[] {
+function unitless(blocks: CssBlock[]): Finding[] {
   const out: Finding[] = [];
-  lintUnitlessLengthsOnRules(pageRules(coreApi(), css), "v1", out);
+  lintUnitlessLengthsOnRules(pageRules(blocks), "v1", out);
   return out;
 }
 
 describe("lintUnitlessLengthsOnRules", () => {
   test("a bare number on a rule's length property is a finding addressed at the rule's index", () => {
-    expect(unitless(".card { width: 100; }")).toEqual([
+    expect(unitless([block(".card", "width: 100")])).toEqual([
       {
         tier: "static",
         severity: "blocking",
@@ -37,17 +38,19 @@ describe("lintUnitlessLengthsOnRules", () => {
   });
 
   test("a valued length on a rule passes", () => {
-    expect(unitless(".card { width: 100%; }")).toEqual([]);
+    expect(unitless([block(".card", "width: 100%")])).toEqual([]);
   });
 
   test("no rules is a clean pass", () => {
-    expect(unitless("")).toEqual([]);
+    expect(unitless([])).toEqual([]);
   });
 
   test("every rule is judged, a nested one and one under a condition too, each at its own index and named as written", () => {
-    const out = unitless(
-      ".a { color: red; } .card { gap: 8px; & .title { margin: 4 } } @media (width < 600px) { .card { padding: 12 } }",
-    );
+    const out = unitless([
+      block(".a", "color: red"),
+      block(".card", "gap: 8px", [block("& .title", "margin: 4")]),
+      block("@media (width < 600px)", "", [block(".card", "padding: 12")]),
+    ]);
     expect(out.map((f) => [f.rule, f.property, f.message])).toEqual([
       [
         2,
@@ -62,9 +65,9 @@ describe("lintUnitlessLengthsOnRules", () => {
     ]);
   });
 
-  test("a comment in the value is not part of it, and !important is not a unit", () => {
-    expect(unitless(".a { width: 100 /* px */ !important; }")).toHaveLength(1);
-    expect(unitless(".a { width: /* 100 */ 100px; }")).toEqual([]);
+  test("!important is not a unit", () => {
+    expect(unitless([block(".a", "width: 100 !important")])).toHaveLength(1);
+    expect(unitless([block(".a", "width: 100px !important")])).toEqual([]);
   });
 });
 

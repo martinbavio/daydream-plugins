@@ -1,7 +1,7 @@
-// A PAGE'S MARKUP AS THE LINTS READ IT (decision #76). The browser parses
-// it — `DOMParser`, the same parser the canvas renders it with — and the
-// lints walk what comes back: no hand-rolled HTML reading. Browser only
-// (a gate runs in the canvas tab).
+// A PAGE'S MARKUP AS THE LINTS READ IT (decision #76). The kernel parses
+// it — `dd.core.parsePage`, the browser's own parser in standards mode,
+// as the canvas renders it — and the lints walk what comes back: no
+// hand-rolled HTML reading. Browser only (a gate runs in the canvas tab).
 //
 // A gate judges a page as a landing stores it: every landing door runs
 // the kernel's clean before any gate (src/ai/cleanPage.ts), so the markup
@@ -41,22 +41,20 @@ const NOT_CONTENT: ReadonlySet<string> = new Set([
 /** In a page MOUNTED by `dd.mountViewport` (the live face), the `<style>`
  * holding the page's css: the one the live face appends to the head
  * after everything the page's head holds (src/measure/livePage.ts) — the
- * last `<style>` child of the head that the measurer's motion pin
- * (`data-dream-lint`) or this plugin's (`data-css-author`) did not add.
- * Never a noscript's `<style>`, which the measurer's copy (no scripting
- * there) parses as a style inside the noscript, nor a template's, which
- * is in no tree. The lints mount a page `bare` (pageMount.ts), so its text
- * is the page's css as the copy renders it and nothing else — the stored
- * text with `@import` taken out and `assets/` urls pointed at the
- * document's route — and its rules line up with the stored text's one for
- * one, and its values with the copy's own `style` attributes, whose urls
- * were pointed the same way. */
+ * last `<style>` child of the head that this plugin (`data-css-author`)
+ * did not add; the kernel's motion pin is a sheet the document adopts,
+ * in no element. Never a noscript's `<style>`, which the measurer's copy
+ * (no scripting there) parses as a style inside the noscript, nor a
+ * template's, which is in no tree. The lints mount a page `bare`
+ * (pageMount.ts), so its text is the page's css as the copy renders it
+ * and nothing else — the stored text with `@import` taken out and
+ * `assets/` urls pointed at the document's route — and its rules line up
+ * with the stored text's one for one, and its values with the copy's own
+ * `style` attributes, whose urls were pointed the same way. */
 export function mountedStyle(doc: Document): HTMLStyleElement | null {
   const own = Array.from(doc.head.children).filter(
     (el): el is HTMLStyleElement =>
-      el.localName === "style" &&
-      !el.hasAttribute("data-dream-lint") &&
-      !el.hasAttribute("data-css-author"),
+      el.localName === "style" && !el.hasAttribute("data-css-author"),
   );
   return own.at(-1) ?? null;
 }
@@ -85,7 +83,7 @@ export function lintElements(doc: Document): Element[] {
  * any clean, whose walk removed an element — each node is named in the
  * copy. */
 export function storedNames(
-  core: Pick<CoreApi, "uniqueSelector">,
+  core: CoreApi,
   stored: Document,
   mounted: Document,
 ): (node: Element) => string {

@@ -1,22 +1,26 @@
 // The one test of "a rule that is certain" (certain.ts), over a page's
-// css text read into rules (pageCss.ts, through the kernel's scan, so run
-// from a Daydream checkout): every
-// group at-rule a rule can sit under, nesting, and the state
+// rules (pageCss.ts) read from blocks written by hand (testBlocks.ts):
+// every group at-rule a rule can sit under, nesting, and the state
 // pseudo-classes — in the selector, a parent's or an `@scope`'s.
 import { describe, expect, test } from "vitest";
 
-import { coreApi } from "@daydream/plugin-testing";
+import type { CssBlock } from "@daydream/plugin-api";
 
 import { isCertain } from "./certain";
 import { pageRules } from "./pageCss";
+import { block } from "./testBlocks";
 
-/** Each rule of the css as `[its selector as written, certain]`. */
-const judged = (css: string): [string, boolean][] =>
-  pageRules(coreApi(), css).map((rule) => [rule.prelude, isCertain(rule)]);
+/** Each rule of the blocks as `[its selector as written, certain]`. */
+const judged = (blocks: CssBlock[]): [string, boolean][] =>
+  pageRules(blocks).map((rule) => [rule.prelude, isCertain(rule)]);
+
+/** `rule` inside each at-rule prelude, outermost first. */
+const under = (preludes: string[], rule: CssBlock): CssBlock =>
+  preludes.reduceRight((inner, prelude) => block(prelude, "", [inner]), rule);
 
 describe("isCertain", () => {
   test("a top-level rule with no state pseudo-class is certain", () => {
-    expect(judged(".card { color: red } .card > img { width: 100% }")).toEqual([
+    expect(judged([block(".card", "color: red"), block(".card > img", "width: 100%")])).toEqual([
       [".card", true],
       [".card > img", true],
     ]);
@@ -24,15 +28,13 @@ describe("isCertain", () => {
 
   test("@layer and @scope gate nothing: a rule under either is certain, nested ones included", () => {
     expect(
-      judged(
-        [
-          "@layer base { .a { color: red } }",
-          "@layer base { @layer inner { .b { color: red } } }",
-          "@scope (.page) to (.aside) { .c { color: red } }",
-          "@layer base { @scope (.page) { .d { color: red } } }",
-          "@scope (.page) { :scope { color: red } }",
-        ].join("\n"),
-      ),
+      judged([
+        under(["@layer base"], block(".a", "color: red")),
+        under(["@layer base", "@layer inner"], block(".b", "color: red")),
+        under(["@scope (.page) to (.aside)"], block(".c", "color: red")),
+        under(["@layer base", "@scope (.page)"], block(".d", "color: red")),
+        under(["@scope (.page)"], block(":scope", "color: red")),
+      ]),
     ).toEqual([
       [".a", true],
       [".b", true],
@@ -44,16 +46,14 @@ describe("isCertain", () => {
 
   test("@media, @supports, @container and @starting-style gate a rule: under any of them, alone or inside a layer or a scope, it is not certain", () => {
     expect(
-      judged(
-        [
-          "@media (width >= 600px) { .a { color: red } }",
-          "@supports (display: grid) { .b { color: red } }",
-          "@container (width > 400px) { .c { color: red } }",
-          "@starting-style { .d { opacity: 0 } }",
-          "@layer base { @media print { .e { color: red } } }",
-          "@scope (.page) { @supports (display: grid) { .f { color: red } } }",
-        ].join("\n"),
-      ),
+      judged([
+        under(["@media (width >= 600px)"], block(".a", "color: red")),
+        under(["@supports (display: grid)"], block(".b", "color: red")),
+        under(["@container (width > 400px)"], block(".c", "color: red")),
+        under(["@starting-style"], block(".d", "opacity: 0")),
+        under(["@layer base", "@media print"], block(".e", "color: red")),
+        under(["@scope (.page)", "@supports (display: grid)"], block(".f", "color: red")),
+      ]),
     ).toEqual([
       [".a", false],
       [".b", false],
@@ -66,14 +66,12 @@ describe("isCertain", () => {
 
   test("a nested rule is as certain as its resolved selector and the at-rules around it", () => {
     expect(
-      judged(
-        [
-          ".card { color: red; & .title { color: blue } > img { width: 100% } }",
-          ".card:hover { & .title { color: blue } }",
-          ".card { @media (width >= 600px) { & .title { color: blue } } }",
-          ".card { @layer base { & .title { color: blue } } }",
-        ].join("\n"),
-      ),
+      judged([
+        block(".card", "color: red", [block("& .title", "color: blue"), block("> img", "width: 100%")]),
+        block(".card:hover", "", [block("& .title", "color: blue")]),
+        block(".card", "", [under(["@media (width >= 600px)"], block("& .title", "color: blue"))]),
+        block(".card", "", [under(["@layer base"], block("& .title", "color: blue"))]),
+      ]),
     ).toEqual([
       [".card", true],
       ["& .title", true],
@@ -89,13 +87,11 @@ describe("isCertain", () => {
 
   test("a state pseudo-class in the selector, or in an @scope's roots or limits, makes a rule uncertain", () => {
     expect(
-      judged(
-        [
-          ".a:focus-visible { outline: none }",
-          "@scope (.menu:hover) { .item { color: red } }",
-          "@scope (.menu) to (.item:focus-within) { .label { color: red } }",
-        ].join("\n"),
-      ),
+      judged([
+        block(".a:focus-visible", "outline: none"),
+        under(["@scope (.menu:hover)"], block(".item", "color: red")),
+        under(["@scope (.menu) to (.item:focus-within)"], block(".label", "color: red")),
+      ]),
     ).toEqual([
       [".a:focus-visible", false],
       [".item", false],

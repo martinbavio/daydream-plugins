@@ -8,9 +8,8 @@
 // or an `hr` clips its overflow, and a page may use any element HTML has
 // (decision #76). So a candidate is a finding only once cutting it from
 // the mounted page leaves every element it reaches computing what it did
-// (matchLint.ts lintRestatedInitials). Pure and DOM-free; the choice
-// of candidates is proved over rules the kernel's scan reads
-// (initialValues.browser.test.ts).
+// (matchLint.ts lintRestatedInitials). Pure and DOM-free, so the choice
+// of candidates is proved under node (initialValues.test.ts).
 //
 // The table is restricted to NON-INHERITED properties: an inherited one
 // (letter-spacing, text-transform, visibility, …) restated at its initial
