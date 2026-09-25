@@ -28,8 +28,6 @@ export interface Target {
   anchor: ElementId | null;
 }
 
-const VIEWPORT = "daydream.viewport";
-
 export interface Targeting {
   /** Whether the selection is something a verb can be picked for — a
    * viewport item, or an element inside a page. Cheap: no selector. */
@@ -41,17 +39,10 @@ export interface Targeting {
 }
 
 export function createTargeting(dd: DaydreamApi): Targeting {
-  // The page an element belongs to, from `dd.pageElement(id).viewportId`.
-  // A render-time id never outlives its mount, so one answer per id holds
-  // for its whole life; kept only once there is one.
-  let owner: { id: ElementId; viewportId: string } | null = null;
-  const pageOf = (id: ElementId): string | null => {
-    if (owner?.id === id) return owner.viewportId;
-    const element = untrack(() => dd.pageElement(id));
-    if (element === null) return null;
-    owner = { id, viewportId: element.viewportId };
-    return owner.viewportId;
-  };
+  // The page an element belongs to, from `dd.pageElement(id).viewportId`:
+  // read once per mounted element by the kernel, so asked again freely.
+  const pageOf = (id: ElementId): string | null =>
+    untrack(() => dd.pageElement(id))?.viewportId ?? null;
 
   /** The selection as a viewport and, for an element, its anchor. */
   const place = (): { viewportId: string; anchor: ElementId | null } | null => {
@@ -59,7 +50,9 @@ export function createTargeting(dd: DaydreamApi): Targeting {
     if (selected === null) return null;
     const item = dd.items().find((i) => i.id === selected);
     if (item !== undefined) {
-      return item.kind === VIEWPORT ? { viewportId: item.id, anchor: null } : null;
+      return item.kind === dd.core.viewportKind
+        ? { viewportId: item.id, anchor: null }
+        : null;
     }
     const viewportId = pageOf(selected);
     return viewportId === null ? null : { viewportId, anchor: selected };

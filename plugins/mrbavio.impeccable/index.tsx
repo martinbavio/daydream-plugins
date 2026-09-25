@@ -19,7 +19,7 @@ import type { DaydreamApi } from "@daydream/plugin-api";
 import { adoptInto, isViewport, markerOf, roundOf } from "./adopt";
 import { VERBS as VERB_SPECS } from "./bridge/verbs";
 import createCaption from "./Caption";
-import { absoluteUrls, markTarget, soleMatch, takeOut, withoutMountMarks } from "./pageExport";
+import { absoluteUrls, markTarget, soleMatch, takeOut } from "./pageExport";
 import createPicker, { type PickerEntry } from "./Picker";
 import { createSession, SESSION_KEY } from "./session";
 import { captionCss, pickerCss } from "./styles";
@@ -105,12 +105,12 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   dd.registerItemAction({
     id: "adopt",
     title: "adopt",
-    when: (item) => roundOf(dd.items(), item.id) !== null,
+    when: (item) => roundOf(dd.core, dd.items(), item.id) !== null,
     run: (item) => {
-      const round = roundOf(dd.items(), item.id);
+      const round = roundOf(dd.core, dd.items(), item.id);
       if (round === null) return;
       dd.mutateItems((items) => {
-        adoptInto(items, item.id);
+        adoptInto(dd.core, items, item.id);
       });
       // The source, selected whole: its page is the variant's now, mounted
       // anew, so no element id from before names anything in it.
@@ -173,10 +173,11 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
       const withBaseline = input["baseline"] === true;
       const viewport = dd.core.viewportItems(dd.document()).find((v) => v.id === id);
       if (viewport === undefined) throw new Error(`no viewport with id "${id}"`);
-      const mounted = await dd.mountViewport(viewport);
+      // Bare: the page alone, with nothing the measurer adds for its own
+      // read, so the export is the page as the canvas renders it.
+      const mounted = await dd.mountViewport(viewport, { bare: true });
       try {
         const doc = mounted.document();
-        withoutMountMarks(doc);
         const node = element === undefined ? null : soleMatch(doc, element, id);
         const target = node === null ? undefined : { selector: element!, kept: markTarget(node) };
         absoluteUrls(doc, window.location.origin);
@@ -212,7 +213,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   // is not it.
   const pageText = (viewportId: string): string | null => {
     const item = dd.items().find((i) => i.id === viewportId);
-    if (item === undefined || !isViewport(item)) return null;
+    if (item === undefined || !isViewport(dd.core, item)) return null;
     return JSON.stringify([item.payload.html, item.payload.css]);
   };
   let sourceBefore: string | null = null;
@@ -254,7 +255,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
       let landed = 0;
       let of: number | null = null;
       for (const item of dd.items()) {
-        const m = markerOf(item);
+        const m = markerOf(dd.core, item);
         if (m !== null && m.sourceId === viewportId && m.verb === verb && m.round === round) {
           landed += 1;
           of = Math.max(of ?? 0, m.of);
@@ -275,18 +276,18 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   const titleVariants = (added: string[]): void => {
     for (const id of added) {
       const item = dd.items().find((i) => i.id === id);
-      if (item === undefined || !isViewport(item)) continue;
-      const m = markerOf(item);
+      if (item === undefined || !isViewport(dd.core, item)) continue;
+      const m = markerOf(dd.core, item);
       if (m === null) continue;
       const source = dd.items().find((i) => i.id === m.sourceId);
       const base =
-        source !== undefined && isViewport(source)
+        source !== undefined && isViewport(dd.core, source)
           ? (source.payload.meta?.title ?? "Untitled")
           : "Untitled";
       const title = `${base} · ${m.verb} ${m.n}/${m.of}`;
       if (item.payload.meta?.title === title) continue;
       dd.updateItem(id, (working) => {
-        if (!isViewport(working)) return;
+        if (!isViewport(dd.core, working)) return;
         working.payload.meta = { ...(working.payload.meta ?? {}), title };
       });
     }

@@ -1,7 +1,7 @@
 {
   "name": "@mrbavio/plugin-impeccable",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.2.3",
   "type": "module",
   "dependencies": {
     "@daydream/plugin-api": "catalog:",

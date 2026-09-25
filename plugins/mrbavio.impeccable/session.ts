@@ -106,23 +106,6 @@ export interface Session {
   check(): void;
 }
 
-// mirrors: src/render/parsePage.ts parsePage
-/** The page's stored markup as the browser reads it in STANDARDS mode —
- * the kernel's one parse of a page, to the letter, which the agent's
- * tools resolve a selector against; the plugin API has no call that
- * answers it. A text with no doctype would parse in quirks mode, where
- * class and id selectors match case-insensitively. */
-function parseMarkup(html: string): Document {
-  const parser = new DOMParser();
-  const parsed = parser.parseFromString(html, "text/html");
-  if (parsed.compatMode === "CSS1Compat") return parsed;
-  // A second doctype is a parse error the parser ignores, so a page whose
-  // own doctype is a quirky one is read under this one instead.
-  const standard = parser.parseFromString(`<!doctype html>${html}`, "text/html");
-  if (parsed.doctype === null) standard.doctype?.remove();
-  return standard;
-}
-
 export function createSession(dd: DaydreamApi): Session {
   const [phase, setPhase] = createSignal<Phase>({ kind: "idle" });
   let state: SessionState = EMPTY_SESSION;
@@ -152,7 +135,7 @@ export function createSession(dd: DaydreamApi): Session {
   };
   const pageHtml = (viewportId: string): string | null => {
     const item = untrack(dd.items).find((i) => i.id === viewportId);
-    return item !== undefined && isViewport(item) ? item.payload.html : null;
+    return item !== undefined && isViewport(dd.core, item) ? item.payload.html : null;
   };
   /** How many elements the selector names in the page's stored text,
    * as the agent's tools count them (0 for one the browser refuses).
@@ -163,7 +146,7 @@ export function createSession(dd: DaydreamApi): Session {
     if (counted?.html === html && counted.selector === selector) return counted.count;
     let n: number;
     try {
-      n = parseMarkup(html).querySelectorAll(selector).length;
+      n = dd.core.parsePage(html).querySelectorAll(selector).length;
     } catch {
       n = 0;
     }

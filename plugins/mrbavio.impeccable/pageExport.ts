@@ -1,7 +1,9 @@
 // impeccable_html's work on a live mount's document (index.tsx): find the
 // target by selector, mark it, take it out for the detector's baseline,
 // and make the page's urls stand alone. The document is the mount's own
-// copy — the caller disposes it and nothing here is ever stored.
+// copy, mounted bare — the page and nothing of the measurer's — so it is
+// the page as exported; the caller disposes it and nothing here is ever
+// stored.
 
 /** The one element `selector` names in `doc` — the same addressing
  * get_viewport and the draft tools use (decision #76) — or an error that
@@ -40,131 +42,6 @@ export function markTarget(node: Element): number {
  * siblings, and the rules that find them by it still do. */
 export function takeOut(node: Element): void {
   node.replaceWith(node.ownerDocument.createElementNS(node.namespaceURI, node.localName));
-}
-
-/** The kernel's measuring id, stamped on every element of a mount
- * (src/render/mountPage.ts ID_ATTR). */
-const MEASURE_ID = "data-dream-id";
-
-/** TAKE OUT WHAT THE MOUNT PUT IN for its own reads, so the export is the
- * page and nothing else: the measuring id on each element, and the
- * container probes in its css (withoutProbes). The mount is made without
- * `still`, so there is no motion pin to take out. */
-export function withoutMountMarks(doc: Document): void {
-  for (const el of doc.querySelectorAll(`[${MEASURE_ID}]`)) el.removeAttribute(MEASURE_ID);
-  for (const sheet of doc.querySelectorAll("style")) {
-    const css = sheet.textContent ?? "";
-    const own = withoutProbes(css);
-    if (own !== css) sheet.textContent = own;
-  }
-}
-
-/** The kernel's probe property, a namespace it reserves
- * (src/measure/livePage.ts containerProbeProperty). */
-const PROBE = "--dream-container-";
-/** The probes leading a block under a `@container`: ` --p0: 2; --p1: 2; `. */
-const PROBES_LEADING = /^ --dream-container-\d+: 2;(?: --dream-container-\d+: 2;)* /;
-/** The registrations the probes end the css with, one per probe. */
-const REGISTRATIONS =
-  /(?:\n@property --dream-container-\d+ \{ syntax: "<integer>"; inherits: false; initial-value: 0; \})+\n$/;
-/** The reach copy's opening, as the kernel writes it before a
- * `@container`. */
-const REACH_OPEN = "@media all { ";
-
-/**
- * A mount's css with the kernel's container probes taken back out
- * (src/measure/livePage.ts withContainerProbes writes them): the reach
- * copy, `@media all { … } `, written just before each `@container`; the
- * probes written at the start of each block under one; and the
- * `@property` registrations at the end. Read as CSS tokenizes it, so a
- * brace or an `@media all` in a string or a comment is the page's; a css
- * with no probe comes back as it is.
- */
-export function withoutProbes(css: string): string {
-  if (!css.includes(PROBE)) return css;
-  const text = css.replace(REGISTRATIONS, "");
-  const cuts: [number, number][] = [];
-  let i = 0;
-  while (i < text.length) {
-    const skipped = skipStringOrComment(text, i);
-    if (skipped !== i) {
-      i = skipped;
-      continue;
-    }
-    const c = text[i];
-    if (c === "\\") {
-      i += 2;
-      continue;
-    }
-    if (text.startsWith(REACH_OPEN, i)) {
-      const close = blockClose(text, i + REACH_OPEN.length - 2);
-      if (
-        close < text.length &&
-        text.slice(i, close).includes(PROBE) &&
-        /^ @container/i.test(text.slice(close + 1))
-      ) {
-        cuts.push([i, close + 2]);
-        i = close + 2;
-        continue;
-      }
-    }
-    if (c === "{") {
-      const leading = PROBES_LEADING.exec(text.slice(i + 1));
-      if (leading !== null) cuts.push([i + 1, i + 1 + leading[0].length]);
-    }
-    i += 1;
-  }
-  let out = "";
-  let from = 0;
-  for (const [start, end] of cuts) {
-    out += text.slice(from, start);
-    from = end;
-  }
-  return out + text.slice(from);
-}
-
-/** Past the string or comment starting at `i` (a string ends at its
- * quote or a newline), or `i` when neither starts there. */
-function skipStringOrComment(css: string, i: number): number {
-  const c = css[i];
-  if (c === "/" && css[i + 1] === "*") {
-    const close = css.indexOf("*/", i + 2);
-    return close === -1 ? css.length : close + 2;
-  }
-  if (c === '"' || c === "'") {
-    let end = i + 1;
-    while (end < css.length && css[end] !== c && css[end] !== "\n") {
-      end += css[end] === "\\" ? 2 : 1;
-    }
-    return Math.min(end + 1, css.length);
-  }
-  return i;
-}
-
-/** The `}` closing the block whose `{` is at `open`, or the css's length
- * when none does. */
-function blockClose(css: string, open: number): number {
-  let depth = 0;
-  let i = open;
-  while (i < css.length) {
-    const skipped = skipStringOrComment(css, i);
-    if (skipped !== i) {
-      i = skipped;
-      continue;
-    }
-    const c = css[i];
-    if (c === "\\") {
-      i += 2;
-      continue;
-    }
-    if (c === "{") depth += 1;
-    else if (c === "}") {
-      depth -= 1;
-      if (depth === 0) return i;
-    }
-    i += 1;
-  }
-  return css.length;
 }
 
 const URL_ATTRIBUTES = ["src", "href", "poster", "xlink:href"];
