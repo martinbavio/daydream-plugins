@@ -15,11 +15,14 @@ import type { DaydreamApi } from "@daydream/plugin-api";
 import { flush, untrack } from "solid-js";
 
 import {
+  cleanPaste,
   describePaste,
   hasElements,
-  pageFromPaste,
   parseHtml,
+  pastedElements,
+  storePaste,
   VIEWPORT_WIDTH,
+  type CleanedPaste,
   type PastedPage,
 } from "./page";
 import { hasContent, isSingleParagraph } from "./prose";
@@ -35,6 +38,15 @@ export const MAX_ELEMENTS = 10_000;
  * beside the one on elements, since one `p` can hold a novel and a
  * style value a whole image. */
 export const MAX_SOURCE = 4_000_000;
+
+/** What a paste that did not land says of the image files it stored:
+ * nothing when it stored none. They stay in the document's files — the
+ * host has no call to take one back — so it is said. */
+function leftUnused(stored: number): string {
+  if (stored === 0) return "";
+  const one = stored === 1;
+  return `; the ${stored} image${one ? "" : "s"} stored for it ${one ? "is" : "are"} left unused, since the host has no call to take a stored file back`;
+}
 
 /** Whether plain text is markup and not prose that happens to open with
  * `<` — `<T> extends Foo`, `<Component /> renders`, `<x@y.z> wrote:`.
@@ -113,8 +125,9 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
       // Flush the paste's own notifications while suppression is explicit.
       flush();
     } catch (error) {
+      // After the images were stored: a refusal here cannot unstore them.
       console.error(
-        `[${dd.plugin.id}] paste refused: ${error instanceof Error ? error.message : String(error)}`,
+        `[${dd.plugin.id}] paste refused: ${error instanceof Error ? error.message : String(error)}${leftUnused(pasted.stored)}`,
       );
       return;
     } finally {
@@ -130,32 +143,50 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
   };
 
   /** The text cleaned as a landing cleans it, the `data:` images the
-   * cleaning kept stored through the host (pageFromPaste), and landed —
-   * unless another document was loaded meanwhile. */
+   * cleaning kept stored through the host (page.ts), and landed — unless
+   * another document was loaded meanwhile. Nothing is stored until the
+   * landing is going ahead: the host has no call to take a stored file
+   * back, so an image stored for a paste that does not land stays in the
+   * document's files unused. Storing is the host's time, though, and a
+   * load or a refusal can still come after it; then the line says so. */
   const cleanThenLand = async (
     source: HtmlSource,
     position: { x: number; y: number },
     load: number,
   ): Promise<void> => {
-    let pasted: PastedPage;
+    const refused = (error: unknown, stored: number): void => {
+      console.error(
+        `[${dd.plugin.id}] paste refused: ${error instanceof Error ? error.message : String(error)}${leftUnused(stored)}`,
+      );
+    };
+    const abandoned = (stored: number): boolean => {
+      if (untrack(() => dd.loadVersion()) === load) return false;
+      console.info(
+        `[${dd.plugin.id}] paste abandoned: another document was loaded before it landed${leftUnused(stored)}`,
+      );
+      return true;
+    };
+    let cleaned: CleanedPaste;
     try {
-      pasted = await pageFromPaste(dd, source.text, {
+      cleaned = await cleanPaste(dd, source.text, {
         id: dd.core.generateId(),
         position,
         said: [],
       });
     } catch (error) {
-      console.error(
-        `[${dd.plugin.id}] paste refused: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      refused(error, 0);
       return;
     }
-    if (untrack(() => dd.loadVersion()) !== load) {
-      console.info(
-        `[${dd.plugin.id}] paste abandoned: another document was loaded before it landed`,
-      );
+    if (abandoned(0)) return;
+    const progress = { stored: 0 };
+    let pasted: PastedPage;
+    try {
+      pasted = await storePaste(dd, cleaned, progress);
+    } catch (error) {
+      refused(error, progress.stored);
       return;
     }
+    if (abandoned(pasted.stored)) return;
     land(pasted);
   };
 
@@ -177,7 +208,7 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
       const source = htmlSource(transfer);
       if (source === null) return;
       event.preventDefault();
-      const size = source.doc.body.getElementsByTagName("*").length;
+      const size = pastedElements(source.doc);
       if (size > MAX_ELEMENTS) {
         console.error(
           `[${dd.plugin.id}] paste refused: ${size} elements; a viewport holds at most ${MAX_ELEMENTS}`,

@@ -403,6 +403,31 @@ describe("landing", () => {
     }
   });
 
+  test("the element cap counts every element the page would store: the head's, and each template's content", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const shell = await mount();
+      // A template's content is not in the tree, and is stored all the same.
+      const templated = paste(document.body, {
+        "text/html": `<template>${"<p>x</p>".repeat(MAX_ELEMENTS)}</template><h1>Title</h1><p>Copy</p>`,
+      });
+      expect(templated.defaultPrevented).toBe(true);
+      // What the parser puts in the head is the page's too.
+      const headed = paste(document.body, {
+        "text/html": `${"<meta name=\"a\">".repeat(MAX_ELEMENTS)}<h1>Title</h1><p>Copy</p>`,
+      });
+      expect(headed.defaultPrevented).toBe(true);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(shell.store.document.items).toHaveLength(0);
+      expect(error.mock.calls.map((call) => String(call[0]))).toEqual([
+        `[${PLUGIN}] paste refused: ${MAX_ELEMENTS + 3} elements; a viewport holds at most ${MAX_ELEMENTS}`,
+        `[${PLUGIN}] paste refused: ${MAX_ELEMENTS + 2} elements; a viewport holds at most ${MAX_ELEMENTS}`,
+      ]);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   test("deep nesting lands as pasted and renders: the innermost words are on the canvas", async () => {
     const shell = await mount();
     const deep = 84;
@@ -669,6 +694,62 @@ describe("data: images", () => {
     expect(line).not.toContain("data:");
   });
 
+  test("a document loaded while the paste is cleaned abandons it before any image is stored", async () => {
+    info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const vendorFile = vi.fn(async (file: File) => ({
+      src: `/assets/media-${file.name}`,
+      pageSrc: `assets/page-${file.name}`,
+    }));
+    const shell = await mount({
+      storage: { vendorFile } as unknown as HostStorage,
+    });
+    paste(document.body, { "text/html": dataImage });
+    shell.store.loadDocument(createEmptyDocument(), { slug: null });
+    flush();
+    await vi.waitFor(() =>
+      expect(infoLines(info!)).toEqual([
+        `[${PLUGIN}] paste abandoned: another document was loaded before it landed`,
+      ]),
+    );
+    expect(vendorFile).not.toHaveBeenCalled();
+    expect(shell.store.document.items).toHaveLength(0);
+  });
+
+  test("a landing refused after its images were stored says they are left unused", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const vendorFile = vi.fn(async (file: File) => ({
+        src: `/assets/media-${file.name}`,
+        pageSrc: `assets/page-${file.name}`,
+      }));
+      // The plugin's API with a mutateItems that refuses.
+      const shell = await mountPlugin({
+        entry: (dd) => {
+          const api = Object.create(dd) as DaydreamApi;
+          Object.defineProperty(api, "mutateItems", {
+            value: () => {
+              throw new Error("the canvas is read-only");
+            },
+          });
+          activate(api);
+        },
+        manifest: manifest as PluginManifest,
+        document: createEmptyDocument(),
+        host: { storage: { vendorFile } as unknown as HostStorage },
+      });
+      paste(document.body, { "text/html": dataImage });
+      await vi.waitFor(() =>
+        expect(error.mock.calls.map((call) => String(call[0]))).toEqual([
+          `[${PLUGIN}] paste refused: the canvas is read-only; the 1 image stored for it is left unused, since the host has no call to take a stored file back`,
+        ]),
+      );
+      expect(vendorFile).toHaveBeenCalledTimes(1);
+      expect(shell.store.document.items).toHaveLength(0);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   test("a document loaded while vendoring abandons the paste; without storage the img lands with its alt and the removed src is said", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
     type Stored = { src: string; pageSrc: string };
@@ -689,7 +770,7 @@ describe("data: images", () => {
     release({ src: "/assets/late.png", pageSrc: "assets/late.png" });
     await vi.waitFor(() =>
       expect(infoLines(info!)).toEqual([
-        `[${PLUGIN}] paste abandoned: another document was loaded before it landed`,
+        `[${PLUGIN}] paste abandoned: another document was loaded before it landed; the 1 image stored for it is left unused, since the host has no call to take a stored file back`,
       ]),
     );
     expect(shell.store.document.items).toHaveLength(0);
