@@ -61,9 +61,9 @@ export interface PanelState {
    * so it goes on to core's save. Set by the panel once mounted. */
   saveOver: () => boolean;
   /** The document is about to be swapped, or the plugin to stop (the
-   * entry's `leave` hook): what is typed and pending is saved now, into
-   * the page it was typed in, or held as its draft. Set by the panel once
-   * mounted. */
+   * entry's `leave` hook): what the editor holds is saved now,
+   * synchronously, into the page it was typed in, or held as its draft;
+   * it never throws. Set by the panel once mounted. */
   leave: () => void;
   /** By viewport id, of the document loaded when they were held: a
    * page id names a page of one document only, so another load (a page
@@ -455,12 +455,26 @@ export default function createHtmlPanel(state: PanelState) {
     saveEditor(id);
   };
 
-  // The document is about to be swapped, or the plugin to stop: what is
-  // pending is saved into the page it was typed in now, while that page
-  // is still the document's — the debounce would fire into another
-  // document, or never.
+  // The document is about to be swapped, or the plugin to stop: what the
+  // editor holds is saved into the page it was typed in, now, while that
+  // page is still the document's — the debounce would fire into another
+  // document, or never. Read from the editor itself: text other than
+  // what the page last showed or held as its draft is typing, whether or
+  // not its report has reached the pane yet (a microtask after the
+  // keystroke). A second call finds nothing typed and writes nothing. A
+  // write that fails is held as the page's draft with its reason, as
+  // every failed save is (`write`); anything else that throws is
+  // reported, never thrown into the swap.
   state.leave = (): void => {
-    if (shown !== null) leave(shown);
+    const ed = editor();
+    const id = shown;
+    if (ed === undefined || id === null) return;
+    if (ed.text() !== (drafts().get(id)?.text ?? synced)) dirty = true;
+    try {
+      leave(id);
+    } catch (error) {
+      reportError(error);
+    }
   };
 
   /** Page `id`'s draft, unless the page holds a held draft's text now —
