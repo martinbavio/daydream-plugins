@@ -20,6 +20,18 @@ function declared(...lists: string[]) {
 
 const SIZE = { size: true, scrollState: false };
 
+describe("mergeContainerDeclaration and importance", () => {
+  test("an !important container-type outlasts a later normal shorthand that would reset it; a later !important one does not", () => {
+    expect(
+      satisfies(declared("container-type: inline-size !important; container: card"), SIZE, "card"),
+    ).toBe(true);
+    expect(
+      satisfies(declared("container-type: inline-size !important; container: card / normal !important"), SIZE, null),
+    ).toBe(false);
+    expect(satisfies(declared("container-type: inline-size; container: card"), SIZE, null)).toBe(false);
+  });
+});
+
 describe("splitContainerPrelude and queryNeeds", () => {
   test("a name is the first ident followed by whitespace; not, style( and scroll-state( are not names", () => {
     expect(splitContainerPrelude("@container card (width > 400px)")).toEqual({

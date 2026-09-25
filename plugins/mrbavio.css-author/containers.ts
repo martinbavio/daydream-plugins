@@ -108,8 +108,10 @@ export function emptyContainerDeclaration(): ContainerDeclaration {
 }
 
 /** One declaration list's contribution, merged into `into`. Within one
- * list the later declaration wins, as in the cascade: an unslashed
- * `container: card` written after a `container-type` resets the type.
+ * list the type is the cascade's: an `!important` declaration outlasts
+ * every normal one, and among the same importance the later wins — an
+ * unslashed `container: card` written after a `container-type` resets
+ * the type, one written after a `container-type: … !important` does not.
  * Names gather on top: `container-name` and the shorthand's pre-slash
  * half, each a space-separated ident list where `none` names nothing. */
 export function mergeContainerDeclaration(
@@ -117,7 +119,8 @@ export function mergeContainerDeclaration(
   declarations: readonly CssDeclaration[],
 ): void {
   let type: string[] | null = null;
-  for (const { property, value } of declarations) {
+  let typeImportant = false;
+  for (const { property, value, important } of declarations) {
     if (
       property !== "container-name" &&
       property !== "container-type" &&
@@ -130,9 +133,12 @@ export function mergeContainerDeclaration(
       continue;
     }
     const slash = value.indexOf("/");
-    if (property === "container-type") type = typeTokens(value);
-    else if (property === "container") {
-      type = slash === -1 ? [] : typeTokens(value.slice(slash + 1));
+    if (important || !typeImportant) {
+      if (property === "container-type") type = typeTokens(value);
+      else if (property === "container") {
+        type = slash === -1 ? [] : typeTokens(value.slice(slash + 1));
+      }
+      if (property !== "container-name") typeImportant = important;
     }
     if (property === "container-type") continue;
     const list = property === "container" && slash !== -1 ? value.slice(0, slash) : value;
@@ -143,6 +149,24 @@ export function mergeContainerDeclaration(
   if (type === null) return;
   if (type.includes("size") || type.includes("inline-size")) into.size = true;
   if (type.includes("scroll-state")) into.scrollState = true;
+}
+
+/** What an element IS, as the browser computed it — its `container-type`
+ * and `container-name` read from a mounted copy — in the same terms: the
+ * cascade's answer at that copy's width, `!important`, `var()` and
+ * `inherit` resolved. */
+export function computedContainer(
+  containerType: string,
+  containerName: string,
+): ContainerDeclaration {
+  const type = typeTokens(containerType);
+  const names = containerName.trim().split(/\s+/);
+  return {
+    size: type.includes("size") || type.includes("inline-size"),
+    scrollState: type.includes("scroll-state"),
+    names: new Set(names.filter((name) => name !== "" && name !== "none")),
+    unknown: false,
+  };
 }
 
 function typeTokens(type: string): string[] {

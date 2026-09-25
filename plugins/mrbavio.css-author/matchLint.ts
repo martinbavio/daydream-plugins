@@ -65,10 +65,12 @@
 //
 // A CONTAINER QUERY WITH NO CONTAINER: a rule under `@container` whose
 // every matched element lacks an ancestor that is a container for what the
-// query asks (containers.ts). Each ancestor's container declarations are
-// gathered from its own style and every rule matching it under any
-// condition — generous, because a static lint must never flag a query the
-// browser could match at some width.
+// query asks (containers.ts). An ancestor is one when the mounted copy
+// computes it one (`container-type` and `container-name` as the cascade
+// resolved them), or when its container declarations — gathered from its
+// own style and every rule matching it under any condition — say it could
+// be: generous, because a static lint must never flag a query the browser
+// could match at some width.
 //
 // RULE-AGAINST-RULE REDUNDANCY (the CSS author's review after the
 // selectors step landed): a rule's declaration restating, for EVERY
@@ -97,12 +99,14 @@ import type {
 
 import { isCertain } from "./certain";
 import {
+  computedContainer,
   emptyContainerDeclaration,
   mergeContainerDeclaration,
   queryNeeds,
   satisfies,
   splitContainerPrelude,
   type ContainerDeclaration,
+  type QueryNeeds,
 } from "./containers";
 import {
   atKeyword,
@@ -635,6 +639,30 @@ function lintContainerQueries(read: MountedPage, findings: Finding[]): void {
     gathered.set(node, out);
     return out;
   };
+  // And what each node IS at the mounted width — the cascade's own
+  // answer, `!important`, `var()` and `inherit` resolved — which the
+  // declarations only add to: a type declared under a condition the
+  // frame is not in is still a container at some width.
+  const measured = new Map<Element, ContainerDeclaration>();
+  const measuredOf = (node: Element): ContainerDeclaration => {
+    let out = measured.get(node);
+    if (out === undefined) {
+      const style = (node.ownerDocument.defaultView ?? window).getComputedStyle(node);
+      out = computedContainer(
+        style.getPropertyValue("container-type"),
+        style.getPropertyValue("container-name"),
+      );
+      measured.set(node, out);
+    }
+    return out;
+  };
+  const answers = (
+    node: Element,
+    needs: QueryNeeds,
+    name: string | null,
+  ): boolean =>
+    satisfies(measuredOf(node), needs, name) ||
+    satisfies(declarationOf(node), needs, name);
 
   for (const rule of read.rules) {
     for (const condition of rule.conditions) {
@@ -651,9 +679,8 @@ function lintContainerQueries(read: MountedPage, findings: Finding[]): void {
       let satisfied = false;
       for (const node of matched) {
         for (let a = node.parentElement; a !== null; a = a.parentElement) {
-          const declared = declarationOf(a);
-          if (satisfies(declared, needs, null)) typed = true;
-          if (satisfies(declared, needs, name)) {
+          if (answers(a, needs, null)) typed = true;
+          if (answers(a, needs, name)) {
             satisfied = true;
             break;
           }

@@ -641,6 +641,35 @@ describe("matchLint: a container query with no container", () => {
     expect(await matchLint(queried(wrapped("container: grid")))).toHaveLength(1);
   });
 
+  test("an !important container-type is not reset by a later normal container shorthand", async () => {
+    expect(
+      await matchLint(
+        queried(wrapped("container-type: inline-size !important; container: card"), "", NAMED),
+      ),
+    ).toEqual([]);
+    expect(
+      await matchLint(
+        queried(
+          `<section class="wrap">${CARD}</section>`,
+          ".wrap { container-type: inline-size !important; container: card; }",
+          NAMED,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  test("a container type the text cannot read is measured: an inherited container-type counts", async () => {
+    expect(
+      await matchLint(
+        queried(
+          `<div class="outer"><div class="wrap">${CARD}</div></div>`,
+          ".outer { container-type: inline-size; } .wrap { container-type: inherit; container-name: card; }",
+          NAMED,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
   test("container-type: normal is not a container", async () => {
     expect(await matchLint(queried(wrapped("container-type: normal")))).toHaveLength(1);
   });
