@@ -112,7 +112,9 @@ from, and `test:kernel` checks each against the kernel it runs on
 ```
 
 `mirrors:` (or `mirrors-exact:`) promises the copy is the kernel's function
-as written, comments and formatting aside: the two are compared, and a
+as written, comments and formatting aside: the two are compared token by
+token as TypeScript's scanner reads them — so `a + ++b` is not `a++ + b`,
+and a line break that ends a statement (`return⏎x`) is not a space — and a
 difference fails the run, naming the line where it starts in each file.
 `mirrors-adapted:` is a copy changed on purpose — an import path, a type, a
 helper's name — so the two are never compared; the hash is the kernel

@@ -365,12 +365,16 @@ describe("kernel-test's mirrors", () => {
     "",
   ].join("\n");
 
-  /** A kernel with `src/render/thing.ts`, and a plugin whose copies.ts
-   * holds `source`; every step the run spawns passes. */
-  function mirrorRun(source: string) {
+  /** A kernel with `src/render/thing.ts` (and `extra`, each a file under
+   * `src/render/` and its text), and a plugin whose copies.ts holds
+   * `source`; every step the run spawns passes. */
+  function mirrorRun(source: string, extra: Record<string, string> = {}) {
     const k = scratchKernel();
     mkdirSync(path.join(k, "src", "render"), { recursive: true });
     writeFileSync(path.join(k, "src", "render", "thing.ts"), KERNEL_FILE);
+    for (const [file, text] of Object.entries(extra)) {
+      writeFileSync(path.join(k, "src", "render", file), text);
+    }
     const plugin = path.join(k, ".src", "mrbavio.copies");
     mkdirSync(plugin, { recursive: true });
     writeFileSync(path.join(plugin, "manifest.json"), "{}\n");
@@ -427,6 +431,69 @@ describe("kernel-test's mirrors", () => {
     expect(r.stdout).toMatch(
       /copies\.ts:4: shout is adapted from src\/render\/thing\.ts:7, whose hash is [0-9a-f]{12}/,
     );
+  });
+
+  test("an exact copy whose tokens split otherwise, or whose line break ends a statement the kernel's does not, fails", () => {
+    const r = mirrorRun(
+      [
+        "// mirrors: src/render/ops.ts bump",
+        "export function bump(a: number, b: number): number {",
+        "  return a++ + b;",
+        "}",
+        "// mirrors: src/render/ops.ts early",
+        "export function early(a: number): number | undefined {",
+        "  return",
+        "  a;",
+        "}",
+        "// mirrors: src/render/ops.ts step",
+        "export function step(a: number, b: number): number {",
+        "  a",
+        "  ++b;",
+        "  return a;",
+        "}",
+        "// mirrors: src/render/ops.ts tall",
+        "export function tall(a: number): number { return (a * 2); }",
+        "",
+      ].join("\n"),
+      {
+        "ops.ts": [
+          "export function bump(a: number, b: number): number {",
+          "  return a + ++b;",
+          "}",
+          "",
+          "export function early(a: number): number | undefined {",
+          "  return a;",
+          "}",
+          "",
+          "export function step(a: number, b: number): number {",
+          "  a++",
+          "  b;",
+          "  return a;",
+          "}",
+          "",
+          "export function tall(a: number): number {",
+          "  return (",
+          "    a *",
+          "    2",
+          "  );",
+          "}",
+          "",
+        ].join("\n"),
+      },
+    );
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/FAIL mirrors \(4 marked\) \(3\)/);
+    expect(r.stderr).toContain(
+      "mrbavio.copies/copies.ts:1: bump differs from the kernel's bump (src/render/ops.ts:1)",
+    );
+    expect(r.stderr).toContain("and  mrbavio.copies/copies.ts:3");
+    expect(r.stderr).toContain(
+      "mrbavio.copies/copies.ts:5: early differs from the kernel's early (src/render/ops.ts:5)",
+    );
+    expect(r.stderr).toContain(
+      "mrbavio.copies/copies.ts:10: step differs from the kernel's step (src/render/ops.ts:9)",
+    );
+    expect(r.stderr).not.toContain("tall differs");
   });
 
   test("a marker naming what the kernel does not have fails", () => {

@@ -8,8 +8,10 @@
 // kernel-test (scripts/kernel-test.mjs) reads every marker in the plugin
 // files it copies, takes the named function out of the kernel file at
 // the checkout and the function declared after the marker out of the
-// plugin file, and compares the two with comments and formatting set
-// aside. Three forms:
+// plugin file, and compares the two as TypeScript's scanner reads them:
+// token by token, comments and formatting set aside, but not a token
+// boundary, a semicolon, or a line break that ends a statement. Three
+// forms:
 //
 // - `mirrors:` or `mirrors-exact:` — the copy is the kernel's, to the
 //   letter. A difference fails the run, pointing at the line where it
@@ -30,6 +32,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 
 /** One marker line: its form (`exact`, `adapted`, or none for plain
@@ -232,40 +235,146 @@ function declaration(src, from, name) {
   return null;
 }
 
-/** `src[from, to)` with comments and formatting set aside: one space
- * only where two words would otherwise run together, no trailing comma.
- * `at[k]` is where `text[k]` was in `src`. */
-export function normalised(src, from = 0, to = src.length) {
-  const state = { prev: "", word: "" };
-  let text = "";
-  const at = [];
-  const emit = (chunk, offset) => {
-    for (let k = 0; k < chunk.length; k++) {
-      text += chunk[k];
-      at.push(offset + k);
+/** TypeScript, for its scanner: this repository's own when it is
+ * installed, else the kernel checkout's — CI installs only the kernel's. */
+function typescriptFor(kernel) {
+  for (const base of [import.meta.url, path.join(kernel, "package.json")]) {
+    try {
+      return createRequire(base)("typescript");
+    } catch {
+      // Not installed there; the next place.
     }
-  };
-  for (let i = from; i < to; ) {
-    const token = tokenAt(src, i, state);
-    const end = Math.min(token.end, to);
-    if (token.kind === "word" || token.kind === "literal") {
-      if (/[\w$]$/.test(text) && /^[\w$]/.test(src[i])) emit(" ", i);
-      emit(src.slice(i, end), i);
-    } else if (token.kind === "punct") {
-      if (")]}".includes(src[i]) && text.endsWith(",")) {
-        text = text.slice(0, -1);
-        at.pop();
-      }
-      emit(src[i], i);
-    }
-    i = end;
   }
-  return { text, at };
+  throw new Error(
+    `no typescript to read the copies with: run \`pnpm install\` here, or in ${kernel}`,
+  );
+}
+
+/** Words after which a line break can end the statement where a space
+ * would not: the restricted productions (`return⏎x` returns nothing), and
+ * the contextual keywords TypeScript reads as a modifier or a declaration
+ * only when what follows is on the same line. */
+const BREAK_ENDS_AFTER = new Set([
+  "return",
+  "throw",
+  "break",
+  "continue",
+  "yield",
+  "async",
+  "let",
+  "using",
+  "get",
+  "set",
+  "static",
+  "accessor",
+  "declare",
+  "abstract",
+  "readonly",
+  "override",
+  "public",
+  "private",
+  "protected",
+  "type",
+  "namespace",
+  "module",
+  "interface",
+  "asserts",
+]);
+
+/** Tokens a line break before cannot join to what came before: a postfix
+ * `++`/`--` (`a⏎++b` is `a; ++b`), and TypeScript's `as`/`satisfies`. */
+const BREAK_ENDS_BEFORE = new Set(["++", "--", "as", "satisfies"]);
+
+/**
+ * `src[from, to)` as TypeScript's scanner reads it, comments and
+ * formatting set aside: its tokens — so `a + ++b` and `a++ + b` stay two
+ * things — with no trailing comma, and a `"\n"` token where a line break
+ * can end a statement that a space would not (automatic semicolon
+ * insertion). `at[k]` is where `tokens[k]` was in `src`.
+ */
+export function normalised(ts, src, from = 0, to = src.length) {
+  const { SyntaxKind: K } = ts;
+  const scanner = ts.createScanner(ts.ScriptTarget.Latest, true);
+  scanner.setText(src, from, to - from);
+  const tokens = [];
+  const at = [];
+  const isWord = (kind) =>
+    kind === K.Identifier ||
+    kind === K.PrivateIdentifier ||
+    (kind >= K.FirstKeyword && kind <= K.LastKeyword);
+  // An operand's first or last token: a word or a literal.
+  const isOperand = (kind) =>
+    isWord(kind) ||
+    (kind >= K.FirstLiteralToken && kind <= K.LastLiteralToken) ||
+    kind === K.TemplateHead ||
+    kind === K.TemplateTail;
+  const NOT_BEFORE_REGEX = [
+    K.CloseParenToken,
+    K.CloseBracketToken,
+    K.PlusPlusToken,
+    K.MinusMinusToken,
+  ];
+  let prev = { kind: K.Unknown, text: "" };
+  let depth = 0;
+  // The brace depth each open template's `${` sits at: the `}` that
+  // closes it goes on with the template's text.
+  const templates = [];
+  for (let kind = scanner.scan(); kind !== K.EndOfFileToken; kind = scanner.scan()) {
+    const regexMayStart =
+      prev.kind === K.Unknown ||
+      (isWord(prev.kind)
+        ? KEYWORD_BEFORE_REGEX.test(prev.text)
+        : prev.kind >= K.FirstPunctuation &&
+          prev.kind <= K.LastPunctuation &&
+          !NOT_BEFORE_REGEX.includes(prev.kind));
+    if ((kind === K.SlashToken || kind === K.SlashEqualsToken) && regexMayStart) {
+      kind = scanner.reScanSlashToken();
+    } else if (kind === K.GreaterThanToken) {
+      // The scanner leaves `>>`, `>=` in pieces for type arguments; the
+      // parser joins them where they are an operator. Joined always, so
+      // `a > > b` is never `a >> b`.
+      kind = scanner.reScanGreaterToken();
+    } else if (kind === K.OpenBraceToken) {
+      depth++;
+    } else if (kind === K.CloseBraceToken) {
+      if (templates.at(-1) === depth) {
+        kind = scanner.reScanTemplateToken(false);
+        if (kind === K.TemplateTail) templates.pop();
+      } else {
+        depth--;
+      }
+    }
+    if (kind === K.TemplateHead) templates.push(depth);
+    const text = scanner.getTokenText();
+    const start = scanner.getTokenStart();
+    if (
+      tokens.length > 0 &&
+      scanner.hasPrecedingLineBreak() &&
+      (BREAK_ENDS_BEFORE.has(text) ||
+        (isWord(prev.kind) && BREAK_ENDS_AFTER.has(prev.text)) ||
+        (isOperand(prev.kind) && isOperand(kind)))
+    ) {
+      tokens.push("\n");
+      at.push(start);
+    }
+    const closes =
+      kind === K.CloseParenToken ||
+      kind === K.CloseBracketToken ||
+      kind === K.CloseBraceToken;
+    if (closes && tokens.at(-1) === ",") {
+      tokens.pop();
+      at.pop();
+    }
+    tokens.push(text);
+    at.push(start);
+    prev = { kind, text };
+  }
+  return { tokens, at };
 }
 
 /** A normalised body's hash, as a marker records it. */
-export const bodyHash = (text) =>
-  createHash("sha256").update(text).digest("hex").slice(0, 12);
+export const bodyHash = (tokens) =>
+  createHash("sha256").update(JSON.stringify(tokens)).digest("hex").slice(0, 12);
 
 /** 1-based line of `offset` in `src`. */
 const lineOf = (src, offset) => src.slice(0, offset).split("\n").length;
@@ -289,6 +398,7 @@ function kernelFile(kernel, named) {
  */
 export function checkMirrors(kernel, folders) {
   const report = { checked: 0, failures: [], notes: [] };
+  let ts;
   for (const folder of folders) {
     for (const file of sourceFiles(folder)) {
       const src = readFileSync(file, "utf8");
@@ -311,8 +421,9 @@ export function checkMirrors(kernel, folders) {
           );
           continue;
         }
-        const kernelBody = normalised(theirs, kernelFn.bodyStart, kernelFn.end);
-        const hash = bodyHash(kernelBody.text);
+        ts ??= typescriptFor(kernel);
+        const kernelBody = normalised(ts, theirs, kernelFn.bodyStart, kernelFn.end);
+        const hash = bodyHash(kernelBody.tokens);
         const kernelAt = `${path.relative(kernel, found)}:${lineOf(theirs, kernelFn.start)}`;
         if (form.toLowerCase() === "adapted") {
           if (recorded === undefined) {
@@ -336,12 +447,17 @@ export function checkMirrors(kernel, folders) {
           report.failures.push(`${at}: no function follows the marker`);
           continue;
         }
-        const pluginBody = normalised(src, mine.bodyStart, mine.end);
-        if (pluginBody.text === kernelBody.text) continue;
+        const pluginBody = normalised(ts, src, mine.bodyStart, mine.end);
         let k = 0;
-        while (pluginBody.text[k] === kernelBody.text[k]) k++;
+        while (
+          k < pluginBody.tokens.length &&
+          pluginBody.tokens[k] === kernelBody.tokens[k]
+        ) {
+          k++;
+        }
+        if (k === pluginBody.tokens.length && k === kernelBody.tokens.length) continue;
         const context = (body) =>
-          JSON.stringify(body.text.slice(Math.max(0, k - 20), k + 40));
+          JSON.stringify(body.tokens.slice(Math.max(0, k - 6), k + 10).join(" "));
         const lineIn = (body, text, fallback) =>
           lineOf(text, body.at[k] ?? fallback);
         report.failures.push(
