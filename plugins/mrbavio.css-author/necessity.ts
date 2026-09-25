@@ -11,9 +11,10 @@
 //
 // A PAGE (decision #76) is text, so a declaration is removed from the
 // TEXT: the mount is the caller's alone and nothing done to it is stored
-// (`MountedViewport.document()`), so the page's `<style>` in the mounted
+// (`BareMountedViewport.document()`), so the page's `<style>` in the mounted
 // copy has the declaration cut out of it — exactly the characters the
-// author wrote, found by the scanner (pageCss.ts) — and is put back after
+// author wrote, found by the kernel's scan (`dd.core.cssBlocks`, read by
+// pageCss.ts) — and is put back after
 // the read; an element's own declaration is cut from its `style`
 // attribute the same way. The browser parses what is left, so the answer
 // is the page without that line, whatever the line was: a shorthand, a
@@ -24,9 +25,8 @@
 // top or inside a group rule, are moved to a `<style>` of their own
 // before the baseline, and where a re-parse still reloads a face (a page
 // with an `@layer` reloads every one), the read waits for it
-// (pageMount.ts readWithoutReloading). The kernel's container probes in
-// the mounted css are the measurer's, not the page's, and the scanner
-// leaves them out.
+// (pageMount.ts readWithoutReloading). The page is mounted bare, so the
+// mounted css is the page's and nothing of the measurer's.
 //
 // What that catches is the "just in case" class of failure: explicit
 // initial values, a custom property nothing reads, a declaration the
@@ -113,11 +113,13 @@
 // minus custom properties (see snapshotProperties for why).
 
 import type {
+  BareMountedViewport,
   CoreApi,
+  CssBlock,
+  CssDeclaration,
   DreamDocument,
   DreamPage,
   Finding,
-  MountedViewport,
 } from "@daydream/plugin-api";
 
 import { isCertain } from "./certain";
@@ -127,17 +129,14 @@ import {
   mediaPreludes,
   pageRules,
   ruleName,
-  scanDeclarations,
   selectorForMatching,
   splitTopLevelCommas,
   trailingPseudoElement,
-  type CssDeclaration,
   type PageRule,
 } from "./pageCss";
 import {
   lintElements,
   mountedStyle,
-  parsePage,
   storedNames,
 } from "./pageDom";
 import {
@@ -292,17 +291,19 @@ async function lintViewport(
   // The page as stored, for naming: the mounted copy's css has the asset
   // route in its urls, and a finding should quote what the author wrote;
   // an element is named by its selector in the stored markup.
-  const stored = parsePage(page.payload.html);
+  const stored = dd.core.parsePage(page.payload.html);
   const { css } = page.payload;
-  const authored = pageRules(css);
+  // Read once: the rules and the breakpoints swept are the same text's.
+  const blocks = dd.core.cssBlocks(css);
+  const authored = pageRules(blocks);
   const started = Date.now();
   let slowest = 0;
   const { own, naming, candidates, unloaded } = await withMount(dd, page, undefined, async (m) => {
-    const prepared = await prepare(m);
+    const prepared = await prepare(dd.core, m);
     // What a mount costs, before any judging: what a probe will cost
     // at least, and so what the time left must hold for one.
     slowest = Date.now() - started;
-    const nameOf = storedNames(stored, prepared.doc);
+    const nameOf = storedNames(dd.core, stored, prepared.doc);
     const width = prepared.doc.defaultView?.innerWidth ?? page.frame?.width ?? 0;
     // The two scans line up rule for rule unless the mounted copy is not
     // this text (it always is, cleaned as a landing cleans it); if they
@@ -326,14 +327,14 @@ async function lintViewport(
   // 3): it has nothing left to sweep.
   let pending = candidates.filter((c) => c.dead && !answered.has(c.key));
   const swept = [own];
-  const widths = probeWidths(dd.core, css, own);
+  const widths = probeWidths(dd.core, blocks, own);
   let next = 0;
   for (; next < widths.length && pending.length > 0; next++) {
     if (deadline !== undefined && Date.now() + slowest > deadline) break;
     const width = widths[next]!;
     const began = Date.now();
     await withMount(dd, page, width, async (m) => {
-      const prepared = await prepare(m);
+      const prepared = await prepare(dd.core, m);
       const probe = baseline(prepared);
       for (const c of pending) {
         c.applies ||= appliesIn(prepared, c.removal[0]!);
@@ -395,11 +396,14 @@ function isStartingStyle(rule: Pick<PageRule, "conditions">): boolean {
  * where the page first declares it and the layers keep their order. The
  * rest of the css keeps every offset: each moved face's characters become
  * spaces. */
-async function prepare(mounted: MountedViewport): Promise<Prepared> {
+async function prepare(
+  core: CoreApi,
+  mounted: BareMountedViewport,
+): Promise<Prepared> {
   const doc = mounted.document();
   const style = mountedStyle(doc);
   let base = style?.textContent ?? "";
-  const faces = fontFaceBlocks(base);
+  const faces = fontFaceBlocks(core.cssBlocks(base));
   if (style !== null && faces.length > 0) {
     const fonts = doc.createElement("style");
     fonts.setAttribute("data-css-author", "fonts");
@@ -425,10 +429,11 @@ async function prepare(mounted: MountedViewport): Promise<Prepared> {
   return {
     doc,
     style,
-    rules: pageRules(base),
+    // The text with its faces blanked, read again: every offset holds.
+    rules: pageRules(core.cssBlocks(base)),
     nodes,
     own: nodes.map((node) => ({
-      declarations: scanDeclarations(node.getAttribute("style") ?? ""),
+      declarations: core.cssDeclarations(node.getAttribute("style") ?? ""),
     })),
   };
 }
@@ -436,15 +441,19 @@ async function prepare(mounted: MountedViewport): Promise<Prepared> {
 /**
  * The widths rule 2 sweeps for a page rendered at `own`, ascending,
  * without `own` itself: SWEEP_WIDTHS plus one px either side of every px
- * breakpoint its css's `@media` preludes name (`(width >= 900px)` flips
+ * breakpoint its css's `@media` preludes name (`blocks`, the css read) (`(width >= 900px)` flips
  * between 899 and 900, `(width > 900px)` between 900 and 901, so all three
  * are probed). Container conditions name a container's width, not the
  * window's, and contribute nothing; em/rem breakpoints convert at the
  * initial font size.
  */
-export function probeWidths(core: CoreApi, css: string, own: number): number[] {
+export function probeWidths(
+  core: CoreApi,
+  blocks: readonly CssBlock[],
+  own: number,
+): number[] {
   const widths = new Set<number>(SWEEP_WIDTHS);
-  for (const prelude of mediaPreludes(css)) {
+  for (const prelude of mediaPreludes(blocks)) {
     for (const px of core.mediaPreludePxValues(prelude)) {
       widths.add(px - 1);
       widths.add(px);
@@ -904,8 +913,7 @@ function hundredths(n: number): number {
  * computed value on its element vanishes the moment it is removed, so
  * including it would make every `--x` live by definition; excluded, `--x`
  * is live exactly when some `var(--x)` resolved differently without it —
- * which is what "an unread custom property is dead" means. (The
- * measurer's container probes drop out the same way.)
+ * which is what "an unread custom property is dead" means.
  */
 function snapshotProperties(style: CSSStyleDeclaration): string[] {
   return Array.from(style).filter((name) => !name.startsWith("--"));

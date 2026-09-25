@@ -691,12 +691,7 @@ describe("data: images", () => {
     expect(html).not.toContain("daydream-paste-");
     const line = infoLines(info).at(-1)!;
     expect(line).toContain("removed <script> ×2 and <object> —");
-    // v0.1.38's safety walk still looks inside what it removes, and says
-    // it emptied the url in the SVG <script>'s <g style> it then takes
-    // out: a kernel fix, after which no data: url is named at all.
-    expect(
-      line.replace(/; paste\.html: emptied url\(data:[^)]*\) in g\[style\].*$/, ""),
-    ).not.toContain("data:");
+    expect(line).not.toContain("data:");
   });
 
   test("a document loaded while the paste is cleaned abandons it before any image is stored", async () => {

@@ -4,12 +4,11 @@
 // API — what a person sees. The pane shows the page's html as its text
 // and marks the selected element in it, and the caret selects the element
 // it is in; typing saves live, verbatim, through the kernel's writePage,
-// and quick saves join one undo step; typing over a page that changed
-// elsewhere underneath is carried onto it; a save the kernel refuses, or
-// one where the page changed underneath, is kept as the page's draft, and
-// ⌘S saves the latter over the page, ⌘Z drops either and ⇧⌘Z straight
-// after brings it back; Delete on an inner element cuts it
-// out of the text and never removes the viewport.
+// and quick saves join one undo step; a save the kernel refuses says why
+// as you type; Delete on an inner element cuts it out of the text and
+// never removes the viewport. What a save cannot write is kept as a draft
+// (drafts.browser.test.tsx), and what is typed when the document goes is
+// saved into it first (leave.browser.test.tsx).
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -18,14 +17,14 @@ import {
   createPageItem,
   createTestKernel,
   flush,
+  type MountedPlugin,
   mountPlugin,
   pageElementId,
   pageNode,
   viewportItems,
-  type MountedPlugin,
 } from "@daydream/plugin-testing";
 
-import { APPLY_DEBOUNCE_MS, CHANGED_UNDERNEATH, PAGE_BACK } from "./HtmlPanel";
+import { APPLY_DEBOUNCE_MS } from "./HtmlPanel";
 import activate, {
   BLUR_COMMAND,
   DELETE_COMMAND,
@@ -37,12 +36,14 @@ import rawManifest from "./manifest.json";
 
 const manifest = rawManifest as PluginManifest;
 
+/** The plugin mounted by the test running, or null. */
 let mounted: MountedPlugin | null = null;
 
-afterEach(() => {
+/** Dispose of what the test mounted: each test file's `afterEach`. */
+function disposeMounted(): void {
   mounted?.dispose();
   mounted = null;
-});
+}
 
 /** The page as its author wrote it: a doctype, indentation, a comment. */
 const HTML = [
@@ -67,11 +68,16 @@ const edited = (from: string, to: string, html = HTML): string => {
   return html.replace(from, to);
 };
 
+/** The id of the first page of the document the test mounted. */
 let itemId = "";
 
 /** Mount the plugin over a fresh one-page document (or `doc`) and wait for
- * the page to mount. */
-async function mountPage(doc?: DreamDocument): Promise<MountedPlugin> {
+ * the page to mount. `entry` stands in for the plugin's entry — its API
+ * wrapped — and `slug` names the document as saved in a library. */
+async function mountPage(
+  doc?: DreamDocument,
+  options: { entry?: typeof activate; slug?: string } = {},
+): Promise<MountedPlugin> {
   let document = doc;
   if (document === undefined) {
     const item = createPageItem(
@@ -81,7 +87,12 @@ async function mountPage(doc?: DreamDocument): Promise<MountedPlugin> {
     document = { version: 7, items: [item] };
   }
   itemId = document.items[0]!.id;
-  mounted = await mountPlugin({ entry: activate, manifest, document });
+  mounted = await mountPlugin({
+    entry: options.entry ?? activate,
+    manifest,
+    document,
+    ...(options.slug === undefined ? {} : { slug: options.slug }),
+  });
   await waitMounted(itemId, "h1");
   return mounted;
 }
@@ -216,10 +227,14 @@ async function pause(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 700));
 }
 
+
+
+afterEach(disposeMounted);
+
 describe("mrbavio.html-editor", () => {
   test("the manifest declares everything the entry registers", () => {
     expect(manifest.id).toBe("mrbavio.html-editor");
-    expect(manifest.minCore).toBe("0.1.38");
+    expect(manifest.minCore).toBe("0.1.39");
     expect(manifest.contributes?.panels).toEqual(["html-editor"]);
     expect(manifest.contributes?.commands).toEqual([
       BLUR_COMMAND,
@@ -657,263 +672,6 @@ describe("mrbavio.html-editor", () => {
     expect(text()).toBe(edited("Old headline", "Kept"));
   });
 
-  test("a save the hidden dock deferred is dropped when another document loads, or an undo runs, before it lands", async () => {
-    const a = createPageItem({ html: HTML, css: CSS }, { id: "same", frame: { width: 600 } });
-    const m = await mountPage({ version: 7, items: [a] });
-    // The dock hidden is the shell's state: shown again whatever happens,
-    // as the next test expects to find it.
-    try {
-      select("same");
-      content().focus();
-      await typeAll(edited("Old headline", "Typed before the load"));
-      key(content(), { key: "\\", code: "Backslash", metaKey: true });
-      expect(m.panel()).toBeNull();
-      // Before the deferred save runs: the same document reopened — a page
-      // of the same id, the same text.
-      const b = createPageItem({ html: HTML, css: CSS }, { id: "same", frame: { width: 600 } });
-      m.store.loadDocument({ version: 7, items: [b] }, { slug: null });
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      flush();
-      expect(stored("same")).toBe(HTML);
-      expect(m.store.canUndo()).toBe(false);
-
-      // An undo before it runs: the typing belonged to the state undone.
-      key(window, { key: "\\", code: "Backslash", metaKey: true });
-      await waitMounted("same", "h1");
-      select("same");
-      content().focus();
-      const saved = edited("Old headline", "Saved");
-      await type(saved);
-      expect(stored("same")).toBe(saved);
-      await pause();
-      await typeAll(edited("Body copy", "Pending", saved));
-      key(content(), { key: "\\", code: "Backslash", metaKey: true });
-      expect(m.panel()).toBeNull();
-      m.kernel.commands.runCommand("core.undo");
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      flush();
-      expect(stored("same")).toBe(HTML);
-    } finally {
-      if (m.panel() === null) key(window, { key: "\\", code: "Backslash", metaKey: true });
-    }
-  });
-
-  test("a write that throws keeps the typing, as a draft with the reason, and the next save carries it", async () => {
-    let failing = true;
-    // The plugin's API with a writePage that throws while `failing`.
-    const entry: typeof activate = (dd) => {
-      const api = Object.create(dd) as typeof dd;
-      Object.defineProperty(api, "writePage", {
-        value: (edit: Parameters<typeof dd.writePage>[0]) => {
-          if (failing) throw new Error("the disk is full");
-          return dd.writePage(edit);
-        },
-      });
-      activate(api);
-    };
-    const item = createPageItem({ html: HTML, css: CSS }, { frame: { width: 960 } });
-    itemId = item.id;
-    mounted = await mountPlugin({ entry, manifest, document: { version: 7, items: [item] } });
-    await waitMounted(itemId, "h1");
-    select(itemId);
-    content().focus();
-    const typed = edited("Old headline", "Not lost");
-    await type(typed);
-    expect(text()).toBe(typed);
-    expect(stored()).toBe(HTML);
-    expect(message()).toContain("the disk is full");
-
-    failing = false;
-    const more = edited("Old headline", "Not lost, saved");
-    await type(more);
-    expect(message()).toBeNull();
-    expect(stored()).toBe(more);
-  });
-
-  test("text typed over a page that changed elsewhere on the canvas is carried onto it and saved", async () => {
-    await mountPage();
-    select(itemId);
-    content().focus();
-    await typeAll(edited("Old headline", "Mine"));
-    // An agent writes another part of the page before the debounce saves.
-    const theirs = edited("Body copy", "An agent's copy");
-    outsideEdit(theirs);
-    await settled();
-    // Both: the typing carried onto the page as it is now.
-    const both = edited("Old headline", "Mine", theirs);
-    expect(stored()).toBe(both);
-    expect(text()).toBe(both);
-    expect(message()).toBeNull();
-    expect(document.activeElement).toBe(content());
-  });
-
-  test("text typed where the page changed on the canvas is kept as its draft, with a note", async () => {
-    const one = createPageItem(
-      { html: HTML, css: CSS },
-      { frame: { width: 600 } },
-    );
-    const other = "<!doctype html>\n<body>\n  <h1>Other</h1>\n</body>";
-    const two = createPageItem(
-      { html: other, css: "" },
-      { frame: { width: 600 }, position: { x: 800, y: 0 } },
-    );
-    const m = await mountPage({ version: 7, items: [one, two] });
-    await waitMounted(two.id, "h1");
-    select(one.id);
-    content().focus();
-    const mine = edited("Old headline", "Mine");
-    await typeAll(mine);
-    // An agent writes the same headline before the debounce saves.
-    const theirs = edited("Old headline", "Their headline");
-    outsideEdit(theirs, one.id);
-    // Uncontrolled while typing: the typed text is still there.
-    expect(text()).toBe(mine);
-    await settled();
-    // Nothing written over theirs, and nothing typed thrown away.
-    expect(stored(one.id)).toBe(theirs);
-    expect(text()).toBe(mine);
-    expect(message()).toBe(CHANGED_UNDERNEATH);
-
-    // Held while the page is left: blur writes nothing, another page
-    // shows clean, and the draft comes back with its note.
-    blur();
-    expect(stored(one.id)).toBe(theirs);
-    expect(text()).toBe(mine);
-    select(two.id);
-    expect(text()).toBe(other);
-    expect(message()).toBeNull();
-    select(one.id);
-    expect(text()).toBe(mine);
-    expect(message()).toBe(CHANGED_UNDERNEATH);
-
-    // More typing there is held too: nothing is written over theirs
-    // without being asked.
-    content().focus();
-    const more = edited("Mine", "Mine, kept", mine);
-    await type(more);
-    expect(stored(one.id)).toBe(theirs);
-    expect(text()).toBe(more);
-    expect(message()).toBe(CHANGED_UNDERNEATH);
-
-    // ⌘S in the editor saves it over the page, as the note says, and is
-    // one undo step back to theirs.
-    await pause();
-    const event = key(content(), { key: "s", metaKey: true });
-    expect(event.defaultPrevented).toBe(true);
-    expect(stored(one.id)).toBe(more);
-    expect(text()).toBe(more);
-    expect(message()).toBeNull();
-    m.store.undo();
-    flush();
-    expect(stored(one.id)).toBe(theirs);
-  });
-
-  test("a draft typed back to the page's text goes, and the typing after it saves", async () => {
-    await mountPage();
-    select(itemId);
-    content().focus();
-    await typeAll(edited("Old headline", "Mine"));
-    const theirs = edited("Old headline", "Their headline");
-    outsideEdit(theirs);
-    await settled();
-    expect(message()).toBe(CHANGED_UNDERNEATH);
-
-    // Typed until it is what the page holds: nothing to write, the draft
-    // and its note go.
-    await type(theirs);
-    expect(stored()).toBe(theirs);
-    expect(message()).toBeNull();
-
-    // The next keystroke is typing over the page as it is now, and saves.
-    const next = edited("Body copy", "More copy", theirs);
-    await type(next);
-    expect(message()).toBeNull();
-    expect(stored()).toBe(next);
-  });
-
-  test("⌘S in the editor with nothing held saves what is pending and is the document's save", async () => {
-    await mountPage();
-    select(itemId);
-    content().focus();
-    const typed = edited("Old headline", "Saved now");
-    await typeAll(typed);
-    const event = key(content(), { key: "s", metaKey: true });
-    // Core's save took the key: the browser's save dialog never opens.
-    expect(event.defaultPrevented).toBe(true);
-    expect(stored()).toBe(typed);
-    expect(message()).toBeNull();
-  });
-
-  test("⌘Z drops a draft the page never held and shows the page as it is", async () => {
-    await mountPage();
-    select(itemId);
-    content().focus();
-    await typeAll(edited("Old headline", "Mine"));
-    const theirs = edited("Old headline", "Their headline");
-    outsideEdit(theirs);
-    await settled();
-    expect(message()).toBe(CHANGED_UNDERNEATH);
-
-    key(content(), { key: "z", metaKey: true });
-    // The agent's edit is not undone: only the typed text goes.
-    expect(stored()).toBe(theirs);
-    expect(text()).toBe(theirs);
-    expect(message()).toBeNull();
-  });
-
-  test("⌘Z drops a refused draft, all of it, and ⇧⌘Z straight after brings it back", async () => {
-    await mountPage();
-    select(itemId);
-    content().focus();
-    const refused = edited("<p>", '<p onclick="x()">');
-    await type(refused);
-    expect(message()).toContain("p[onclick]");
-
-    key(content(), { key: "z", metaKey: true });
-    expect(text()).toBe(HTML);
-    expect(message()).toBeNull();
-
-    // The editor keeps no history of its own: ⇧⌘Z is the one way back.
-    const back = key(content(), { key: "Z", metaKey: true, shiftKey: true });
-    expect(back.defaultPrevented).toBe(true);
-    expect(text()).toBe(refused);
-    expect(message()).toContain("p[onclick]");
-    expect(stored()).toBe(HTML);
-
-    // Typing after a drop is a new edit: nothing to bring back, and
-    // ⇧⌘Z saves it as it always does.
-    key(content(), { key: "z", metaKey: true });
-    const typed = edited("Body copy", "After the drop");
-    await typeAll(typed);
-    key(content(), { key: "Z", metaKey: true, shiftKey: true });
-    expect(stored()).toBe(typed);
-    expect(text()).toBe(typed);
-    expect(message()).toBeNull();
-  });
-
-  test("a held draft whose page is back as the typing found it says so, and ⌘S saves it", async () => {
-    const m = await mountPage();
-    select(itemId);
-    content().focus();
-    const mine = edited("Old headline", "Mine");
-    await typeAll(mine);
-    outsideEdit(edited("Old headline", "Their headline"));
-    await settled();
-    expect(message()).toBe(CHANGED_UNDERNEATH);
-
-    // Their change undone: the page is as the typing started from it.
-    m.store.undo();
-    flush();
-    expect(stored()).toBe(HTML);
-    expect(text()).toBe(mine);
-    expect(message()).toBe(PAGE_BACK);
-
-    content().focus();
-    key(content(), { key: "s", metaKey: true });
-    expect(stored()).toBe(mine);
-    expect(message()).toBeNull();
-  });
-
   test("a page changed on the canvas with nothing pending is shown as it is now", async () => {
     await mountPage();
     select(itemId);
@@ -924,126 +682,4 @@ describe("mrbavio.html-editor", () => {
     expect(document.activeElement).toBe(content());
   });
 
-  test("a refused text is kept as its page's draft and comes back with the page", async () => {
-    const one = createPageItem(
-      { html: HTML, css: CSS },
-      { frame: { width: 600 } },
-    );
-    const other = "<!doctype html>\n<body>\n  <h1>Other</h1>\n</body>";
-    const two = createPageItem(
-      { html: other, css: "" },
-      { frame: { width: 600 }, position: { x: 800, y: 0 } },
-    );
-    await mountPage({ version: 7, items: [one, two] });
-    await waitMounted(two.id, "h1");
-    select(one.id);
-    content().focus();
-    const refused = edited("<p>", '<p onclick="x()">');
-    await type(refused);
-    blur();
-    expect(text()).toBe(refused);
-    expect(message()).toContain("p[onclick]");
-    expect(stored(one.id)).toBe(HTML);
-
-    // Away and back: the other page shows clean, this one's draft waits.
-    select(two.id);
-    expect(text()).toBe(other);
-    expect(message()).toBeNull();
-    select(one.id);
-    expect(text()).toBe(refused);
-    expect(message()).toContain("p[onclick]");
-
-    // Corrected: saved, and the draft is gone.
-    content().focus();
-    await type(edited("<p>", '<p class="x">'));
-    blur();
-    expect(stored(one.id)).toBe(edited("<p>", '<p class="x">'));
-    expect(message()).toBeNull();
-    select(two.id);
-    select(one.id);
-    expect(text()).toBe(edited("<p>", '<p class="x">'));
-  });
-
-  test("a draft stays with its document: another document's page of the same id shows as it is", async () => {
-    const a = createPageItem(
-      { html: HTML, css: CSS },
-      { id: "same", frame: { width: 600 } },
-    );
-    const m = await mountPage({ version: 7, items: [a] });
-    select("same");
-    content().focus();
-    const refused = edited("<p>", '<p onclick="x()">');
-    await type(refused);
-    blur();
-    expect(message()).toContain("p[onclick]");
-
-    // Another document, whose page has the same id.
-    const theirs = "<!doctype html>\n<body>\n  <h1>Document B</h1>\n</body>";
-    const b = createPageItem(
-      { html: theirs, css: "" },
-      { id: "same", frame: { width: 600 } },
-    );
-    m.store.loadDocument({ version: 7, items: [b] }, { slug: null });
-    flush();
-    await vi.waitFor(() => {
-      expect(pageNode("same", "h1")?.textContent).toBe("Document B");
-    });
-    select("same");
-    expect(text()).toBe(theirs);
-    expect(message()).toBeNull();
-
-    // Typing there saves over B's page, never A's markup.
-    content().focus();
-    const mine = edited("Document B", "Document B, edited", theirs);
-    await type(mine);
-    expect(message()).toBeNull();
-    expect(stored("same")).toBe(mine);
-  });
-
-  test("the page removed from outside while the pane is dirty: the pane empties without a write", async () => {
-    const m = await mountPage();
-    select(itemId);
-    content().focus();
-    await typeAll(edited("Old headline", "Typing"));
-    const kernel = createTestKernel();
-    kernel.dd.mutateItems((items) => {
-      items.splice(0, 1);
-    });
-    kernel.dispose();
-    flush();
-    expect(panel().querySelector(".cm-content")).toBeNull();
-    expect(panel().textContent).toContain("Select a page");
-    expect(m.store.document.items).toHaveLength(0);
-  });
-
-  test("text held because its page left the canvas is told apart once an undo brings the page back", async () => {
-    const m = await mountPage();
-    select(itemId);
-    content().focus();
-    const typed = edited("Old headline", "Typing");
-    await typeAll(typed);
-    const kernel = createTestKernel();
-    kernel.dd.mutateItems((items) => {
-      items.splice(0, 1);
-    });
-    kernel.dispose();
-    flush();
-    expect(panel().querySelector(".cm-content")).toBeNull();
-
-    // The page is back: the typing with it, and a note that says so —
-    // not that the page is gone.
-    m.store.undo();
-    flush();
-    await waitMounted(itemId, "h1");
-    select(itemId);
-    expect(stored()).toBe(HTML);
-    expect(text()).toBe(typed);
-    expect(message()).toBe(PAGE_BACK);
-
-    // ⌘S saves it over the page, as the note says.
-    content().focus();
-    key(content(), { key: "s", metaKey: true });
-    expect(stored()).toBe(typed);
-    expect(message()).toBeNull();
-  });
 });

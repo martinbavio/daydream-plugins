@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { absoluteCssUrls, absoluteSrcset, withoutProbes } from "./pageExport";
+import { absoluteCssUrls, absoluteSrcset } from "./pageExport";
 
 const O = "http://host.test";
 
@@ -60,39 +60,5 @@ describe("the export's urls stand alone", () => {
     expect(absoluteCssUrls('a { b: url(" /a.png"); }', O)).toBe(`a { b: url(" ${O}/a.png"); }`);
     // A url() inside another function (a var() fallback) is still one.
     expect(absoluteCssUrls("a { b: var(--x, url(/a.png)); }", O)).toBe(`a { b: var(--x, url(${O}/a.png)); }`);
-  });
-});
-
-describe("the export holds the page's own css", () => {
-  // As the kernel's mount probes a page's css (src/measure/livePage.ts
-  // withContainerProbes): a reach copy under `@media all` before each
-  // `@container`, the probe leading each block under it, and one
-  // `@property` per probe at the end.
-  const REGISTER = (n: number) =>
-    `@property --dream-container-${n} { syntax: "<integer>"; inherits: false; initial-value: 0; }`;
-
-  test("the container probes come out, and the page's css is left as written", () => {
-    const css = 'main { x: 1; }\n@container (width > 100px) { .t { color: red; } }\n';
-    const probed =
-      'main { x: 1; }\n@media all {  .t { --dream-container-0: 1; } } @container (width > 100px) { .t { --dream-container-0: 2;  color: red; } }\n' +
-      `\n${REGISTER(0)}\n`;
-    expect(withoutProbes(probed)).toBe(css);
-    // Nested in a style rule: the reach copy carries the probe on its own
-    // block, and the rule's block leads with it.
-    const nested = ".a { @container x { color: red; } }";
-    expect(
-      withoutProbes(
-        `.a { @media all { --dream-container-0: 1; } @container x { --dream-container-0: 2;  color: red; } }\n${REGISTER(0)}\n`,
-      ),
-    ).toBe(nested);
-    // A css with no probe is not touched; a brace or an `@media all` in a
-    // string, or the author's own `@media all`, is the page's.
-    const own = '.t::before { content: "{ @media all { }"; } @media all { .t { color: red; } } ';
-    expect(withoutProbes(own)).toBe(own);
-    expect(
-      withoutProbes(
-        `${own}@media all {  .u { --dream-container-0: 1; } } @container y { .u { --dream-container-0: 2;  top: 0; } }\n${REGISTER(0)}\n`,
-      ),
-    ).toBe(`${own}@container y { .u { top: 0; } }`);
   });
 });

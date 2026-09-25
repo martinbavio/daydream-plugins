@@ -20,8 +20,10 @@
 // declaration is never judged: it is there to win, which a reset may need
 // to.
 
+import type { CssDeclaration } from "@daydream/plugin-api";
+
 import { isCertain } from "./certain";
-import type { CssDeclaration, PageRule } from "./pageCss";
+import type { PageRule } from "./pageCss";
 
 /** Each property the rule judges, and its initial value. */
 const INITIAL_VALUES: ReadonlyMap<string, string> = new Map([

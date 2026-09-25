@@ -3,7 +3,7 @@
 // every assertion is on the findings' shape and words. Real Chromium: the
 // lint parses a page's markup with the browser's own parser (decision
 // #76), and reads a `font` shorthand through the CSSOM. The rule-level
-// checks alone are proved under node too (staticLint.rules.test.ts); a
+// checks alone are proved too (staticLint.rules.browser.test.ts); a
 // container query with no container moved to matchLint.browser.test.ts,
 // since a page's query lives in a rule whose elements only a match finds,
 // and so did an explicit initial value, which is measured.

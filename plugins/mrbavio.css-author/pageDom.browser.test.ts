@@ -6,7 +6,7 @@ import { afterAll, describe, expect, test } from "vitest";
 
 import { createPageItem, createTestKernel } from "@daydream/plugin-testing";
 
-import { mountedStyle, parsePage, storedNames } from "./pageDom";
+import { mountedStyle, storedNames } from "./pageDom";
 
 const kernel = createTestKernel();
 afterAll(() => kernel.dispose());
@@ -21,10 +21,10 @@ async function namesOf(
     { html, css: "" },
     { id: "v1", frame: { width: 600 } },
   );
-  const stored = parsePage(page.payload.html);
-  const mount = await kernel.dd.mountViewport(page);
+  const stored = kernel.dd.core.parsePage(page.payload.html);
+  const mount = await kernel.dd.mountViewport(page, { bare: true });
   try {
-    const nameOf = storedNames(stored, mount.document());
+    const nameOf = storedNames(kernel.dd.core, stored, mount.document());
     return {
       stored,
       names: Array.from(mount.document().querySelectorAll(selector), nameOf),
@@ -77,7 +77,7 @@ describe("storedNames", () => {
 });
 
 describe("mountedStyle", () => {
-  test("the page's own sheet in a mount is the one the live face writes, never a noscript's or a template's before it", async () => {
+  test("the page's own sheet in a lint's mount is the one the live face writes — never a noscript's or a template's before it, nor the motion pin after it — and holds the page's css alone", async () => {
     const page = createPageItem(
       {
         html: [
@@ -90,7 +90,10 @@ describe("mountedStyle", () => {
       },
       { id: "v1", frame: { width: 600 } },
     );
-    const mount = await kernel.dd.mountViewport(page, { still: true });
+    const mount = await kernel.dd.mountViewport(page, {
+      still: true,
+      bare: true,
+    });
     try {
       expect(mountedStyle(mount.document())?.textContent).toBe(
         ".page { color: blue }",

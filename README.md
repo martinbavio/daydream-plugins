@@ -10,12 +10,12 @@ workspace, one build, one folder per plugin.
 | Plugin                | What it adds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mrbavio.text`        | plain canvas text as an item kind: type, edit, resize, paste a paragraph. Needs Daydream 0.1.38 or later (decision #76, a format 7 document)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `mrbavio.grid`        | a DevTools-style grid overlay for the selected grid container. Needs Daydream 0.1.38 or later (decision #76, a format 7 page)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `mrbavio.notes`       | a notes pane in the dock, saved with the document. Needs Daydream 0.1.38 or later (decision #76, a format 7 page)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `mrbavio.html-editor` | the selected page's HTML as its own text, edited and saved as written, the selected element marked in it. Needs Daydream 0.1.38 or later (decision #76, the page payload)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `mrbavio.grid`        | a DevTools-style grid overlay for the selected grid container. Needs Daydream 0.1.39 or later (decision #76, a format 7 page)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `mrbavio.notes`       | a notes pane in the dock, saved with the document. Needs Daydream 0.1.39 or later (decision #76, a format 7 page)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `mrbavio.html-editor` | the selected page's HTML as its own text, edited and saved as written, the selected element marked in it. Needs Daydream 0.1.39 or later (decision #76, the page payload)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `mrbavio.html-paste`  | pasting HTML on the canvas lands it as a viewport                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `mrbavio.css-author`  | the opinion about CSS: two lints as gates, the layout procedures, a technique corpus the knowledge tools serve, and a `procedures` resource — the `dream-author` workflow itself is Daydream's own                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `mrbavio.impeccable`  | [Impeccable](https://impeccable.style)'s design verbs on the canvas — its playbooks over a viewport, read from the skill installed on the machine (`npx impeccable install`), never vendored. Select something, ⌘P, type a verb and, after it, a brief in your own words (bolder, quieter, typeset, layout, colorize, delight fan out three draft variants; distill, polish, clarify, animate, adapt rework in place; critique and audit answer a scored review over the rendered page with Impeccable's detector, landing nothing); an agent in a design session ("start a design session in Daydream" — not the `/impeccable` skill's live mode) wakes on the pick through the plugin's storage file; `adopt` in a variant's title bar folds it into its source as one undo step. Also `impeccable_verb` from a sentence, and a prompt per verb. Needs Daydream 0.1.38 or later (decision #67 and #76, a format 7 page)    |
+| `mrbavio.impeccable`  | [Impeccable](https://impeccable.style)'s design verbs on the canvas — its playbooks over a viewport, read from the skill installed on the machine (`npx impeccable install`), never vendored. Select something, ⌘P, type a verb and, after it, a brief in your own words (bolder, quieter, typeset, layout, colorize, delight fan out three draft variants; distill, polish, clarify, animate, adapt rework in place; critique and audit answer a scored review over the rendered page with Impeccable's detector, landing nothing); an agent in a design session ("start a design session in Daydream" — not the `/impeccable` skill's live mode) wakes on the pick through the plugin's storage file; `adopt` in a variant's title bar folds it into its source as one undo step. Also `impeccable_verb` from a sentence, and a prompt per verb. Needs Daydream 0.1.39 or later (decision #67 and #76, a format 7 page)    |
 
 Each is a folder under `plugins/`: `manifest.json`, `index.tsx`, `styles.ts`
 (CSS as a string), `icon.svg`, its own `package.json` for its runtime
@@ -47,7 +47,13 @@ for the two packages as `catalog:`, and the root's `pnpm.overrides` pins
 `@daydream/plugin-api` the same way, so every plugin resolves one copy.
 To move to another kernel, change the commit on both catalog lines and
 run `pnpm install`. `pnpm test:kernel` warns when the checkout it is
-given is at another commit.
+given is at another commit. While a change here needs kernel API that is
+not released yet, the pin names the head of the kernel branch that adds
+it, so the two are reviewed together. That pin is for review only: before
+a change here merges, the pin must name a kernel tag, or a commit on the
+kernel's main, never a branch commit — a branch may be squash-merged and
+its commits gone — and a plugin's `minCore` names the release that tag
+is.
 
 ## Ship
 
@@ -84,11 +90,21 @@ plugin on from the plugins page (⌥⌘P).
 
 ## Tests
 
-`pnpm test` runs each plugin's unit tests, and the scripts', under node. The browser tests
-(`*.browser.test.tsx`) mount Daydream's real shell through its test
-harness, which lives in the Daydream checkout and reaches into its source;
-they are kept beside the code as the specification and run from a Daydream
-checkout, not from here: `pnpm test:kernel <daydream-checkout> [plugins/<id> …]`
+`pnpm test` runs each plugin's unit tests, and the scripts', under node:
+every `*.test.ts[x]` but two kinds, which need the kernel's own code and
+so run from a Daydream checkout. The browser tests (`*.browser.test.ts[x]`)
+run in a browser, most mounting Daydream's real shell through its test
+harness, which lives in the Daydream checkout and reaches into its source.
+The kernel tests (`*.kernel.test.ts[x]`) run under node but read through
+the kernel itself — plugin-testing's `coreApi()`, `dd.core` with no shell,
+which reaches into the same source: the CSS author's reading of a real
+sheet through the kernel's scan is one. Anything that is a plugin's own
+logic over what the kernel hands it stays a unit test: the CSS author's
+rule walks, nesting, `@scope` and every lint's judgement over a scan are
+proved over blocks and declarations written by hand
+(`plugins/mrbavio.css-author/testBlocks.ts`). The other two kinds are kept
+beside the code as the specification and run from a Daydream checkout,
+not from here: `pnpm test:kernel <daydream-checkout> [plugins/<id> …]`
 copies each plugin into the checkout with its `@daydream/*` packages pointed
 at the checkout's own, runs its tests, the kernel's boundary lint and its
 typecheck, and removes the copies. `--no-lint` and `--no-typecheck` skip
@@ -104,7 +120,10 @@ killed run's leftover, which `--clean` removes.
 A plugin may not import the kernel's source, so a function it needs to the
 letter is copied, with a one-line marker above it naming where it came
 from, and `test:kernel` checks each against the kernel it runs on
-(`scripts/mirrors.mjs`):
+(`scripts/mirrors.mjs`). No plugin here holds such a copy today — what
+they copied, the kernel now hands them through `dd.core` — and the
+checker and its tests (`scripts/kernel-test.test.ts`) are kept on purpose,
+as the guard for the next copy:
 
 ```
 // mirrors: src/render/uniqueSelector.ts stepFor
@@ -140,3 +159,10 @@ build. The `@daydream/plugin-api` types are a dev dependency at the root,
 with `zod`, which its host-part contract types tool schemas with. A new
 plugin's package.json asks for the `@daydream/*` packages as `catalog:`
 (see the kernel pin above).
+
+A module that calls the API is handed `dd`, narrowed with
+`Pick<DaydreamApi, …>` to the members it calls, `core` among them when it
+reads `dd.core`. A module that needs only the kernel's pure helpers is
+handed `dd.core` whole, as `core: CoreApi` — never a `Pick` of it or a
+subset under a name of its own — and a walk over a scan is handed the
+blocks, read once by its caller (`core.cssBlocks(css)`), not the text.

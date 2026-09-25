@@ -16,5 +16,5 @@
     "skipLibCheck": true
   },
   "include": ["plugins", "scripts"],
-  "exclude": ["**/node_modules", "**/dist", "**/*.browser.test.*"]
+  "exclude": ["**/node_modules", "**/dist", "**/*.browser.test.*", "**/*.kernel.test.*"]
 }

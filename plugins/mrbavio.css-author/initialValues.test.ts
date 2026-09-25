@@ -1,20 +1,23 @@
 // Which declarations the explicit-initial-value rule weighs
-// (initialValues.ts), in the node project, over a page's css text scanned
-// into rules (pageCss.ts). Whether one is a finding is measured against
-// the mounted page, the UA sheet included (matchLint.browser.test.ts,
-// gates.browser.test.ts).
+// (initialValues.ts), over a page's rules (pageCss.ts) read from blocks
+// written by hand (testBlocks.ts). Whether one is a finding is measured
+// against the mounted page, the UA sheet included
+// (matchLint.browser.test.ts, gates.browser.test.ts).
 import { describe, expect, test } from "vitest";
 
-import { pageRules, scanDeclarations } from "./pageCss";
+import type { CssBlock } from "@daydream/plugin-api";
+
+import { pageRules } from "./pageCss";
 import { restatesInitial, ruleInitialCandidates } from "./initialValues";
+import { block, decls } from "./testBlocks";
 
 const restated = (style: string): string[] =>
-  scanDeclarations(style)
+  decls(style)
     .filter(restatesInitial)
     .map((d) => d.property);
 
-const candidates = (css: string): [number, string][] =>
-  ruleInitialCandidates(pageRules(css)).map(({ rule, declaration }) => [
+const candidates = (blocks: CssBlock[]): [number, string][] =>
+  ruleInitialCandidates(pageRules(blocks)).map(({ rule, declaration }) => [
     rule.index,
     declaration.property,
   ]);
@@ -68,9 +71,11 @@ describe("restatesInitial", () => {
 describe("ruleInitialCandidates", () => {
   test("a top-level rule's restated initials, at the rule's index, whatever the selector", () => {
     expect(
-      candidates(
-        ".a { color: red } .card { position: static; overflow: visible } img.hero { overflow: visible }",
-      ),
+      candidates([
+        block(".a", "color: red"),
+        block(".card", "position: static; overflow: visible"),
+        block("img.hero", "overflow: visible"),
+      ]),
     ).toEqual([
       [1, "position"],
       [1, "overflow"],
@@ -80,28 +85,24 @@ describe("ruleInitialCandidates", () => {
 
   test("a rule under a condition or a state pseudo-class resets under that condition or state — the override — and is never one", () => {
     expect(
-      candidates(
-        [
-          "@media (width >= 600px) { .card { position: static; max-width: none; } }",
-          "@supports (display: grid) { .card { position: static; } }",
-          "@container (width > 400px) { .card { position: static; } }",
-          "@starting-style { .card { opacity: 1; } }",
-          ".card { @media (width >= 600px) { position: static; } }",
-          ".card:hover { position: static; }",
-        ].join("\n"),
-      ),
+      candidates([
+        block("@media (width >= 600px)", "", [block(".card", "position: static; max-width: none")]),
+        block("@supports (display: grid)", "", [block(".card", "position: static")]),
+        block("@container (width > 400px)", "", [block(".card", "position: static")]),
+        block("@starting-style", "", [block(".card", "opacity: 1")]),
+        block(".card", "", [block("@media (width >= 600px)", "position: static")]),
+        block(".card:hover", "position: static"),
+      ]),
     ).toEqual([]);
   });
 
   test("a rule applying wherever it matches is one — nested, layered or scoped — and the measure decides (an override it needs is no finding)", () => {
     expect(
-      candidates(
-        [
-          ".card { position: absolute; &.open { position: static; } }",
-          "@layer base { .card { overflow: visible; } }",
-          "@scope (main) { .card { opacity: 1; } }",
-        ].join("\n"),
-      ),
+      candidates([
+        block(".card", "position: absolute", [block("&.open", "position: static")]),
+        block("@layer base", "", [block(".card", "overflow: visible")]),
+        block("@scope (main)", "", [block(".card", "opacity: 1")]),
+      ]),
     ).toEqual([
       [1, "position"],
       [2, "overflow"],
@@ -110,6 +111,6 @@ describe("ruleInitialCandidates", () => {
   });
 
   test("an !important initial is there to win, and is not one", () => {
-    expect(candidates(".a { position: static !important; }")).toEqual([]);
+    expect(candidates([block(".a", "position: static !important")])).toEqual([]);
   });
 });

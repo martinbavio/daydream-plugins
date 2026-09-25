@@ -4,15 +4,18 @@
 // items for a test); the marker on each variant's notes (variants.ts) is
 // how a round is known.
 
-import type { DreamItem, DreamPage } from "@daydream/plugin-api";
+import type { DreamItem, DreamPage, ViewportKind } from "@daydream/plugin-api";
 
 import { parseVariantMarker, type VariantMarker } from "./variants";
 
-const VIEWPORT = "daydream.viewport";
+/** A viewport item's kind, read once: `dd.core.viewportKind`'s value, the
+ * one `ViewportKind` names — a spelling the type checks against the
+ * kernel's, so no function here needs `dd.core` handed in for it. */
+const VIEWPORT_KIND: ViewportKind = "daydream.viewport";
 
 /** A viewport item — a page since format 7 (decision #76). */
 export function isViewport(item: DreamItem): item is DreamPage {
-  return item.kind === VIEWPORT;
+  return item.kind === VIEWPORT_KIND;
 }
 
 /** The marker on a viewport item's notes, or null. */
@@ -32,7 +35,10 @@ export interface Round {
  * such sibling of the same source and verb, never one with an id. Null
  * when the item is not a variant, or its source is gone (adopting into
  * nothing is not a thing; the user deletes it). */
-export function roundOf(items: readonly DreamItem[], variantId: string): Round | null {
+export function roundOf(
+  items: readonly DreamItem[],
+  variantId: string,
+): Round | null {
   const variant = items.find((i) => i.id === variantId);
   if (variant === undefined) return null;
   const marker = markerOf(variant);
@@ -58,7 +64,10 @@ export function roundOf(items: readonly DreamItem[], variantId: string): Round |
  * takes the variant's page, its two texts verbatim (the variant's web
  * fonts are `@font-face` rules in its css, so they come along); the
  * round's variants are spliced out. False when nothing applies. */
-export function adoptInto(items: DreamItem[], variantId: string): boolean {
+export function adoptInto(
+  items: DreamItem[],
+  variantId: string,
+): boolean {
   const round = roundOf(items, variantId);
   if (round === null) return false;
   const chosen = round.variants.find((v) => v.id === variantId)!;

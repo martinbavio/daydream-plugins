@@ -1,6 +1,7 @@
 // What a container query needs and what declarations provide
-// (containers.ts), proved under node. Which ELEMENTS are a query's
-// ancestors is the browser's, and matchLint.browser.test.ts's.
+// (containers.ts), over declarations written by hand (testBlocks.ts).
+// Which ELEMENTS are a query's ancestors is the browser's, and
+// matchLint.browser.test.ts's.
 import { describe, expect, test } from "vitest";
 
 import {
@@ -10,11 +11,11 @@ import {
   satisfies,
   splitContainerPrelude,
 } from "./containers";
-import { scanDeclarations } from "./pageCss";
+import { decls } from "./testBlocks";
 
 function declared(...lists: string[]) {
   const out = emptyContainerDeclaration();
-  for (const list of lists) mergeContainerDeclaration(out, scanDeclarations(list));
+  for (const list of lists) mergeContainerDeclaration(out, decls(list));
   return out;
 }
 

@@ -11,7 +11,7 @@
 // not. A named query further needs the satisfying ancestor to carry the
 // name, via `container-name` or the shorthand's first half.
 
-import type { CssDeclaration } from "./pageCss";
+import type { CssDeclaration } from "@daydream/plugin-api";
 
 /** The `<container-name>` a prelude asks for (null for an unnamed query)
  * and the condition after it. The name is the first token after
