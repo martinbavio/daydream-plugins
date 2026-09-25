@@ -445,7 +445,7 @@ describe("landing", () => {
   test("an image-only HTML paste still goes to Media", async () => {
     const shell = await mount();
     paste(document.body, {
-      "text/html": '<img src="/assets/browser-paste.png">',
+      "text/html": '<img src="assets/browser-paste.png">',
       "text/plain": "fallback",
     });
     await vi.waitFor(() => expect(shell.store.document.items).toHaveLength(1), {
@@ -453,7 +453,7 @@ describe("landing", () => {
     });
     expect(shell.store.document.items[0]).toMatchObject({
       kind: "daydream.image",
-      payload: { src: "/assets/browser-paste.png" },
+      payload: { src: "assets/browser-paste.png" },
     });
   });
 
@@ -602,7 +602,7 @@ describe("data: images", () => {
     // The two names differ past their slash, so the page's is the host's
     // pageSrc and not one the paste made from src.
     const vendorFile = vi.fn(async (file: File) => ({
-      src: `/assets/media-${file.name}`,
+      src: `assets/media-${file.name}`,
       pageSrc: `assets/page-${file.name}`,
     }));
     const shell = await mount({
@@ -633,7 +633,7 @@ describe("data: images", () => {
   test("a data: image a css url() names is vendored too, its copy's name written inside the url(); a data: url in css that is no image is kept as written, as the cleaning keeps a data: url wherever it only loads a resource", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
     const vendorFile = vi.fn(async (file: File) => ({
-      src: `/assets/media-${file.name}`,
+      src: `assets/media-${file.name}`,
       pageSrc: `assets/page-${file.name}`,
     }));
     const shell = await mount({
@@ -662,7 +662,7 @@ describe("data: images", () => {
   test("a data: image in a subtree the cleaning removes is never stored — a <script>'s, an SVG <script>'s, an <object>'s fallback — and one in a <noscript>, which the page keeps, is", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
     const vendorFile = vi.fn(async (file: File) => ({
-      src: `/assets/media-${file.name}`,
+      src: `assets/media-${file.name}`,
       pageSrc: `assets/page-${file.name}`,
     }));
     const shell = await mount({
@@ -695,7 +695,7 @@ describe("data: images", () => {
   test("a document loaded while the paste is cleaned abandons it before any image is stored", async () => {
     info = vi.spyOn(console, "info").mockImplementation(() => {});
     const vendorFile = vi.fn(async (file: File) => ({
-      src: `/assets/media-${file.name}`,
+      src: `assets/media-${file.name}`,
       pageSrc: `assets/page-${file.name}`,
     }));
     const shell = await mount({
@@ -717,7 +717,7 @@ describe("data: images", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const vendorFile = vi.fn(async (file: File) => ({
-        src: `/assets/media-${file.name}`,
+        src: `assets/media-${file.name}`,
         pageSrc: `assets/page-${file.name}`,
       }));
       // The plugin's API with a mutateItems that refuses.
@@ -765,7 +765,7 @@ describe("data: images", () => {
     await vi.waitFor(() => expect(vendorFile).toHaveBeenCalledTimes(1));
     shell.store.loadDocument(createEmptyDocument(), { slug: null });
     flush();
-    release({ src: "/assets/late.png", pageSrc: "assets/late.png" });
+    release({ src: "assets/late.png", pageSrc: "assets/late.png" });
     await vi.waitFor(() =>
       expect(infoLines(info!)).toEqual([
         `[${PLUGIN}] paste abandoned: another document was loaded before it landed; the 1 image stored for it is left unused, since the host has no call to take a stored file back`,
