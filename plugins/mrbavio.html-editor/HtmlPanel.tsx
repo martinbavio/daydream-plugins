@@ -492,14 +492,20 @@ export default function createHtmlPanel(state: PanelState) {
 
   // The panel unmounting — the dock hidden (⌘\), the plugin unloading —
   // mid-edit: save what is pending the way blur would, after the disposal
-  // has run (never a write inside it).
+  // has run (never a write inside it). Only into the state the typing
+  // belongs to: a load or an undo, a redo, before the save runs — the
+  // same document reopened, a page of the same id — drops it, as the
+  // restore drops what is pending while the panel is up.
   onSettled(() => () => {
     clearDebounce();
     const ed = editor();
     const id = shown;
-    if (ed !== undefined && id !== null && dirty) {
+    const load = untrack(dd.loadVersion);
+    const history = untrack(dd.historyVersion);
+    if (ed !== undefined && id !== null && dirty && history === syncedHistory) {
       const text = ed.text();
       queueMicrotask(() => {
+        if (untrack(dd.loadVersion) !== load || untrack(dd.historyVersion) !== history) return;
         const result = saveText(id, text);
         if (!result.ok) drafts().set(id, draftOf(text, result));
       });

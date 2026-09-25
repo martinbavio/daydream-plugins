@@ -657,6 +657,47 @@ describe("mrbavio.html-editor", () => {
     expect(text()).toBe(edited("Old headline", "Kept"));
   });
 
+  test("a save the hidden dock deferred is dropped when another document loads, or an undo runs, before it lands", async () => {
+    const a = createPageItem({ html: HTML, css: CSS }, { id: "same", frame: { width: 600 } });
+    const m = await mountPage({ version: 7, items: [a] });
+    // The dock hidden is the shell's state: shown again whatever happens,
+    // as the next test expects to find it.
+    try {
+      select("same");
+      content().focus();
+      await typeAll(edited("Old headline", "Typed before the load"));
+      key(content(), { key: "\\", code: "Backslash", metaKey: true });
+      expect(m.panel()).toBeNull();
+      // Before the deferred save runs: the same document reopened — a page
+      // of the same id, the same text.
+      const b = createPageItem({ html: HTML, css: CSS }, { id: "same", frame: { width: 600 } });
+      m.store.loadDocument({ version: 7, items: [b] }, { slug: null });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flush();
+      expect(stored("same")).toBe(HTML);
+      expect(m.store.canUndo()).toBe(false);
+
+      // An undo before it runs: the typing belonged to the state undone.
+      key(window, { key: "\\", code: "Backslash", metaKey: true });
+      await waitMounted("same", "h1");
+      select("same");
+      content().focus();
+      const saved = edited("Old headline", "Saved");
+      await type(saved);
+      expect(stored("same")).toBe(saved);
+      await pause();
+      await typeAll(edited("Body copy", "Pending", saved));
+      key(content(), { key: "\\", code: "Backslash", metaKey: true });
+      expect(m.panel()).toBeNull();
+      m.kernel.commands.runCommand("core.undo");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flush();
+      expect(stored("same")).toBe(HTML);
+    } finally {
+      if (m.panel() === null) key(window, { key: "\\", code: "Backslash", metaKey: true });
+    }
+  });
+
   test("text typed over a page that changed elsewhere on the canvas is carried onto it and saved", async () => {
     await mountPage();
     select(itemId);
