@@ -32,19 +32,11 @@ export default function createNotesPanel(dd: DaydreamApi) {
 
   // The viewport an element of a page belongs to (decision #76): the
   // page's elements are not in the document, so the kernel answers it,
-  // through `dd.pageElement(id).viewportId`. A render-time id never
-  // outlives its mount, so its viewport never changes and one answer per
-  // id is kept — it is read once per selection, not on every document
-  // write (a drag writes one per frame). Not kept while nothing is
-  // mounted under the id yet.
-  let owner: { id: ElementId; viewportId: string } | null = null;
-  const pageOf = (id: ElementId): string | null => {
-    if (owner?.id === id) return owner.viewportId;
-    const element = untrack(() => dd.pageElement(id));
-    if (element === null) return null;
-    owner = { id, viewportId: element.viewportId };
-    return owner.viewportId;
-  };
+  // through `dd.pageElement(id).viewportId` — read once per mounted
+  // element by the kernel, so the memo below asks again on every document
+  // write (a drag writes one per frame) at the cost of a lookup.
+  const pageOf = (id: ElementId): string | null =>
+    untrack(() => dd.pageElement(id))?.viewportId ?? null;
 
   const meta = createMemo<DeepReadonly<DreamMeta> | undefined>(() => {
     const doc = dd.document();
