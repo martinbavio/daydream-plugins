@@ -113,6 +113,21 @@ describe("css-author gates", () => {
     expect(necessity.map((f) => [f.rule, f.property])).toEqual([[5, "position"]]);
   });
 
+  test("a stray `;` that drops a rule is one static finding, and the rule it drops is judged by neither gate", async () => {
+    const doc = pageFixtureDocument();
+    const page = fixturePage(doc);
+    page.payload.css = page.payload.css.replace(".aside {", "; .aside {");
+    const statics = await judge(STATIC_GATE, doc);
+    expect(statics).toEqual([
+      {
+        tier: "static",
+        severity: "blocking",
+        message: `the stray \`;\` before \`.aside\` of viewport ${page.id} (line 4 of its css) makes the browser drop the rule \`.aside\`; remove it`,
+      },
+    ]);
+    expect(await judge(NECESSITY_GATE, doc)).toEqual([]);
+  });
+
   // The eval regression (2026-09-17 raw eval jsonl): the static gate,
   // through the real registration `activate` installed above, judging a
   // document straight from `documentFrom` — never loaded into the app

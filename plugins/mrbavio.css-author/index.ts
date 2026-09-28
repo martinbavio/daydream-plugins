@@ -6,7 +6,8 @@
 // it, the css scanned so each declaration is judged as written
 // (pageCss.ts), every match and every computed value the browser's.
 // The browser part registers the two lints as gates on every landing path
-// — the static lint (staticLint.ts's facts from the texts, plus
+// — the static lint (staticLint.ts's facts from the texts, a stray `;`
+// that drops a rule among them, plus
 // matchLint.ts's match-dependent ones: an explicit initial value the page
 // computes without, redundancy — an element's own style against a rule,
 // and a rule's against the rule beneath it — dead rules, and a container

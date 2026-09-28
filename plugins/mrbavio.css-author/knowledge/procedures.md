@@ -48,6 +48,7 @@ Then: would the page change if this line went — at this width or at another? I
 - No `!important`, ever. Shared styling is a rule, its selector naming who shares it; a one-off is a rule of its own (a tag or an `id` that says which box) or, rarely, the element's `style`, which beats every rule. Never restate in a `style` what a rule sets (the lint blocks it).
 - **When to write a rule.** Two or more elements carrying the same declarations are ONE rule plus a class saying what they are (`.card`; never `.card-1`, `.card-2`), and each element's own rule or `style` keeps only what is its alone. A tag selector where the tag already says it (`nav a`, `h2`); a class where the markup does not. Ask it before the second card, not after the third.
 - Dead weight the static lint blocks: a class no rule names, a rule no element matches, and a rule's line that repeats, for everything it reaches, what the rule beneath it already sets. Drop the hook, the rule, or the line.
+- A `;` after a rule's `}` (`.a { … };`) is no separator: where rules follow, the browser reads it into the next rule's selector and drops that rule. The static lint blocks it; delete the `;`.
 - One reason per element. A wrapper that exists only to carry a declaration gives it to its child or parent and disappears.
 
 ## 4. The loop

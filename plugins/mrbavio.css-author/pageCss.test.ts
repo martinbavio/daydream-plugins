@@ -21,6 +21,7 @@ import {
   selectorForMatching,
   selectorPreludes,
   splitTopLevelCommas,
+  strayDelimiter,
   trailingPseudoElement,
   withoutRanges,
 } from "./pageCss";
@@ -274,6 +275,47 @@ describe("helpers", () => {
     expect(
       pageRules([block('@scope ([title="a\n]) to (.b)', "", [block("p", "margin: 0")])])[0]!.scopes,
     ).toEqual([{ start: '[title="a\n]', end: ":where(:scope) .b" }]);
+  });
+
+  test("a rule a stray `;` has the browser drop is none of the page's, nor is anything in it; its selector still names its classes", () => {
+    const blocks = [
+      block(".a", "color: red"),
+      block("; .b", "width: 100", [block("& .x", "color: red")]),
+      block("; @media (width < 600px)", "", [
+        block(".c", "color: red"),
+        block("@font-face", "font-family: D"),
+      ]),
+      block("; @font-face", "font-family: E"),
+      block("@media (width >= 600px)", "", [block("; @layer q; .d", "color: red"), block(".e", "color: red")]),
+      block('[data-x=";"]', "color: red"),
+    ];
+    expect(pageRules(blocks).map((rule) => [rule.index, rule.prelude])).toEqual([
+      [0, ".a"],
+      [1, ".e"],
+      [2, '[data-x=";"]'],
+    ]);
+    expect(fontFaceBlocks(blocks)).toEqual([]);
+    expect(mediaPreludes(blocks)).toEqual(["@media (width >= 600px)"]);
+    expect(selectorPreludes(blocks)).toEqual([
+      ".a",
+      "; .b",
+      "& .x",
+      "; @media (width < 600px)",
+      ".c",
+      "; @font-face",
+      "; @layer q; .d",
+      ".e",
+      '[data-x=";"]',
+    ]);
+  });
+
+  test("strayDelimiter finds the first `;` outside comments, strings, escapes and brackets, up to a block's `{`", () => {
+    expect(strayDelimiter("; .b")).toBe(0);
+    expect(strayDelimiter(".a;b")).toBe(2);
+    expect(strayDelimiter('[x=";"] :is(a;b) .a\\;b "; " /* ; */ ;')).toBe(36);
+    expect(strayDelimiter(".a { ; }")).toBe(-1);
+    expect(strayDelimiter("x .a; b {", 2)).toBe(4);
+    expect(strayDelimiter("x .a; b {", 0, 4)).toBe(-1);
   });
 
   test("declarationMap: later wins, !important kept in the value", () => {

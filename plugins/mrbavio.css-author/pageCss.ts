@@ -28,6 +28,16 @@
 // `@scope` is relative to the scope's root, as the browser reads it (its
 // `selector` and `scopes`; ruleMatch.ts matches it), and the `@scope`'s
 // own declarations style the root.
+//
+// A RULE THE BROWSER REFUSES FOR A STRAY `;` is none of the page's: where
+// the parser reads rules alone (the sheet's top level, a group rule's
+// block no style rule encloses), a `;` ends nothing and is read into the
+// next rule's prelude, and the kernel's scan reads it there too
+// (`CssBlock.prelude`, `; .b`). The browser drops that rule whole, with
+// everything nested in it, so no walk here yields it or anything inside
+// it — its one finding is the static lint's, about the `;`
+// (staticLint.ts rule 5) — but `selectorPreludes`: a class it names was
+// written for a rule, and the `;` is the one line to fix.
 
 import type { CssBlock, CssDeclaration } from "@daydream/plugin-api";
 
@@ -130,7 +140,7 @@ export function pageRules(blocks: readonly CssBlock[]): PageRule[] {
     const at = level.at++;
     const block = level.blocks[at]!;
     const { conditions, parents, parentSelector, scopes } = level;
-    if (block.statement) continue;
+    if (block.statement || refused(block)) continue;
     const keyword = atKeyword(block.prelude);
     if (keyword === null) {
       const selector =
@@ -220,6 +230,40 @@ function listOf<T>(chain: Chain<T>): T[] {
     chain.list = out.reverse();
   }
   return chain.list;
+}
+
+/** Where the first `;` of `text` in `[from, to)` sits outside comments,
+ * strings (`stringEnd`), escapes and brackets, or -1 — read up to the
+ * first `{` outside them, where a rule's block begins. On a prelude
+ * (`CssBlock.prelude`, comments already out) it is the stray `;` the
+ * kernel's scan read into it; on the css text from a block's `range[0]`,
+ * that same `;` where it was written. */
+export function strayDelimiter(
+  text: string,
+  from = 0,
+  to = text.length,
+): number {
+  let depth = 0;
+  for (let i = from; i < to; i++) {
+    const ch = text[i] as string;
+    if (ch === "/" && text[i + 1] === "*") {
+      const close = text.indexOf("*/", i + 2);
+      if (close === -1) return -1;
+      i = close + 1;
+    } else if (ch === '"' || ch === "'") i = stringEnd(text, i) - 1;
+    else if (ch === "\\") i++;
+    else if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    else if (depth === 0 && ch === "{") return -1;
+    else if (depth === 0 && ch === ";") return i;
+  }
+  return -1;
+}
+
+/** Whether the browser refuses the block for a stray `;` in its prelude
+ * (see the header): the scan reads one there only where it ends nothing. */
+export function refused(block: CssBlock): boolean {
+  return strayDelimiter(block.prelude) !== -1;
 }
 
 /** Each of `blocks` and every block nested in it, in source order — a
@@ -415,7 +459,7 @@ export function fontFaceBlocks(
       levels.pop();
       continue;
     }
-    if (block.statement) continue;
+    if (block.statement || refused(block)) continue;
     const keyword = atKeyword(block.prelude);
     if (keyword === "font-face") {
       out.push({ block, within: listOf(level.within) });
@@ -435,7 +479,7 @@ export function fontFaceBlocks(
 export function mediaPreludes(blocks: readonly CssBlock[]): string[] {
   const out: string[] = [];
   walkBlocks(blocks, (block) => {
-    if (block.statement) return false;
+    if (block.statement || refused(block)) return false;
     const keyword = atKeyword(block.prelude);
     if (keyword === "media") out.push(block.prelude);
     return keyword === null || GROUP_RULES.has(keyword);
@@ -445,7 +489,10 @@ export function mediaPreludes(blocks: readonly CssBlock[]): string[] {
 
 /** Every selector-bearing prelude of the blocks — each style rule's
  * selector as written, nested ones included, and each `@scope`'s — what
- * the unreferenced-class rule reads for names (staticLint.ts). */
+ * the unreferenced-class rule reads for names (staticLint.ts). A rule a
+ * stray `;` has the browser drop is read too, its prelude whole: the
+ * class it names is not a hook nothing hangs on, and the `;` is the
+ * finding. */
 export function selectorPreludes(blocks: readonly CssBlock[]): string[] {
   const out: string[] = [];
   walkBlocks(blocks, (block) => {
