@@ -20,7 +20,7 @@ import type { DaydreamApi, ElementId } from "@daydream/plugin-api";
 import { createSignal, untrack } from "solid-js";
 
 import { follow, holdAt, isHeld, type Held } from "./held";
-import { droppedLegacyPick, EMPTY_SESSION, sessionState, type SessionState, type VerbPick } from "./pick";
+import { EMPTY_SESSION, sessionState, type SessionState, type VerbPick } from "./pick";
 import type { Target } from "./target";
 
 export const SESSION_KEY = "session";
@@ -246,14 +246,6 @@ export function createSession(
       if (untrack(phase).kind === "building") setPhase({ kind: "idle" });
     },
     restore(saved, viewportExists) {
-      // A pick from before pages that named an element: nothing names it
-      // now, so it is dropped, said, and cleared from the file.
-      const dropped = droppedLegacyPick(saved);
-      if (dropped) {
-        console.info(
-          `[${dd.plugin.id}] a waiting pick saved before pages named its element by an id no page has, so it was dropped: pick the verb again`,
-        );
-      }
       const s = sessionState(saved);
       state = { ...s, exit: false };
       if (s.pick !== null && viewportExists(s.pick.viewportId)) {
@@ -262,7 +254,7 @@ export function createSession(
         watch = watchFor(s.pick.viewportId, s.pick.element, null);
         setPhase({ kind: "waiting", pick: s.pick, anchor: null });
         check();
-      } else if (s.pick !== null || dropped) {
+      } else if (s.pick !== null) {
         write({ pick: null, exit: false });
       }
     },

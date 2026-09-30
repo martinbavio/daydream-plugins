@@ -23,9 +23,10 @@
 // A MOUNTED copy (`dd.mountViewport`) holds one `<style>` per LIVE sheet,
 // in cascade order — never a disabled one, its text the face's own (its
 // `@import`s out, its urls routed, under its `media`). `writtenRules`
-// pairs each with the page sheet it renders, by the shape of its rules,
-// so a lint that reads the copy names and numbers a rule as the page's
-// text has it. DOM-free.
+// pairs each with the page sheet it renders, by its rules' selectors and
+// declarations, so a lint that reads the copy names and numbers a rule
+// as the page's text has it; a copy it cannot pair is never a finding's
+// subject. DOM-free.
 
 import type {
   CoreApi,
@@ -102,6 +103,16 @@ export function sheetName(page: Page, sheet: number): string {
   return `\`${source.url}\``;
 }
 
+/** What identifies sheet `sheet` of a page across pages: a project file
+ * or a url by what it names — the same text wherever it is linked — and
+ * a `<style>` block by its page and its place there. */
+export function sheetKey(page: Page, sheet: number): string {
+  const source = page.sheets[sheet]!.source;
+  if ("file" in source) return `file\u0000${source.file}`;
+  if ("url" in source) return `url\u0000${source.url}`;
+  return `style\u0000${page.path}\u0000${source.style}`;
+}
+
 /** What a finding calls a mounted sheet no sheet of the page renders. */
 function unpairedName(page: Page): string {
   return `a stylesheet of \`${page.path}\` with no file`;
@@ -118,6 +129,12 @@ export interface WrittenRule {
   written: PageRule;
   /** The sheet it is written in (`sheetName`). */
   sheet: string;
+  /** That sheet across pages (`sheetKey`): a sheet several pages link is
+   * one key. A mounted sheet with no pair has a key of its own. */
+  key: string;
+  /** Its position among its sheet's rules: with `key`, the rule wherever
+   * the sheet is linked, whatever the page numbers it. */
+  at: number;
   /** Whether a finding may be about it: not a read-only sheet's. */
   editable: boolean;
 }
@@ -126,11 +143,18 @@ export interface WrittenRule {
  * Each rule of each mounted sheet (`mounted`, the copy's `<style>`s in
  * cascade order, each read on its own), as the page writes it. Each is
  * paired with the first page sheet not yet paired whose rules have its
- * rules' shape — each rule's prelude and declaration count, in order —
- * looking on from the last pair first (the copy's order is the page's,
- * a sheet that is not live skipped), then back. A mounted sheet with no
- * pair — a copy that is not the page's text — is judged as the copy
- * holds it, named as a sheet of the page with no file.
+ * rules' shape, looking on from the last pair first (the copy's order is
+ * the page's, a sheet that is not live skipped), then back: first the
+ * whole shape — each rule's prelude and its declarations' properties and
+ * values in order, a value the copy may have routed (one naming a
+ * `url(`) matched by its property alone — so two sheets alike but for
+ * their values (a light sheet and its alternate dark one) pair as
+ * written; then, for a copy the face wrote otherwise (a remote sheet the
+ * safety walk serialised again), each rule's prelude and declaration
+ * count. A mounted sheet with no pair — a copy that is not the page's
+ * text — is read as the copy holds it, named as a sheet of the page with
+ * no file, and never a finding's subject: no edit could name what to
+ * change.
  */
 export function writtenRules(
   page: Page,
@@ -143,18 +167,24 @@ export function writtenRules(
   const paired = new Set<number>();
   let next = 0;
   let extra = read.rules.length;
-  return mounted.map((rules) => {
-    const fits = (sheet: number): boolean =>
-      !paired.has(sheet) && sameShape(bySheet[sheet]!, rules);
-    let sheet = -1;
-    for (let s = next; s < bySheet.length && sheet < 0; s++) if (fits(s)) sheet = s;
-    for (let s = 0; s < next && sheet < 0; s++) if (fits(s)) sheet = s;
+  return mounted.map((rules, copy) => {
+    const pair = (same: Same): number => {
+      const fits = (sheet: number): boolean =>
+        !paired.has(sheet) && same(bySheet[sheet]!, rules);
+      for (let s = next; s < bySheet.length; s++) if (fits(s)) return s;
+      for (let s = 0; s < next; s++) if (fits(s)) return s;
+      return -1;
+    };
+    let sheet = pair(sameRules);
+    if (sheet < 0) sheet = pair(sameShape);
     if (sheet < 0) {
-      return rules.map((rule) => ({
+      return rules.map((rule, k) => ({
         rule: extra++,
         written: rule,
         sheet: unpairedName(page),
-        editable: true,
+        key: `copy\u0000${page.path}\u0000${copy}`,
+        at: k,
+        editable: false,
       }));
     }
     paired.add(sheet);
@@ -164,11 +194,16 @@ export function writtenRules(
       rule: own[k]!.index,
       written: own[k]!,
       sheet: sheetName(page, sheet),
+      key: sheetKey(page, sheet),
+      at: k,
       editable: editable(page, sheet),
     }));
   });
 }
 
+type Same = (a: readonly PageRule[], b: readonly PageRule[]) => boolean;
+
+/** Each rule's prelude and declaration count, in order. */
 function sameShape(a: readonly PageRule[], b: readonly PageRule[]): boolean {
   return (
     a.length === b.length &&
@@ -179,3 +214,23 @@ function sameShape(a: readonly PageRule[], b: readonly PageRule[]): boolean {
     )
   );
 }
+
+/** `sameShape`, and each declaration's property and value: a value
+ * naming a `url(` (which the copy routes) by its property alone. */
+function sameRules(a: readonly PageRule[], b: readonly PageRule[]): boolean {
+  return (
+    sameShape(a, b) &&
+    a.every((rule, i) =>
+      rule.declarations.every((declaration, k) => {
+        const other = b[i]!.declarations[k]!;
+        if (declaration.property !== other.property) return false;
+        return (
+          declaration.value === other.value ||
+          (ROUTED.test(declaration.value) && ROUTED.test(other.value))
+        );
+      }),
+    )
+  );
+}
+
+const ROUTED = /url\(/i;

@@ -43,7 +43,7 @@ export const EMPTY_SESSION: SessionState = { seq: 0, pick: null, exit: false };
 export function sessionState(raw: unknown): SessionState {
   if (typeof raw !== "object" || raw === null) return EMPTY_SESSION;
   const r = raw as Record<string, unknown>;
-  const pick = legacyWholePage(r["pick"]);
+  const pick = r["pick"];
   return {
     seq: typeof r["seq"] === "number" ? r["seq"] : 0,
     pick: isPick(pick) ? ownFields(pick) : null,
@@ -51,37 +51,9 @@ export function sessionState(raw: unknown): SessionState {
   };
 }
 
-/** The pick's own fields, and nothing an older version stored beside
- * them (a round). */
+/** The pick's own fields, and nothing else the file holds beside them. */
 function ownFields({ verb, viewportId, element, brief, at }: VerbPick): VerbPick {
   return { verb, viewportId, element, ...(brief === undefined ? {} : { brief }), at };
-}
-
-/** A pick saved before pages (decision #76) named its element by
- * `elementId`, the element's id in the document's tree — which a page
- * does not have, so nothing names that element now. Such a pick for an
- * element is not read back; this says one was there, for the canvas to
- * note. One for the whole page (`elementId: null`) loses nothing and is
- * read back as `element: null`. */
-export function droppedLegacyPick(raw: unknown): boolean {
-  if (typeof raw !== "object" || raw === null) return false;
-  const pick = (raw as Record<string, unknown>)["pick"];
-  return (
-    typeof pick === "object" &&
-    pick !== null &&
-    !("element" in pick) &&
-    typeof (pick as Record<string, unknown>)["elementId"] === "string"
-  );
-}
-
-/** A legacy whole-page pick as a page's; anything else as it is. */
-function legacyWholePage(raw: unknown): unknown {
-  if (typeof raw !== "object" || raw === null) return raw;
-  const r = raw as Record<string, unknown>;
-  if ("element" in r || r["elementId"] !== null) return raw;
-  const page: Record<string, unknown> = { ...r, element: null };
-  delete page["elementId"];
-  return page;
 }
 
 function isPick(raw: unknown): raw is VerbPick {

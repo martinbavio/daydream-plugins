@@ -772,3 +772,70 @@ describe("mrbavio.html-editor", () => {
     expect(document.activeElement).toBe(content());
   });
 });
+
+// A page file whose lines end in `\r\n` (decision #78: the file is the
+// author's, written as typed). CodeMirror holds every break as `\n`; the
+// editor keeps the file's own (lineBreaks.ts), so a save writes only
+// what was typed, and a mark and a caret land where the kernel's offsets
+// — the file's — say.
+describe("mrbavio.html-editor: a CRLF page", () => {
+  const CRLF = HTML.replaceAll("\n", "\r\n");
+  const BOM = "﻿";
+
+  test("one typed character writes the file with that character alone changed, its byte order mark and every \\r\\n kept", async () => {
+    const files = createFileHost({ "page.html": BOM + CRLF, "page.css": CSS });
+    overrideHostForTests({ project: files.project });
+    onTestFinished(() => overrideHostForTests(null));
+    await mountPage(onePage(CRLF));
+    select(itemId);
+    content().focus();
+    // The editor's text is the file's with `\n` for each break.
+    expect(text()).toBe(HTML);
+    const at = text().indexOf("Old headline") + "Old headline".length;
+    view().dispatch({ changes: { from: at, insert: "!" } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settled();
+    const typed = CRLF.replace("Old headline", "Old headline!");
+    expect(stored()).toBe(typed);
+    await vi.waitFor(() => expect(files.text("page.html")).toBe(BOM + typed));
+  });
+
+  test("a line typed is written with the file's break, and the lines around it keep theirs", async () => {
+    // Mixed: the file's breaks are \r\n but the comment's, a lone \n.
+    const mixed = CRLF.replace("<!-- the copy -->\r\n", "<!-- the copy -->\n");
+    await mountPage(onePage(mixed));
+    select(itemId);
+    content().focus();
+    const at = text().indexOf("<p>");
+    view().dispatch({ changes: { from: at, insert: "<p>New</p>\n    " } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settled();
+    expect(stored()).toBe(mixed.replace("<p>", "<p>New</p>\r\n    <p>"));
+  });
+
+  test("focus and blur with nothing typed, and the plugin stopping, write nothing", async () => {
+    const m = await mountPage(onePage(CRLF));
+    select(itemId);
+    content().focus();
+    blur();
+    content().focus();
+    const history = m.store.historyVersion();
+    m.pluginHost.deactivate(manifest.id);
+    flush();
+    expect(stored()).toBe(CRLF);
+    expect(m.store.canUndo()).toBe(false);
+    expect(m.store.historyVersion()).toBe(history);
+  });
+
+  test("the selected element is marked on its own text, and the caret selects the element it is in", async () => {
+    const m = await mountPage(onePage(CRLF));
+    select(idOf("p"));
+    await marks();
+    expect(marked()).toBe("<p>Body copy</p>");
+    expect(view().state.selection.main.head).toBe(HTML.indexOf("<p>"));
+    content().focus();
+    await caret(HTML.indexOf("Old headline"));
+    expect(m.store.selectedId()).toBe(idOf("h1"));
+    expect(marked()).toBe('<h1 class="headline">Old headline</h1>');
+  });
+});

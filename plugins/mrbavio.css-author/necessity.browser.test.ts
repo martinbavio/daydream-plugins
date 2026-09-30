@@ -28,7 +28,7 @@ import {
   type NecessityHost,
   type NecessityOptions,
 } from "./necessity";
-import { pagesOf, withSheets } from "./testPages";
+import { pagesOf, withSheets } from "./testPages.test-support";
 
 const kernel = createTestKernel();
 afterAll(() => kernel.dispose());
@@ -790,6 +790,7 @@ describe("the width sweep (a page is not a photo)", () => {
     let mounts = 0;
     const counted: NecessityHost = {
       core: kernel.dd.core,
+      page: kernel.dd.page,
       // One function behind the API's overloads, as the kernel's is.
       mountViewport: ((...args: Parameters<NecessityHost["mountViewport"]>) => {
         mounts++;

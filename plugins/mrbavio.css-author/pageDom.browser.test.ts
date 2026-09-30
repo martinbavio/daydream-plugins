@@ -13,7 +13,7 @@ import {
 } from "@daydream/plugin-testing";
 
 import { mountedStyles, storedNames } from "./pageDom";
-import { withSheets } from "./testPages";
+import { withSheets } from "./testPages.test-support";
 
 const kernel = createTestKernel();
 afterAll(() => kernel.dispose());

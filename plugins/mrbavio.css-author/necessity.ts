@@ -149,8 +149,10 @@ import {
 } from "./pageDom";
 import {
   conditionsHold,
+  mountable,
   mountedSheets,
   readWithoutReloading,
+  unmountedNote,
   withMount,
   type MountHost,
   type SheetRange,
@@ -217,8 +219,10 @@ export function isExemptProperty(property: string): boolean {
  * in that order; the survivors are then re-judged at each probe width in
  * a fresh mount. Every iframe is disposed, a thrown read included. A
  * viewport whose page the project does not hold is skipped (the static
- * lint reports it). After the dead declarations, one advisory finding per
- * viewport whose copy could not load an image. Browser only.
+ * lint reports it), and one whose page the store holds otherwise than
+ * handed in is not mounted (pageMount.ts `mountable`). After the dead
+ * declarations, one advisory finding per viewport whose copy could not
+ * load an image, and one per viewport not mounted. Browser only.
  */
 export async function necessityLint(
   dd: NecessityHost,
@@ -229,7 +233,14 @@ export async function necessityLint(
   const perViewport: Candidate[][] = [];
   const notes: Finding[] = [];
   const live = new Set<string>();
-  for (const shown of selectViewports(dd.core, doc, pageOf, options.viewportIds)) {
+  const { mounted, unmounted } = mountable(
+    dd,
+    selectViewports(dd.core, doc, pageOf, options.viewportIds),
+  );
+  for (const { viewport } of unmounted) {
+    notes.push(unmountedNote("necessity", "necessity lint", viewport));
+  }
+  for (const shown of mounted) {
     const judged = await lintViewport(dd, shown, live, options.deadline);
     perViewport.push(judged.candidates);
     notes.push(...judged.notes);
@@ -247,10 +258,13 @@ function selectViewports(
   pageOf: PageOf,
   viewportIds: string[] | undefined,
 ): Shown[] {
-  const { shown } = shownPages(core, doc, pageOf);
+  const { shown, missing } = shownPages(core, doc, pageOf);
   if (viewportIds === undefined) return shown;
   const wanted = new Set(viewportIds);
-  const known = new Set(core.viewportItems(doc).map((vp) => vp.id));
+  const known = new Set([
+    ...shown.map(({ viewport }) => viewport.id),
+    ...missing.map((viewport) => viewport.id),
+  ]);
   const unknown = viewportIds.filter((id) => !known.has(id));
   if (unknown.length > 0) {
     throw new Error(`No such viewport: ${unknown.join(", ")}`);
@@ -584,8 +598,8 @@ async function judgeAll(
   // keyed across viewports (rule 3) as its sheet writes it, in that sheet.
   const occurrences = new Map<string, number>();
   rules.forEach((rule, r) => {
-    const { written, sheet, editable } = prepared.written[r]!;
-    const shape = `${sheet}\u0000${[...written.parents, written.prelude].join(" › ")}\u0000${written.conditions.join("\u0000")}`;
+    const { written, key, editable } = prepared.written[r]!;
+    const shape = `${key}\u0000${[...written.parents, written.prelude].join(" › ")}\u0000${written.conditions.join("\u0000")}`;
     const occurrence = occurrences.get(shape) ?? 0;
     occurrences.set(shape, occurrence + 1);
     // A read-only sheet's line is the author's to keep: never judged.

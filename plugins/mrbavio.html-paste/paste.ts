@@ -8,23 +8,23 @@
 // wrapped it, and is left for Text. A claimed paste is a new PAGE, and a
 // page is a file of the project (decision #78): the pasted text is
 // written as a new html file through `dd.createPage`, which names it
-// (`index.html` in a project with no page yet, else after its `<title>`),
-// downloads the remote media it names into `assets/`, and places a
-// viewport of it as one undo step; the paste selects it. One console line
-// says what was made, and one more names each file that could not be
-// downloaded, left as written; a refusal (no project open, no host) is
-// the paste's one console line. No gates: a paste is the user's own hand
-// on the canvas, not an agent's page.
+// (`index.html` in a project with no page yet, else after its `<title>`,
+// `page.html` with none), downloads the remote media it names into
+// `assets/`, and places a viewport of it as one undo step; the paste
+// selects it. The file is the pasted text as it arrived — nothing is
+// cleaned or folded: what would run is the render walk's to leave off
+// the mount, as for every page — save one line: a fragment, which has no
+// doctype, is written after `<!doctype html>`, so a browser opening the
+// file renders it in standards mode, as the canvas renders every page.
+// One console line says what was made, and one more names each file
+// that could not be downloaded, left as written; a refusal (no project
+// open, no host) is the paste's one console line, and a viewport made
+// that could not be selected says so. No gates: a paste is the user's
+// own hand on the canvas, not an agent's page.
 
 import type { DaydreamApi } from "@daydream/plugin-api";
 import { flush, untrack } from "solid-js";
 
-import {
-  hasElements,
-  parseHtml,
-  pastedElements,
-  VIEWPORT_WIDTH,
-} from "./page";
 import { hasContent, isSingleParagraph } from "./prose";
 
 export const PASTE_PRIORITY = 5;
@@ -39,6 +39,55 @@ export const MAX_ELEMENTS = 10_000;
  * style value a whole image. */
 export const MAX_SOURCE = 4_000_000;
 
+/** Every pasted viewport's frame width: the frame rule (knowledge/
+ * format.md) wants a width and no height, and 960 is the desktop page a
+ * copied section was designed for. */
+export const VIEWPORT_WIDTH = 960;
+
+/** DOMParser over the whole clipboard text: a fragment gets a synthetic
+ * `html`/`body`, a Chrome copy (`<meta charset>` and StartFragment
+ * comments around the fragment) parses as the document it claims to be,
+ * and a real document keeps its own root, head, title and doctype. */
+export function parseHtml(html: string): Document {
+  return new DOMParser().parseFromString(html, "text/html");
+}
+
+/** How many elements a page made of `doc` would hold, as the element cap
+ * counts them: every one in the head and the body — a `<meta>`, a
+ * `<style>` too — and every one in a `<template>`'s content, which is not
+ * in the tree and is stored all the same; not the `html`, `head` and
+ * `body` every page has. */
+export function pastedElements(doc: Document): number {
+  const count = (root: ParentNode): number => {
+    let n = 0;
+    for (const el of root.querySelectorAll("*")) {
+      n += 1;
+      if (el.localName === "template" && "content" in el) {
+        n += count((el as HTMLTemplateElement).content);
+      }
+    }
+    return n;
+  };
+  return count(doc.head) + count(doc.body);
+}
+
+/** Whether the parse produced any element in the body — the difference
+ * between markup and text that happens to start with `<`. */
+export function hasElements(doc: Document): boolean {
+  return doc.body.firstElementChild !== null;
+}
+
+/** The doctype a fragment's file is written after. */
+export const DOCTYPE = "<!doctype html>\n";
+
+/** The file a paste writes: the text as it arrived, after `DOCTYPE`
+ * when its parse has none — a fragment, which a browser would otherwise
+ * render in quirks mode. A document's own doctype, whatever it says, is
+ * the author's. */
+export function pageFile(source: HtmlSource): string {
+  return source.doc.doctype === null ? DOCTYPE + source.text : source.text;
+}
+
 /** Whether plain text is markup and not prose that happens to open with
  * `<` — `<T> extends Foo`, `<Component /> renders`, `<x@y.z> wrote:`.
  * The parser makes an element out of any of those; a closing tag is
@@ -50,7 +99,7 @@ export function looksLikeMarkup(text: string): boolean {
 /** What a transfer carries as markup: the text, and its parse. */
 export interface HtmlSource {
   /** The face that was parsed, as it arrived: the markup the paste
-   * writes as the new page's file. */
+   * writes as the new page's file (`pageFile`). */
   text: string;
   doc: Document;
 }
@@ -84,14 +133,19 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
   // TODO(#56): a canvas-owned "where does the next paste land" is the
   // dedupe, when a third kind wants it.
   let consecutivePastes = 0;
-  // Pastes whose page is being written: while one is, the page landing
-  // and its selection are the paste's own, not an action in between.
+  // Pastes whose page is being written: while one is, a change of the
+  // document or the selection is the paste's own — its viewport placed,
+  // then selected — not an action in between. A gesture on the canvas
+  // and a pan or a zoom are the user's, and start over even then.
   let pasting = 0;
   let camera = untrack(() => dd.geometry.camera());
-  const reset = () => {
-    if (pasting === 0) consecutivePastes = 0;
+  const startOver = () => {
+    consecutivePastes = 0;
   };
-  dd.canvas.onActivity(reset);
+  const reset = () => {
+    if (pasting === 0) startOver();
+  };
+  dd.canvas.onActivity(startOver);
   dd.on("document", reset);
   dd.on("selection", reset);
   dd.on("geometry", () => {
@@ -101,9 +155,12 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
       next.panY !== camera.panY ||
       next.zoom !== camera.zoom
     )
-      reset();
+      startOver();
     camera = next;
   });
+
+  const why = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error);
 
   /** Write `text` as a new page of the project, its viewport at
    * `position`, and select it; say what was made. The kernel writes the
@@ -115,15 +172,29 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
   ): Promise<void> => {
     pasting += 1;
     try {
-      const made = await dd.createPage(text, {
-        position,
-        frame: { width: VIEWPORT_WIDTH },
-      });
-      // A page is selected as an item is: by its envelope id. (One made
-      // while another project opened is refused, placed nowhere.)
-      dd.select(made.viewportId);
-      // Flush the paste's own notifications while suppression is explicit.
-      flush();
+      let made: Awaited<ReturnType<DaydreamApi["createPage"]>>;
+      try {
+        made = await dd.createPage(text, {
+          position,
+          frame: { width: VIEWPORT_WIDTH },
+        });
+      } catch (error) {
+        console.error(`[${dd.plugin.id}] paste refused: ${why(error)}`);
+        return;
+      }
+      try {
+        // A page is selected as an item is: by its envelope id. (One made
+        // while another project opened is refused, placed nowhere.)
+        dd.select(made.viewportId);
+        // Flush the paste's own notifications while suppression is
+        // explicit.
+        flush();
+      } catch (error) {
+        console.error(
+          `[${dd.plugin.id}] pasted a page: ${made.path}, but its viewport could not be selected: ${why(error)}`,
+        );
+        return;
+      }
       console.info(
         `[${dd.plugin.id}] pasted a page: ${made.path}, ${VIEWPORT_WIDTH}px wide`,
       );
@@ -132,10 +203,6 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
           `[${dd.plugin.id}] ${url} could not be downloaded into assets/ (${reason}): it stays as written`,
         );
       }
-    } catch (error) {
-      console.error(
-        `[${dd.plugin.id}] paste refused: ${error instanceof Error ? error.message : String(error)}`,
-      );
     } finally {
       pasting -= 1;
     }
@@ -174,7 +241,7 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
         x: center.x - VIEWPORT_WIDTH / 2 + cascade,
         y: center.y - VIEWPORT_WIDTH / 4 + cascade,
       };
-      void land(source.text, position);
+      void land(pageFile(source), position);
     },
     { priority: PASTE_PRIORITY },
   );

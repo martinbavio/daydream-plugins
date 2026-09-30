@@ -229,7 +229,7 @@ describe("mrbavio.notes in the shell", () => {
     expect(source()).toBe(HOLY_GRAIL_SOURCE);
   });
 
-  test("the pane follows the project's meta edited while an element stays selected", async () => {
+  test("the pane follows the project's meta, and the page's source, edited while an element stays selected", async () => {
     const page = fixturePageAt(0);
     mounted = await mountPlugin({
       entry: activate,
@@ -238,11 +238,17 @@ describe("mrbavio.notes in the shell", () => {
     });
     select(await gridIn(page));
     expect(title()).toBe("Holy grail");
+    expect(source()).toBeUndefined();
     mounted.store.setDocument((d) => {
       d.meta = { ...holyGrail, title: "Holy grail, tighter" };
     });
     flush();
     expect(title()).toBe("Holy grail, tighter");
+    mounted.store.setDocument((d) => {
+      d.pages[0]!.meta = { sourceUrl: SIDEBAR_SOURCE };
+    });
+    flush();
+    expect(source()).toBe(SIDEBAR_SOURCE);
   });
 
   test("renders nothing without meta, and the panel stays in the dock", async () => {

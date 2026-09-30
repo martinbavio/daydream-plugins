@@ -48,7 +48,7 @@ export default function createNotesPanel(dd: DaydreamApi) {
           ? viewports[0]
           : undefined
         : (viewports.find((v) => v.id === id) ??
-          (doc.canvases[0]?.items.some((item) => item.id === id)
+          (dd.items().some((item) => item.id === id)
             ? undefined
             : viewports.find((v) => v.id === pageOf(id))));
     const sourceUrl =

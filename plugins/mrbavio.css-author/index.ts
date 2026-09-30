@@ -1,4 +1,4 @@
-// mrbavio.css-author — the opinion about what a GOOD .dream document is
+// mrbavio.css-author — the opinion about what a GOOD page of a project is
 // (decision #48, "Agent guidance is a plugin's"; decision #48
 // P9). Core guarantees a project's document is valid; this plugin judges
 // its pages. Every viewport shows a page of the project, its markup and
@@ -7,9 +7,13 @@
 // declaration is judged as written (pageCss.ts, pageSheets.ts), every
 // match and every computed value the browser's.
 // The browser part registers the two lints as gates, which core runs on
-// MCP `lint` over the open project's pages, and over a draft's page at
-// its `draft_finalize`, before its files are written, a blocking finding
-// refusing the write (decision #78) — the static lint (staticLint.ts's
+// MCP `lint` over the open project's pages (decision #78). Core runs them
+// at a draft's `draft_finalize` too, over the page about to be written,
+// which the store does not hold yet: there only staticLint.ts's facts
+// from the texts judge it, and the two mounting lints each answer one
+// advisory that they did not (pageMount.ts `mountable`), since a mount
+// shows the store's page — until the kernel mounts the page a gate is
+// handed. The lints: the static lint (staticLint.ts's
 // facts from the texts, a stray `;` that drops a rule among them, plus
 // matchLint.ts's match-dependent ones: an explicit initial value the page
 // computes without, redundancy — an element's own style against a rule,

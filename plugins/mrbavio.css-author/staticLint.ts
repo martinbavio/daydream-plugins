@@ -56,6 +56,7 @@ import { lintElements } from "./pageDom";
 import {
   editable,
   readSheets,
+  sheetKey,
   sheetName,
   shownPages,
   type Page,
@@ -153,16 +154,6 @@ function readPage(core: CoreApi, page: Page): ReadPage {
   // Read once: every walk below is over the same blocks.
   const { blocks, rules } = readSheets(core, page);
   return { core, page, parsed, elements: lintElements(parsed), blocks, rules };
-}
-
-/** What identifies sheet `sheet` of a page across pages: a project file
- * or a url by what it names — the same text wherever it is linked — and
- * a `<style>` block by its page and its place there. */
-function sheetKey(page: Page, sheet: number): string {
-  const source = page.sheets[sheet]!.source;
-  if ("file" in source) return `file\u0000${source.file}`;
-  if ("url" in source) return `url\u0000${source.url}`;
-  return `style\u0000${page.path}\u0000${source.style}`;
 }
 
 /** An element as a finding's sentence names it. */
@@ -697,12 +688,17 @@ function listed(items: readonly string[]): string {
 
 /** The line of `css` the block's stray `;` is on, counted from 1: where
  * the scan's range starts, or, for a prelude with text before its `;`
- * (`.a;b`), that `;` found in the text. */
+ * (`.a;b`), that `;` found in the text. A newline is CSS's: `\n`, `\f`,
+ * `\r`, or `\r\n` as one. */
 function lineOf(css: string, block: CssBlock): number {
   const [start, end] = block.range;
   const found = strayDelimiter(css, start, end);
   const at = found === -1 ? start : found;
   let line = 1;
-  for (let i = 0; i < at && i < css.length; i++) if (css[i] === "\n") line++;
+  for (let i = 0; i < at && i < css.length; i++) {
+    const c = css[i];
+    if (c === "\r" && css[i + 1] === "\n") continue;
+    if (c === "\n" || c === "\r" || c === "\f") line++;
+  }
   return line;
 }

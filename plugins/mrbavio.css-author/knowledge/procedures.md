@@ -56,5 +56,5 @@ Then: would the page change if this line went — at this width or at another? I
 1. This file rides the `dream-author` prompt; `knowledge_bundle {query}` brings the format rules with the nearest example.
 2. Gather the source or the intent; decide each container's formatting context with §1.
 3. Author the smallest page; pass every declaration through §2 and §3.
-4. `draft_finalize` it (the `dream-author` prompt says how): every enabled gate runs over the page first — static, necessity — and a blocking finding refuses the write. Each names the element, or the rule and its stylesheet; fix it and finalize again. `lint` judges pages already written.
-5. Your reply comes from what `lint` and `measure` answered, not from a second look; the track summaries are `measure`'s.
+4. `draft_finalize` it (the `dream-author` prompt says how): the static lint's text facts judge the page first, and a blocking one refuses the write. Matching and necessity need the page mounted, so they judge it once written: `lint` it next, fix what each finding names (the element, or the rule and its stylesheet) and lint again.
+5. Reply from what `draft_finalize` (its measure report) and `lint` answered, not from a second look.

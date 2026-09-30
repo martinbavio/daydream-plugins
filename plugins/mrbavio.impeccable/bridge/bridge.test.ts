@@ -144,16 +144,18 @@ describe("impeccable host part", () => {
     expect(text).not.toContain("Impeccable bolder · variant");
     expect(text).not.toContain("· round ");
     expect(text).not.toContain("draft_open {from:");
-    // No draft lands in this release: the copies stay drafts, the agent
-    // is told never to finalize and to say so, and nothing promises an
-    // adopt.
+    // A copy is not finalized yet (the kernel refuses it until Phase 9):
+    // the copies stay drafts, the agent is told never to finalize one and
+    // to say so, and nothing promises an adopt.
     expect(text).toContain("THEY STAY DRAFTS");
-    expect(text).toContain("never call draft_finalize");
+    expect(text).toContain("never call draft_finalize on a copy");
     expect(text).not.toMatch(/draft_finalize (IMMEDIATELY|lands)/);
     expect(text).not.toContain("adopt (");
     expect(text).toContain("tell the user the copies stay on the canvas as drafts to compare");
     expect(text).toContain("you write its direction into `pricing.html` with your file tools");
-    expect(text).toContain("then draft_discard every copy of the round and reload the canvas tab");
+    expect(text).toContain('then draft_discard every copy of the round and lint {viewportIds: ["vp_pricing"]} — the canvas follows the files');
+    // The canvas follows the files (kernel Phase 5): nothing to reload.
+    expect(text).not.toContain("reload");
     // A variant is a copy of the source's page, then its target's markup
     // replaced by selector and its rules edited by text (decision #76),
     // fanned out to sub-agents where the harness has them.
@@ -243,16 +245,24 @@ describe("impeccable host part", () => {
     expect(text).toContain("IN PLACE");
     // Previewed by selector and by exact text, not resent whole.
     expect(text).toContain("draft_replace {draft, token, target: <its selector>, html: <its reworked markup>}");
-    expect(text).toContain("The draft's css starts empty and applies after the page's own sheets");
+    // A rework's css holds only the rules to add (the kernel's draft
+    // guide); a rule of a linked sheet is changed in its file.
+    expect(text).toContain("The draft's css starts empty and holds only the rules to ADD");
+    expect(text).not.toContain("applies after the page's own sheets");
     expect(text).toContain("draft_edit {draft, token, html: {old, new}}");
     expect(text).toContain("never the whole page resent");
-    // Then written into the page's own files, the draft discarded and the
-    // tab reloaded, as the core guide has a page written (decision #78):
-    // never a finalize, which writes nothing in this release.
-    expect(text).toContain("Write the same change into the project with your file tools: the markup into `pricing.html`");
-    expect(text).toContain("never call draft_finalize");
-    expect(text).not.toContain("draft_finalize lands");
-    expect(text).toContain('draft_discard the draft, reload the canvas tab, and lint {viewportIds: ["vp_pricing"]}');
+    // Then finalized into the page's own files after the gates (decision
+    // #78), only what changed written back, and the canvas following the
+    // files; a linked sheet's rule changed in its file, then linted.
+    expect(text).toContain("3. draft_finalize {draft, token}: every gate runs over the page it is about to write, and it writes back into `pricing.html` only what the draft changed");
+    expect(text).toContain("fix in the draft what it names and finalize again");
+    expect(text).toContain("read them, do not measure again");
+    expect(text).toContain('then lint {viewportIds: ["vp_pricing"]} and fix in the files what a blocking finding names');
+    expect(text).not.toContain("never call draft_finalize");
+    expect(text).not.toContain("draft_discard");
+    expect(text).not.toContain("reload");
+    // The gates run at the finalize, and lint over files written directly.
+    expect(text).toContain("THE GATES run over the page draft_finalize is about to write");
     expect(text).toContain("Then impeccable_done.");
     expect(text).not.toContain("root's styles");
     expect(text).not.toContain("VARIANTS");

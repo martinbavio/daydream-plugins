@@ -84,9 +84,48 @@ describe("writtenRules", () => {
     ]);
   });
 
-  test("a mounted sheet no page sheet renders is judged as the copy holds it, numbered after the page's rules, as a sheet with no file", () => {
+  test("two sheets alike but for their values pair as written: the live one is not taken for the alternate before it", () => {
+    const dark = [block(".a", "color: white"), block(".b", "margin: 0; padding: 0")];
+    const DARK = { source: { file: "dark.css" }, readOnly: false };
+    expect(written(page([DARK, FILE]), [dark, a], [a])).toEqual([
+      [
+        [2, ".a", "`blog/post.css`", true],
+        [3, ".b", "`blog/post.css`", true],
+      ],
+    ]);
+  });
+
+  test("a remote sheet after a local one that is not live is the remote one, never a finding's subject", () => {
+    const print = [block("*", "box-sizing: content-box")];
+    expect(written(page([FILE, REMOTE]), [print, reset], [reset])).toEqual([
+      [[1, "*", "`https://cdn.example/reset.css`", false]],
+    ]);
+  });
+
+  test("a value the copy routes is matched by its property: the sheet still pairs by its values", () => {
+    const hero = [block(".h", 'background: url("hero.png")'), block(".h", "color: red")];
+    const other = [block(".h", 'background: url("hero.png")'), block(".h", "color: blue")];
+    const routed = [block(".h", 'background: url("/_p/hero.png")'), block(".h", "color: red")];
+    const OTHER = { source: { file: "other.css" }, readOnly: false };
+    expect(written(page([OTHER, FILE]), [other, hero], [routed])).toEqual([
+      [
+        [2, ".h", "`blog/post.css`", true],
+        [3, ".h", "`blog/post.css`", true],
+      ],
+    ]);
+  });
+
+  test("a copy the face serialised again still pairs by each rule's prelude and declaration count", () => {
+    const fetched = [block("*", "margin: 0 0")];
+    const serialised = [block("*", "margin: 0px")];
+    expect(written(page([REMOTE]), [fetched], [serialised])).toEqual([
+      [[0, "*", "`https://cdn.example/reset.css`", false]],
+    ]);
+  });
+
+  test("a mounted sheet no page sheet renders is read as the copy holds it, numbered after the page's rules, as a sheet with no file, and never a finding's subject", () => {
     expect(written(page([FILE]), [a], [[block(".x", "color: blue")], a])).toEqual([
-      [[2, ".x", "a stylesheet of `blog/post.html` with no file", true]],
+      [[2, ".x", "a stylesheet of `blog/post.html` with no file", false]],
       [
         [0, ".a", "`blog/post.css`", true],
         [1, ".b", "`blog/post.css`", true],

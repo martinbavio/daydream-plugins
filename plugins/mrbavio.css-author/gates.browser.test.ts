@@ -9,6 +9,7 @@
 import { afterAll, describe, expect, test } from "vitest";
 
 import type {
+  DreamViewport,
   Finding,
   GateRegistration,
   PluginManifest,
@@ -23,7 +24,7 @@ import {
 } from "@daydream/plugin-testing";
 
 import activate, { NECESSITY_GATE, STATIC_GATE } from "./index";
-import { pagesOf } from "./testPages";
+import { pagesOf } from "./testPages.test-support";
 
 /** What the real manifest declares of gates (the manifests test pins the
  * file itself; a JSON import needs a compiler flag the plugins do not
@@ -356,5 +357,117 @@ describe("the static gate on an explicit initial value the UA sheet overrides", 
         "overflow",
       ]);
     }
+  });
+});
+
+// A gate at a `draft_finalize` (kernel src/ai/draftFinalize.ts): the
+// document is the one viewport of the page about to be written, and
+// `ctx.page` answers that page for its path and the store's for the rest.
+// A lint's mount shows the store's page (`dd.mountViewport`), so the two
+// mounting lints judge only a page the store holds as handed in, and say
+// of the other that they did not (pageMount.ts `mountable`); the texts'
+// own lint judges the page handed in. Until the kernel mounts the page a
+// gate is handed.
+describe("css-author gates over a page the project does not hold yet", () => {
+  const HTML =
+    '<!doctype html><html><head><title>t</title></head><body><div class="a">x</div></body></html>';
+
+  /** The gates as a finalize runs them: `project` in the store, and the
+   * candidate page `candidate` answering for `path`. */
+  async function finalizing(
+    id: string,
+    project: TestProject,
+    path: string,
+    candidate: TestProject["pages"][number],
+  ): Promise<Finding[]> {
+    const gate = gates().get(id)!;
+    kernel.store.loadProject(project);
+    const viewport = project.document.canvases[0]!.items[0]! as DreamViewport;
+    return gate.run(
+      {
+        version: 8,
+        pages: [{ path }],
+        canvases: [
+          {
+            id: "finalize",
+            name: "First Canvas",
+            items: [{ ...viewport, payload: { ...viewport.payload, page: path } }],
+          },
+        ],
+      },
+      {
+        measure: kernel.dd.measure,
+        page: (p) => (p === path ? { ...candidate, path } : kernel.dd.page(p)),
+      },
+    );
+  }
+
+  function unread(viewport: string, path: string, lint: string): string {
+    return `viewport ${viewport} shows a version of ${path} the project does not hold yet, and a lint can mount only the project's own, so the ${lint} did not judge it; \`lint\` judges it once it is written`;
+  }
+
+  test("a new page is not refused: each mounting lint says it did not read it, and throws nothing", async () => {
+    const project = testProject([
+      createPageItem({ html: HTML, css: ".a { color: red }\n" }, { id: "old" }),
+    ]);
+    const candidate = testProject([
+      createPageItem({ html: HTML, css: ".a { color: blue }\n" }, { id: "old" }),
+    ]).pages[0]!;
+    expect(
+      await finalizing(STATIC_GATE, project, "brand-new.html", candidate),
+    ).toEqual([
+      {
+        tier: "static",
+        severity: "advisory",
+        message: unread("old", "brand-new.html", "match-dependent static lint"),
+      },
+    ]);
+    expect(
+      await finalizing(NECESSITY_GATE, project, "brand-new.html", candidate),
+    ).toEqual([
+      {
+        tier: "necessity",
+        severity: "advisory",
+        message: unread("old", "brand-new.html", "necessity lint"),
+      },
+    ]);
+  });
+
+  test("a rework is never judged as the page it replaces: a dead line the draft removed is no finding, and the texts' lint reads the draft", async () => {
+    const project = testProject([
+      createPageItem(
+        { html: HTML, css: ".a { color: red; float: none }\n" },
+        { id: "ed" },
+      ),
+    ]);
+    const stored = project.pages[0]!;
+    // The draft drops the dead `float` and adds a length with no unit,
+    // which the texts alone decide.
+    const candidate = {
+      ...stored,
+      html: HTML.replace('class="a"', 'class="a" style="width: 100"'),
+      sheets: stored.sheets.map((sheet) => ({ ...sheet, text: ".a { color: red }\n" })),
+    };
+    const statics = await finalizing(STATIC_GATE, project, stored.path, candidate);
+    expect(statics.map((f) => [f.severity, f.elementId, f.property])).toEqual([
+      ["blocking", "div.a", "width"],
+      ["advisory", undefined, undefined],
+    ]);
+    expect(statics[1]!.message).toBe(
+      unread("ed", stored.path, "match-dependent static lint"),
+    );
+    expect(
+      await finalizing(NECESSITY_GATE, project, stored.path, candidate),
+    ).toEqual([
+      {
+        tier: "necessity",
+        severity: "advisory",
+        message: unread("ed", stored.path, "necessity lint"),
+      },
+    ]);
+    // Control: handed the page the store holds, both judge it in full.
+    expect(
+      (await judge(NECESSITY_GATE, project)).map((f) => [f.severity, f.property]),
+    ).toEqual([["blocking", "float"]]);
   });
 });

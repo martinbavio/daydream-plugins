@@ -129,8 +129,10 @@ import {
 } from "./pageDom";
 import {
   conditionsHold,
+  mountable,
   mountedSheets,
   readWithout,
+  unmountedNote,
   withMount,
   type MountedSheets,
   type MountHost,
@@ -177,25 +179,71 @@ interface MountedPage {
   nameOf(node: Element): string;
   /** Matching in the copy, a rule's `@scope` included (ruleMatch.ts). */
   match: RuleMatcher;
+  /** Each finding whose subject is a rule (`ruleFinding`): what it says
+   * of which rule of which sheet, the same wherever the sheet is linked. */
+  about: Map<Finding, RuleSubject>;
+}
+
+/** What a rule finding says of which rule: the rule across pages (its
+ * sheet's `sheetKey` and its place there) and the finding's identity. */
+interface RuleSubject {
+  rule: string;
+  id: string;
+}
+
+/** Push a finding whose subject is the rule at `index` of the copy,
+ * `what` saying what it finds of it (the kind and the declaration), so
+ * the lint can tell the same finding in every page that links the rule's
+ * sheet (`matchLint`). */
+function ruleKey({ key, at }: WrittenRule): string {
+  return `${key}\u0000${at}`;
+}
+
+function ruleFinding(
+  read: MountedPage,
+  index: number,
+  what: string,
+  finding: Finding,
+  findings: Finding[],
+): void {
+  const rule = ruleKey(read.written[index]!);
+  read.about.set(finding, { rule, id: `${rule}\u0000${what}` });
+  findings.push(finding);
 }
 
 /** Every match-dependent static finding for the document, per viewport
- * in canvas order: explicit initial values (the elements' own in tree
+ * in canvas order (a rule's once, below): explicit initial values (the elements' own in tree
  * order, then the rules'), redundancy (an element's, and a rule's against
  * the rule beneath it), dead rules, and a rule's container query with no
  * container. Each viewport's page (`pageOf`, the gate's `ctx.page`) is
  * mounted once — the ranked matches are read once for every node and
  * answer every question here — and disposed before the next; a viewport
  * whose page the project does not hold is skipped (the static lint
- * reports it). Empty when nothing in the mounted pages disagrees with
- * their css. */
+ * reports it), and one whose page the store holds otherwise than handed
+ * in is not mounted, one advisory saying so (pageMount.ts `mountable`).
+ * A finding about a rule of a sheet several mounted pages link — a dead
+ * rule, a restated initial, a restatement, a container query — holds
+ * only when every viewport the rule applies in finds it (a rule one page
+ * matches is not dead because another does not), and is said once, from
+ * the first.
+ * Empty when nothing in the mounted pages disagrees with their css. */
 export async function matchLint(
   dd: MatchHost,
   doc: DeepReadonly<DreamDocument>,
   pageOf: PageOf,
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
-  for (const { viewport, page } of shownPages(dd.core, doc, pageOf).shown) {
+  /** Each rule finding's identity → the viewports that found it; each
+   * editable rule → the viewports it applies in (its conditions hold
+   * there); the finding kept. */
+  const found = new Map<string, number>();
+  const applied = new Map<string, number>();
+  const kept = new Map<Finding, RuleSubject>();
+  const { mounted, unmounted } = mountable(
+    dd,
+    shownPages(dd.core, doc, pageOf).shown,
+  );
+  for (const { viewport, page } of mounted) {
     // Every question here is about a rule or a restated initial, so a
     // page with neither has nothing to ask and pays for no mount.
     const stored = dd.core.parsePage(page.html);
@@ -229,16 +277,52 @@ export async function matchLint(
         ),
         nameOf: storedNames(dd.core, stored, mdoc),
         match: ruleMatcher(mdoc),
+        about: new Map(),
       };
       const ranked = rankedMatches(dd.core, read);
-      lintRestatedInitials(read, ranked, findings);
-      lintRedundancy(read, ranked, findings);
-      lintRuleRestatements(read, ranked, findings);
-      lintDeadRules(read, findings);
-      lintContainerQueries(read, findings);
+      const local: Finding[] = [];
+      lintRestatedInitials(read, ranked, local);
+      lintRedundancy(read, ranked, local);
+      lintRuleRestatements(read, ranked, local);
+      lintDeadRules(read, local);
+      lintContainerQueries(read, local);
+      const rules = new Set(
+        read.rules
+          .filter(
+            (rule) =>
+              judgeable(read, rule.index) &&
+              conditionsHold(mdoc, rule.conditions),
+          )
+          .map((rule) => ruleKey(read.written[rule.index]!)),
+      );
+      for (const rule of rules) applied.set(rule, (applied.get(rule) ?? 0) + 1);
+      const ids = new Set<string>();
+      for (const finding of local) {
+        const about = read.about.get(finding);
+        if (about === undefined) {
+          findings.push(finding);
+          continue;
+        }
+        if (ids.has(about.id)) continue;
+        ids.add(about.id);
+        const times = found.get(about.id) ?? 0;
+        found.set(about.id, times + 1);
+        if (times > 0) continue;
+        kept.set(finding, about);
+        findings.push(finding);
+      }
     });
   }
-  return findings;
+  for (const { viewport } of unmounted) {
+    findings.push(unmountedNote("static", "match-dependent static lint", viewport));
+  }
+  return findings.filter((finding) => {
+    const about = kept.get(finding);
+    return (
+      about === undefined ||
+      (found.get(about.id) ?? 0) >= (applied.get(about.rule) ?? 0)
+    );
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -496,13 +580,19 @@ function lintRestatedInitials(
     if (!unchangedWithout(read, inSheet(rule, [declaration]), new Map(), reached)) {
       continue;
     }
-    findings.push({
-      tier: "static",
-      severity: "blocking",
-      rule: read.written[rule.index]!.rule,
-      property: declaration.property,
-      message: `${declaration.property}: ${declaration.value} in rule ${ruleOf(read, rule.index)} in viewport ${read.viewport.id} restates the initial value`,
-    });
+    ruleFinding(
+      read,
+      rule.index,
+      `initial\u0000${declaration.property}\u0000${declaration.value}`,
+      {
+        tier: "static",
+        severity: "blocking",
+        rule: read.written[rule.index]!.rule,
+        property: declaration.property,
+        message: `${declaration.property}: ${declaration.value} in rule ${ruleOf(read, rule.index)} in viewport ${read.viewport.id} restates the initial value`,
+      },
+      findings,
+    );
   }
 }
 
@@ -586,13 +676,19 @@ function lintRuleRestatements(
           : `${ruleName(r.written)} of ${r.sheet}`,
       )
       .join(" and ");
-    findings.push({
-      tier: "static",
-      severity: "blocking",
-      rule: written.rule,
-      property: hit.property,
-      message: `${hit.property}: ${hit.value} in rule ${ruleOf(read, hit.rule)} in viewport ${read.viewport.id} restates ${hit.restates.length === 1 ? "rule" : "rules"} ${beneath} for every element it reaches; remove it from ${ruleName(written.written)}`,
-    });
+    ruleFinding(
+      read,
+      hit.rule,
+      `restates\u0000${hit.property}\u0000${hit.value}`,
+      {
+        tier: "static",
+        severity: "blocking",
+        rule: written.rule,
+        property: hit.property,
+        message: `${hit.property}: ${hit.value} in rule ${ruleOf(read, hit.rule)} in viewport ${read.viewport.id} restates ${hit.restates.length === 1 ? "rule" : "rules"} ${beneath} for every element it reaches; remove it from ${ruleName(written.written)}`,
+      },
+      findings,
+    );
   }
 }
 
@@ -657,13 +753,19 @@ function lintDeadRules(read: MountedPage, findings: Finding[]): void {
       );
     }
     if (!dead) continue;
-    findings.push({
-      tier: "static",
-      severity: "blocking",
-      elementId: "html",
-      rule: read.written[rule.index]!.rule,
-      message: `rule ${ruleOf(read, rule.index)} in viewport ${read.viewport.id} matches no element`,
-    });
+    ruleFinding(
+      read,
+      rule.index,
+      "dead",
+      {
+        tier: "static",
+        severity: "blocking",
+        elementId: "html",
+        rule: read.written[rule.index]!.rule,
+        message: `rule ${ruleOf(read, rule.index)} in viewport ${read.viewport.id} matches no element`,
+      },
+      findings,
+    );
   }
 }
 
@@ -749,12 +851,12 @@ function lintContainerQueries(read: MountedPage, findings: Finding[]): void {
           ? "declares container-type"
           : "declares container-type: scroll-state"
         : `declares a container named \`${name}\``;
-      findings.push({
+      ruleFinding(read, rule.index, `container\u0000${condition}`, {
         tier: "static",
         severity: "blocking",
         rule: written.rule,
         message: `container query \`${condition}\` in rule ${ruleName({ ...written.written, conditions: [] })} of ${written.sheet} in viewport ${read.viewport.id} can never match: no ancestor of an element it matches ${reason}`,
-      });
+      }, findings);
     }
   }
 }

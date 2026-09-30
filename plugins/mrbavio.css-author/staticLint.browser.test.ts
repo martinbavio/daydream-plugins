@@ -18,7 +18,7 @@ import {
 } from "@daydream/plugin-testing";
 
 import { staticLint as lintWith } from "./staticLint";
-import { pagesOf, withSheets } from "./testPages";
+import { pagesOf, withSheets } from "./testPages.test-support";
 
 /** The lint over a project, each viewport's page read as a gate's
  * context hands it. */

@@ -22,7 +22,7 @@ import {
 import { matchLint } from "./matchLint";
 import { necessityLint } from "./necessity";
 import { staticLint } from "./staticLint";
-import { pagesOf } from "./testPages";
+import { pagesOf } from "./testPages.test-support";
 
 /** Where the corpus is, from the root the tests run in (the checkout's). */
 const KNOWLEDGE = "plugins/mrbavio.css-author/knowledge";

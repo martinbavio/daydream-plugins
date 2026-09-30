@@ -9,6 +9,19 @@
 // (`fakeProjectHost`), which names and records each page as the host
 // does, in memory. That the host downloads a page's media into `assets/`
 // and writes the bytes as sent is the kernel's to test on a real host.
+// What a pasted page is on the canvas — it renders, what would run never
+// does, and its text stays one an editor can save — is this plugin's
+// choice of what to write, so it is tested here; the fake host reads a
+// page's `<style>` blocks as its sheets where a test needs them
+// (`readingStyles`), as the real one does.
+//
+// Dropped for good with the cleaning and the folding (decision #78: the
+// file is the pasted text): the fixtures and tests of `<style>` folded
+// into the css (nesting, custom properties, `@font-face`, at-rules, a
+// class grid, an id hero, a whole document, a Chrome fragment), of what
+// the cleaning cut and said, and of `data:` images stored as assets —
+// the kernel downloads remote media only, and a `data:` url stays as
+// written.
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { DaydreamApi, PluginManifest } from "@daydream/plugin-api";
@@ -25,11 +38,25 @@ import {
   type MountedShell,
 } from "@daydream/plugin-testing";
 
+import form from "./fixtures/form.html?raw";
 import hero from "./fixtures/hero.html?raw";
+import hostile from "./fixtures/hostile.html?raw";
+import mediaInterleaved from "./fixtures/media-interleaved.html?raw";
+import mixedInline from "./fixtures/mixed-inline.html?raw";
+import ornaments from "./fixtures/ornaments.html?raw";
+import svgIcon from "./fixtures/svg-icon.html?raw";
+import table from "./fixtures/table.html?raw";
 import activate from "./index";
 import manifest from "./manifest.json";
-import { hasElements } from "./page";
-import { htmlSource, looksLikeMarkup, MAX_ELEMENTS, MAX_SOURCE } from "./paste";
+import {
+  DOCTYPE,
+  hasElements,
+  htmlSource,
+  looksLikeMarkup,
+  MAX_ELEMENTS,
+  MAX_SOURCE,
+  parseHtml,
+} from "./paste";
 import { isSingleParagraph } from "./prose";
 
 const PLUGIN = "mrbavio.html-paste";
@@ -63,16 +90,21 @@ const mountWithMedia = () =>
   });
 
 /** This plugin alone over an empty project whose pages are made by the
- * fake project host (`host` to stand in for it), its `dd` in hand. */
+ * fake project host (`host` to stand in for it), its `dd` in hand;
+ * `wrap` stands in for what the plugin is handed. */
 async function mountMade(
-  options: { host?: Host; open?: boolean } = {},
+  options: {
+    host?: Host;
+    open?: boolean;
+    wrap?: (dd: DaydreamApi) => DaydreamApi;
+  } = {},
 ): Promise<{ shell: MountedShell; dd: DaydreamApi; fake: FakeProjectHost }> {
   let dd: DaydreamApi | null = null;
   const fake = fakeProjectHost();
   const shell = await mountPlugin({
     entry: (api) => {
       dd = api;
-      activate(api);
+      activate(options.wrap?.(api) ?? api);
     },
     manifest: manifest as PluginManifest,
     project: testProject([], options.open === false ? { project: null } : {}),
@@ -244,8 +276,7 @@ describe("claiming", () => {
   });
 });
 
-const parse = (html: string) =>
-  new DOMParser().parseFromString(html, "text/html");
+const parse = parseHtml;
 
 describe("pasting a page", () => {
   test("an HTML paste writes one new page of the pasted text, places it 960 wide and selected as one undo step, and says so in one line", async () => {
@@ -257,11 +288,12 @@ describe("pasting a page", () => {
     });
     expect(event.defaultPrevented).toBe(true);
     const [viewport] = await placed(shell, 1);
-    // The file is the pasted text, as it arrived, named by the host: the
-    // first page of a project is its index.
-    expect(fake.made).toEqual([{ html: hero, title: null }]);
+    // The file is the pasted text, as it arrived — a fragment's after a
+    // doctype — named by the host: the first page of a project is its
+    // index.
+    expect(fake.made).toEqual([{ html: DOCTYPE + hero, title: null }]);
     expect(viewport!.payload).toEqual({ page: "index.html" });
-    expect(shell.store.page("index.html")?.html).toBe(hero);
+    expect(shell.store.page("index.html")?.html).toBe(DOCTYPE + hero);
     expect(viewport!.frame).toEqual({ width: 960 });
     // Selected as an item is: the envelope id is the primary and the set.
     await vi.waitFor(() =>
@@ -436,7 +468,7 @@ describe("pasting a page", () => {
     expect(claimed).toEqual([false, false, true, false]);
     await placed(shell, 1);
     expect(fake.made.map((made) => made.html)).toEqual([
-      '<p style="color: red">red</p>',
+      `${DOCTYPE}<p style="color: red">red</p>`,
     ]);
   });
 
@@ -512,5 +544,214 @@ describe("pasting a page", () => {
     expect(hasElements(parse("plain words"))).toBe(false);
     // A lone stylesheet is hoisted to the head: nothing for the body.
     expect(hasElements(parse("<style>p{}</style>"))).toBe(false);
+  });
+});
+
+/** The fake host, its made page read as the host reads one: each
+ * `<style>` block of its markup a sheet, in document order. */
+function readingStyles(fake: FakeProjectHost): Host {
+  const project = fake.host.project!;
+  return {
+    ...fake.host,
+    project: {
+      ...project,
+      createPage: async (...args) => {
+        const made = await project.createPage!(...args);
+        const styles = Array.from(parseHtml(made.page.html).querySelectorAll("style"));
+        return {
+          ...made,
+          page: {
+            ...made.page,
+            sheets: styles.map((style, n) => ({
+              source: { style: n },
+              text: style.textContent ?? "",
+              readOnly: false,
+            })),
+          },
+        };
+      },
+    },
+  };
+}
+
+/** Paste `html` as markup from an editor, which is always claimed (a
+ * fixture that is one paragraph would be prose as a rich copy), and wait
+ * for its page to render: its viewport id, its stored text and its
+ * shadow root. */
+async function pastedPage(
+  html: string,
+): Promise<{ shell: MountedShell; dd: DaydreamApi; id: string; path: string; html: string; shadow: ShadowRoot }> {
+  const fake = fakeProjectHost();
+  const { shell, dd } = await mountMade({ host: readingStyles(fake) });
+  paste(document.body, { "text/plain": html });
+  const [viewport] = await placed(shell, 1);
+  const path = viewport!.payload.page;
+  const shadow = await vi.waitFor(() => {
+    const root = pageShadow(viewport!.id);
+    expect(root?.querySelector("body")?.childElementCount ?? 0).toBeGreaterThan(0);
+    return root!;
+  });
+  return { shell, dd, id: viewport!.id, path, html: shell.store.page(path)!.html, shadow };
+}
+
+describe("the file a paste writes", () => {
+  test("a fragment is written after a doctype, so a browser renders the file as the canvas does; a document's own doctype is the author's", async () => {
+    quiet();
+    const { shell, fake } = await mountMade();
+    const legacy =
+      '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"><html><head><title>Old</title></head><body><h1>Old</h1><p>page</p></body></html>';
+    paste(document.body, { "text/plain": "<h2>a</h2><p>fragment</p>" });
+    await placed(shell, 1);
+    paste(document.body, { "text/plain": legacy });
+    await placed(shell, 2);
+    expect(fake.made.map((made) => made.html)).toEqual([
+      "<!doctype html>\n<h2>a</h2><p>fragment</p>",
+      legacy,
+    ]);
+  });
+
+  test("a viewport made that could not be selected is said as what it is, never a refused paste", async () => {
+    quiet();
+    const { shell } = await mountMade({
+      wrap: (dd) => ({
+        ...dd,
+        select: () => {
+          throw new Error("Plugin is disabled");
+        },
+      }),
+    });
+    paste(document.body, { "text/plain": "<h2>a</h2><p>page</p>" });
+    await placed(shell, 1);
+    await vi.waitFor(() => expect(lines("error")).toHaveLength(1));
+    expect(lines("error")).toEqual([
+      `[${PLUGIN}] pasted a page: index.html, but its viewport could not be selected: Plugin is disabled`,
+    ]);
+    expect(lines("info")).toEqual([]);
+  });
+
+  test("a pan while a page is being written starts the cascade over", async () => {
+    quiet();
+    const fake = fakeProjectHost();
+    const project = fake.host.project!;
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const host: Host = {
+      ...fake.host,
+      project: {
+        ...project,
+        createPage: async (...args) => {
+          await held;
+          return project.createPage!(...args);
+        },
+      },
+    };
+    const { shell, dd } = await mountMade({ host });
+    paste(document.body, { "text/html": "<h2>one</h2><p>first</p>" });
+    shell.store.setPanX((x) => x + 100);
+    flush();
+    release();
+    await placed(shell, 1);
+    const center = dd.canvas.center();
+    paste(document.body, { "text/html": "<h2>two</h2><p>second</p>" });
+    const second = (await placed(shell, 2))[1]!;
+    // Placed where the kernel rounds it: 16px from here were a cascade.
+    expect(second.position.x).toBeCloseTo(center.x - 960 / 2, 0);
+    expect(second.position.y).toBeCloseTo(center.y - 960 / 4, 0);
+  });
+});
+
+describe("a pasted page on the canvas", () => {
+  test("a table is a table, every part itself, every cell's inline style kept", async () => {
+    quiet();
+    const { shadow } = await pastedPage(table);
+    expect(shadow.querySelectorAll("table > thead > tr > th")).toHaveLength(2);
+    const cells = shadow.querySelectorAll("table > tbody > tr > td");
+    expect(cells).toHaveLength(4);
+    expect(getComputedStyle(cells[1]!).textAlign).toBe("right");
+  });
+
+  test("a form keeps its controls and their attributes", async () => {
+    quiet();
+    const { shadow } = await pastedPage(form);
+    const input = shadow.querySelector("form input[type=email]");
+    expect(input?.getAttribute("placeholder")).toBe("you@example.com");
+    expect(shadow.querySelectorAll("select > option")).toHaveLength(2);
+    expect(shadow.querySelector("textarea")?.textContent).toBe("Tell us more");
+    expect(shadow.querySelector("button[type=submit]")).not.toBeNull();
+  });
+
+  test("an inline svg is the drawing, at its own size", async () => {
+    quiet();
+    const { shadow } = await pastedPage(svgIcon);
+    const svg = shadow.querySelector("button > svg");
+    expect(svg?.querySelector("path")?.getAttribute("d")).toBe("M5 12l5 5L20 7");
+    expect(svg!.getBoundingClientRect().width).toBeGreaterThan(0);
+    expect(getComputedStyle(svg!).width).toBe("20px");
+  });
+
+  test("mixed inline runs render as written: text beside elements, the br kept", async () => {
+    quiet();
+    const { shadow } = await pastedPage(mixedInline);
+    const p = shadow.querySelector("p")!;
+    expect(p.querySelector("strong")?.textContent).toBe("bold");
+    expect(p.querySelector("br")).not.toBeNull();
+    expect(p.textContent?.replace(/\s+/g, " ").trim()).toBe(
+      "Hello bold and emphatic, with a link, abreak, and code.",
+    );
+  });
+
+  test("its `<style>` applies against the 960 frame: a @media rule, kept in the file as written", async () => {
+    quiet();
+    const { shadow, html } = await pastedPage(mediaInterleaved);
+    const btn = shadow.querySelector(".btn")!;
+    expect(getComputedStyle(btn).paddingLeft).toBe("24px");
+    expect(html).toBe(DOCTYPE + mediaInterleaved);
+  });
+
+  test("its `<style>` applies: a ::before ornament", async () => {
+    quiet();
+    const { shadow } = await pastedPage(ornaments);
+    const tag = shadow.querySelector(".tag")!;
+    expect(getComputedStyle(tag, "::before").content).toBe('"★ "');
+  });
+
+  test("deep nesting is written as pasted and renders: the innermost words are on the canvas", async () => {
+    quiet();
+    const deep = 84;
+    const source = `${"<div>".repeat(deep)}deep words${"</div>".repeat(deep)}`;
+    const { shadow, html } = await pastedPage(source);
+    expect(html).toBe(DOCTYPE + source);
+    await vi.waitFor(() => expect(shadow.textContent).toContain("deep words"));
+  });
+
+  test("a hostile paste is written as it arrived and renders inert: nothing that runs reaches the canvas", async () => {
+    quiet();
+    const { shadow, html } = await pastedPage(hostile);
+    // The file is the author's: nothing is cut from it.
+    expect(html).toBe(DOCTYPE + hostile);
+    for (const tag of ["script", "object", "embed", "base"])
+      expect(shadow.querySelector(tag), tag).toBeNull();
+    expect(shadow.querySelector("meta[http-equiv]")).toBeNull();
+    for (const element of Array.from(shadow.querySelectorAll("*"))) {
+      for (const attr of Array.from(element.attributes)) {
+        expect(attr.name.toLowerCase().startsWith("on"), attr.name).toBe(false);
+        expect(attr.name).not.toBe("srcdoc");
+        expect(/^\s*javascript:/i.test(attr.value), attr.value).toBe(false);
+      }
+    }
+    expect(shadow.querySelector("iframe")?.getAttribute("sandbox")).not.toBe(null);
+  });
+
+  test("its file stays one an editor of its text can save: dd.writePage accepts an ordinary edit, the markup that would run kept", async () => {
+    quiet();
+    const { shell, dd, path, html } = await pastedPage(
+      '<style>.card { padding: 16px }</style>\n<div class="card" onclick="steal()">\n  <h3>Title</h3>\n  <a href="/about">About</a>\n</div>\n<script>steal()</script>',
+    );
+    const edited = html.replace("<h3>Title</h3>", "<h3>A new title</h3>");
+    expect(edited).not.toBe(html);
+    expect(dd.writePage({ kind: "html", path, expected: html, html: edited })).toBeNull();
+    expect(shell.store.page(path)!.html).toBe(edited);
   });
 });

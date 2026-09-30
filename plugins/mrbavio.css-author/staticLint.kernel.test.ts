@@ -35,6 +35,18 @@ describe("a stray `;` that drops a rule, over the kernel's scan", () => {
     ]);
   });
 
+  test("its line counts every newline CSS has: `\\r\\n` as one, a lone `\\r` and `\\f` each one", () => {
+    expect(strays(".a {}\r\n\r\n; .b { color: blue }")).toEqual([
+      drops(".b", "the rule `.b`", "", 3),
+    ]);
+    expect(strays(".a {}\r\r; .b { color: blue }")).toEqual([
+      drops(".b", "the rule `.b`", "", 3),
+    ]);
+    expect(strays(".a {}\f\n; .b { color: blue }")).toEqual([
+      drops(".b", "the rule `.b`", "", 3),
+    ]);
+  });
+
   test("inside a @media block, a statement after the `;` dropped with the rule", () => {
     expect(strays("@media all {\n  .a { color: red }\n  ; .b { color: blue }\n}")).toEqual([
       drops(".b", "the rule `.b`", " in `@media all`", 3),

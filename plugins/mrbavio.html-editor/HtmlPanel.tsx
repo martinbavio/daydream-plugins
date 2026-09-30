@@ -97,7 +97,7 @@ export const APPLY_DEBOUNCE_MS = 150;
  * text is kept as the page's draft. Typing elsewhere in the page is
  * carried onto the change and saved. */
 export const CHANGED_UNDERNEATH =
-  "The page's HTML changed on the canvas where you were typing, so nothing was saved. Your text is kept here: ⌘S saves it over the page as it is now, and ⌘Z drops it.";
+  "The page's HTML changed where you were typing, on the canvas or in its file on disk, so nothing was saved. Your text is kept here: ⌘S saves it over the page as it is now, and ⌘Z drops it.";
 
 /** The sentence for a held draft whose page is back as the typing found
  * it: the viewport left the canvas mid-save and an undo or a redo brought
@@ -114,10 +114,10 @@ export function draftMessage(draft: Draft, current: string | null): string {
   return current === draft.base ? PAGE_BACK : CHANGED_UNDERNEATH;
 }
 
-/** What the selection points at: the page it is in, and the element
- * (null when the page itself is selected). */
+/** What the selection points at: the viewport showing the page it is
+ * in, and the element (null when the viewport itself is selected). */
 export interface Target {
-  pageId: string;
+  viewportId: string;
   elementId: string | null;
 }
 
@@ -128,32 +128,32 @@ export function targetOf(dd: DaydreamApi, id: string | null): Target | null {
   const item = dd.items().find((candidate) => candidate.id === id);
   if (item !== undefined) {
     return item.kind === dd.core.viewportKind
-      ? { pageId: id, elementId: null }
+      ? { viewportId: id, elementId: null }
       : null;
   }
   const element = dd.pageElement(id);
-  return element === null ? null : { pageId: element.viewportId, elementId: id };
+  return element === null ? null : { viewportId: element.viewportId, elementId: id };
 }
 
-/** The path of the page viewport `pageId` shows (its `payload.page`,
+/** The path of the page viewport `viewportId` shows (its `payload.page`,
  * decision #78), or null when the viewport is not on the canvas. */
 export function pagePath(
   dd: Pick<DaydreamApi, "core" | "document">,
-  pageId: string,
+  viewportId: string,
 ): string | null {
   const viewport = dd.core
     .viewportItems(dd.document())
-    .find((item) => item.id === pageId);
+    .find((item) => item.id === viewportId);
   return viewport === undefined ? null : viewport.payload.page;
 }
 
-/** The stored markup of the page viewport `pageId` shows, or null when
+/** The stored markup of the page viewport `viewportId` shows, or null when
  * the viewport is not on the canvas or the project holds no such page. */
 export function pageHtml(
   dd: Pick<DaydreamApi, "core" | "document" | "page">,
-  pageId: string,
+  viewportId: string,
 ): string | null {
-  const path = pagePath(dd, pageId);
+  const path = pagePath(dd, viewportId);
   return path === null ? null : (dd.page(path)?.html ?? null);
 }
 
@@ -256,26 +256,26 @@ export default function createHtmlPanel(state: PanelState) {
     if (id !== null || !untrack(holdingCaret)) {
       return { target: read, last: read };
     }
-    if (last === null || untrack(() => pageHtml(dd, last.pageId)) === null) {
+    if (last === null || untrack(() => pageHtml(dd, last.viewportId)) === null) {
       return { target: null, last };
     }
     // The same object while nothing changes, so nothing that follows the
     // target re-runs.
     const kept =
-      last.elementId === null ? last : { pageId: last.pageId, elementId: null };
+      last.elementId === null ? last : { viewportId: last.viewportId, elementId: null };
     return { target: kept, last: kept };
   });
   const target = createMemo(() => resolution().target);
-  const pageId = createMemo(() => target()?.pageId ?? null);
+  const viewportId = createMemo(() => target()?.viewportId ?? null);
   // The page's stored markup; tracks the field, so an outside write
   // reaches the editor.
   const html = createMemo<string | null>(() => {
-    const id = pageId();
+    const id = viewportId();
     return id === null ? null : pageHtml(dd, id);
   });
   // The page the editor is open on: the selection's, while it is on the
   // canvas.
-  const openPage = createMemo(() => (html() === null ? null : pageId()));
+  const openPage = createMemo(() => (html() === null ? null : viewportId()));
 
   // A draft's sentence, shown under the editor until the next save or
   // page.
@@ -429,7 +429,7 @@ export default function createHtmlPanel(state: PanelState) {
 
   state.undo = (): boolean => {
     const ed = editor();
-    const id = untrack(pageId);
+    const id = untrack(viewportId);
     if (ed === undefined || id === null) return false;
     clearDebounce();
     saveEditor(id);
@@ -449,7 +449,7 @@ export default function createHtmlPanel(state: PanelState) {
 
   state.saveOver = (): boolean => {
     const ed = editor();
-    const id = untrack(pageId);
+    const id = untrack(viewportId);
     if (ed === undefined || id === null) return false;
     clearDebounce();
     saveEditor(id);
@@ -464,7 +464,7 @@ export default function createHtmlPanel(state: PanelState) {
 
   state.redo = (): boolean => {
     const ed = editor();
-    const id = untrack(pageId);
+    const id = untrack(viewportId);
     if (id === null) return false;
     leave(id);
     const back = dropped;
@@ -552,12 +552,12 @@ export default function createHtmlPanel(state: PanelState) {
     const range =
       t === null ||
       t.elementId === null ||
-      t.pageId !== shown ||
+      t.viewportId !== shown ||
       ed.text() !== synced
         ? null
         : dd.pageSource(t.elementId);
     ed.setMark(
-      range === null || range.viewportId !== t?.pageId
+      range === null || range.viewportId !== t?.viewportId
         ? null
         : { from: range.start, to: range.end },
       reveal && !ed.hasFocus(),
@@ -674,12 +674,12 @@ export default function createHtmlPanel(state: PanelState) {
   const handleDocChanged = (): void => {
     dirty = true;
     dropped = null;
-    const id = untrack(pageId);
+    const id = untrack(viewportId);
     if (id === null) return;
     clearDebounce();
     debounce = setTimeout(() => {
       debounce = null;
-      if (untrack(pageId) !== id) return;
+      if (untrack(viewportId) !== id) return;
       saveEditor(id);
     }, APPLY_DEBOUNCE_MS);
   };
@@ -690,7 +690,7 @@ export default function createHtmlPanel(state: PanelState) {
   // which leaves the selection where it is.
   const handleCaret = (offset: number): void => {
     const ed = editor();
-    const id = untrack(pageId);
+    const id = untrack(viewportId);
     if (ed === undefined || id === null || dirty || !ed.hasFocus()) return;
     if (ed.text() !== synced || stored(id) !== synced) return;
     const element = dd.pageElementAt(id, offset);
@@ -705,7 +705,7 @@ export default function createHtmlPanel(state: PanelState) {
     // path and the disposal above already have it.
     if (host === undefined || !host.isConnected) return;
     const ed = editor();
-    const id = untrack(pageId);
+    const id = untrack(viewportId);
     if (ed === undefined || id === null) return;
     leave(id);
     if (!drafts().has(id)) {

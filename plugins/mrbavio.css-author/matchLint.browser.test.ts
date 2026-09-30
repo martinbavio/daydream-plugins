@@ -21,7 +21,7 @@ import {
 } from "@daydream/plugin-testing";
 
 import { matchLint as lintWith } from "./matchLint";
-import { pagesOf, withSheets } from "./testPages";
+import { pagesOf, withSheets } from "./testPages.test-support";
 
 const kernel = createTestKernel();
 afterAll(() => kernel.dispose());
@@ -886,5 +886,82 @@ describe("matchLint: a page of several sheets", () => {
       ],
       [3, "rule `.ghost` of `v1.css` in viewport v1 matches no element"],
     ]);
+  });
+});
+
+// A sheet several pages link is one text (decision #78): a rule of it is
+// judged in every viewport whose page links it, and a finding about the
+// rule holds only where every one of them finds it — said once, from the
+// first (matchLint.ts).
+describe("matchLint over a sheet several pages link", () => {
+  /** Viewport `id` showing its page (`path`, default `<id>.html`), which
+   * holds `own` as a `<style>` block, if any, then links `site.css`. */
+  function sharing(
+    id: string,
+    body: string,
+    site: string,
+    options: { own?: string; path?: string } = {},
+  ): TestPage {
+    const { own, path } = options;
+    const head = `${own === undefined ? "" : `<style>${own}</style>`}<link rel="stylesheet" href="site.css">`;
+    return withSheets(
+      createPageItem(
+        { html: `<!doctype html><html><head>${head}</head><body>${body}</body></html>` },
+        { id, frame: { width: 960 }, ...(path === undefined ? {} : { path }) },
+      ),
+      [
+        ...(own === undefined
+          ? []
+          : [{ source: { style: 0 }, text: own, readOnly: false }]),
+        { source: { file: "site.css" }, text: site, readOnly: false },
+      ],
+    );
+  }
+
+  const SITE = ".home { color: red; }\n.about { color: blue; }\n.ghost { color: green; }";
+
+  test("a rule one page matches is not dead because another does not; one no page matches is said once", async () => {
+    expect(
+      await messages(
+        testProject([
+          sharing("v1", '<div class="home"></div>', SITE),
+          sharing("v2", '<div class="about"></div>', SITE),
+        ]),
+      ),
+    ).toEqual(["rule `.ghost` of `site.css` in viewport v1 matches no element"]);
+  });
+
+  test("two viewports of one page: its dead rule is said once", async () => {
+    expect(
+      await messages(
+        testProject([
+          sharing("v1", '<div class="home"></div><div class="about"></div>', SITE),
+          sharing("v2", '<div class="home"></div><div class="about"></div>', SITE, {
+            path: "v1.html",
+          }),
+        ]),
+      ),
+    ).toEqual(["rule `.ghost` of `site.css` in viewport v1 matches no element"]);
+  });
+
+  test("a restated initial another page needs is no finding; one no page needs is", async () => {
+    const site = ".a { float: none; }";
+    // v2's own block floats `.a` first: there the line is the override.
+    expect(
+      await messages(
+        testProject([
+          sharing("v1", '<div class="a"></div>', site),
+          sharing("v2", '<div class="a"></div>', site, { own: ".a { float: left; }" }),
+        ]),
+      ),
+    ).toEqual([]);
+    expect(
+      await messages(
+        testProject([
+          sharing("v1", '<div class="a"></div>', site),
+          sharing("v2", '<div class="a"></div>', site),
+        ]),
+      ),
+    ).toEqual(["float: none in rule `.a` of `site.css` in viewport v1 restates the initial value"]);
   });
 });
