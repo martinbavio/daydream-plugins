@@ -3,17 +3,18 @@
 // every assertion is on the findings' shape and words — never on how the
 // lint decided. Real Chromium only (vite.config.ts): the lint removes
 // declarations from a live iframe core mounts (`dd.mountViewport`) and
-// reads the CSS engine's answer back. The API object is a test kernel's,
-// and the mount reads a viewport's page from the open project, so each
-// lint opens its project first, as the gate's lint runs over the open one.
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+// reads the CSS engine's answer back. The context is a gate's as core
+// builds it (plugin-testing's `gateContext`), over the test's project:
+// the lint reads each viewport's page through it and mounts that page
+// through it (`ctx.mountViewport`), as a gate does.
+import { afterEach, describe, expect, test } from "vitest";
 import { commands } from "vitest/browser";
 
 import type { Finding, PageSheet } from "@daydream/plugin-api";
 import {
   coreApi,
   createPageItem,
-  createTestKernel,
+  gateContext,
   testProject,
   type TestPage,
   type TestProject,
@@ -25,29 +26,28 @@ import {
   probeWidths,
   SWEEP_WIDTHS,
   widthsText,
-  type NecessityHost,
   type NecessityOptions,
 } from "./necessity";
+import type { MountContext } from "./pageMount";
 import { pagesOf, withSheets } from "./testPages.test-support";
 
-const kernel = createTestKernel();
-afterAll(() => kernel.dispose());
+/** A gate's context over a project's pages: what the lint reads and
+ * what it mounts. */
+const contextOf = (project: TestProject): MountContext =>
+  gateContext({ page: pagesOf(project) });
 
-/** The lint over a project, opened first: its pages are what the mount
- * reads and what the gate's context hands the lint. */
 function necessityWith(
-  host: NecessityHost,
+  ctx: MountContext,
   project: TestProject,
   options?: NecessityOptions,
 ): Promise<Finding[]> {
-  kernel.store.loadProject(project);
-  return lintWith(host, project.document, pagesOf(project), options);
+  return lintWith(coreApi(), project.document, ctx, options);
 }
 
 const necessityLint = (
   project: TestProject,
   options?: NecessityOptions,
-): Promise<Finding[]> => necessityWith(kernel.dd, project, options);
+): Promise<Finding[]> => necessityWith(contextOf(project), project, options);
 
 afterEach(() => {
   // Every lint disposes its own iframe; a leftover is a bug, not a
@@ -788,14 +788,14 @@ describe("the width sweep (a page is not a photo)", () => {
       shownPage({ width: 900, height: 300 }, "", "", { id: "v2", path: "v1.html" }),
     ]);
     let mounts = 0;
-    const counted: NecessityHost = {
-      core: kernel.dd.core,
-      page: kernel.dd.page,
+    const ctx = contextOf(doc);
+    const counted: MountContext = {
+      page: ctx.page,
       // One function behind the API's overloads, as the kernel's is.
-      mountViewport: ((...args: Parameters<NecessityHost["mountViewport"]>) => {
+      mountViewport: ((...args: Parameters<MountContext["mountViewport"]>) => {
         mounts++;
-        return kernel.dd.mountViewport(...args);
-      }) as NecessityHost["mountViewport"],
+        return ctx.mountViewport(...args);
+      }) as MountContext["mountViewport"],
     };
     expect(await necessityWith(counted, doc)).toEqual([]);
     expect(mounts).toBe(2);

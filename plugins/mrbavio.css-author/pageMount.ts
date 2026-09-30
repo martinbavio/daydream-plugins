@@ -5,7 +5,7 @@
 // never judge the same rule by two answers — a preference or a height
 // query read one way by one and another way by the other. Browser only.
 //
-// A mount is the live face core renders (`dd.mountViewport`, the page's
+// A mount is the live face core renders (`ctx.mountViewport`, the page's
 // own text in an iframe, each live sheet a `<style>` of its own), bare —
 // nothing the measurer adds for its own read — and motion pinned off: a
 // remove-and-read is synchronous, and a transition would answer it with
@@ -13,22 +13,17 @@
 // What a condition answers is the mounted window's own — the one the page
 // renders with.
 //
-// A MOUNT SHOWS THE PAGE THE PROJECT HOLDS (`dd.mountViewport` reads the
-// store), and a gate may be handed another: at a `draft_finalize` its
-// `ctx.page` answers the page ABOUT TO BE WRITTEN — a new path the store
-// holds nothing at, or the draft's text over the stored one. Mounting
-// then would judge the wrong page (or throw, which the runner turns into
-// a blocking finding), so both mounting lints judge only a viewport whose
-// page the store holds exactly as handed in (`mountable`), and say once
-// of each other one that it was not read (`unmountedNote`); `lint` over
-// the written page judges it in full. Until the kernel mounts the page a
-// gate is handed.
+// A MOUNT SHOWS THE PAGE THE GATE IS JUDGING: it is the gate's own,
+// `ctx.mountViewport`, never `dd.mountViewport` (which mounts the
+// project's page and refuses one the project does not hold). At a
+// `draft_finalize` that is the page about to be written — a new path no
+// file holds yet, or a rework as it will be read — so both mounting lints
+// judge the page `ctx.page` hands them, and at `lint` the project's.
 
 import type {
   BareMountedViewport,
   CoreApi,
-  DaydreamApi,
-  Finding,
+  GateContext,
 } from "@daydream/plugin-api";
 
 import { atKeyword, sheetRules, withoutRanges, type PageRule } from "./pageCss";
@@ -36,15 +31,16 @@ import {
   writtenRules,
   type Page,
   type ReadSheets,
-  type Shown,
   type Viewport,
   type WrittenRule,
 } from "./pageSheets";
 
-/** What a mounting lint needs from the API object: the pure helpers, the
- * live mount, and the store's page (which the mount shows). A gate hands
- * in its `dd`; a test hands in a test kernel's. */
-export type MountHost = Pick<DaydreamApi, "core" | "mountViewport" | "page">;
+/** What a mounting lint is handed: the gate's context — the page each
+ * viewport shows (`page`) and the live mount of that same page
+ * (`mountViewport`), so what the lint reads and what it mounts are one
+ * page. A gate hands in its `ctx`; a test hands in plugin-testing's
+ * `gateContext`. */
+export type MountContext = Pick<GateContext, "page" | "mountViewport">;
 
 /** `[start, end)` of a declaration in a text: its `style` attribute's,
  * or a sheet's. */
@@ -57,65 +53,18 @@ export interface SheetRange {
   range: TextRange;
 }
 
-/** The viewports whose page a mount shows as the gate was handed it —
- * the store holds that path, with the same markup and the same sheets —
- * and the others (see the header): a draft's page at its finalize. */
-export function mountable(
-  dd: MountHost,
-  shown: readonly Shown[],
-): { mounted: Shown[]; unmounted: Shown[] } {
-  const mounted: Shown[] = [];
-  const unmounted: Shown[] = [];
-  for (const entry of shown) {
-    const held = dd.page(entry.viewport.payload.page);
-    if (held !== undefined && samePage(held, entry.page)) mounted.push(entry);
-    else unmounted.push(entry);
-  }
-  return { mounted, unmounted };
-}
-
-function samePage(a: Page, b: Page): boolean {
-  return (
-    a.html === b.html &&
-    a.sheets.length === b.sheets.length &&
-    a.sheets.every((sheet, k) => {
-      const other = b.sheets[k]!;
-      return (
-        sheet.text === other.text &&
-        sheet.readOnly === other.readOnly &&
-        JSON.stringify(sheet.source) === JSON.stringify(other.source)
-      );
-    })
-  );
-}
-
-/** The one advisory for a viewport a mounting lint could not read
- * (`mountable`): which lint, and that `lint` reads it once it is
- * written. */
-export function unmountedNote(
-  tier: string,
-  lint: string,
-  viewport: Viewport,
-): Finding {
-  return {
-    tier,
-    severity: "advisory",
-    message: `viewport ${viewport.id} shows a version of ${viewport.payload.page} the project does not hold yet, and a lint can mount only the project's own, so the ${lint} did not judge it; \`lint\` judges it once it is written`,
-  };
-}
-
 /** Mount (motion pinned off), run, dispose — the one lifecycle every
  * mount of a lint follows, a thrown read included. The viewport's page
- * is the project's (`dd.mountViewport` reads it from the store), so a
- * lint mounts only a viewport `mountable` passed. `width` undefined is the
- * frame's own; a number is the same window at that width. */
+ * is the one `ctx.page` answers for it (`ctx.mountViewport`, the gate's:
+ * see the header). `width` undefined is the frame's own; a number is the
+ * same window at that width. */
 export async function withMount<T>(
-  dd: MountHost,
+  ctx: MountContext,
   viewport: Viewport,
   width: number | undefined,
   run: (mounted: BareMountedViewport) => Promise<T>,
 ): Promise<T> {
-  const mounted = await dd.mountViewport(viewport, {
+  const mounted = await ctx.mountViewport(viewport, {
     still: true,
     // The page alone: nothing of the measurer's own in the copy, so its
     // `<style>`s are the page's live sheets (pageDom.ts mountedStyles).

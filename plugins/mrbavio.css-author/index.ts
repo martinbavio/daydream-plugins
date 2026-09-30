@@ -7,18 +7,17 @@
 // declaration is judged as written (pageCss.ts, pageSheets.ts), every
 // match and every computed value the browser's.
 // The browser part registers the two lints as gates, which core runs on
-// MCP `lint` over the open project's pages (decision #78). Core runs them
-// at a draft's `draft_finalize` too, over the page about to be written,
-// which the store does not hold yet: there only staticLint.ts's facts
-// from the texts judge it, and the two mounting lints each answer one
-// advisory that they did not (pageMount.ts `mountable`), since a mount
-// shows the store's page — until the kernel mounts the page a gate is
-// handed. The lints: the static lint (staticLint.ts's
-// facts from the texts, a stray `;` that drops a rule among them, plus
-// matchLint.ts's match-dependent ones: an explicit initial value the page
-// computes without, redundancy — an element's own style against a rule,
-// and a rule's against the rule beneath it — dead rules, and a container
-// query no ancestor can answer — judged by MOUNTING each viewport's page,
+// MCP `lint` over the open project's pages, and over a draft's page at
+// its `draft_finalize`, before its files are written, a blocking finding
+// refusing the write (decision #78). Each lint reads, and mounts, the
+// page the gate is handed (`ctx.page`, `ctx.mountViewport`: at a
+// finalize, the page about to be written; pageMount.ts). The lints: the
+// static lint (staticLint.ts's facts from the texts, a stray `;` that
+// drops a rule among them, plus matchLint.ts's match-dependent ones: an
+// explicit initial value the page computes without, redundancy — an
+// element's own style against a rule, and a rule's against the rule
+// beneath it — dead rules, and a container query no ancestor can answer
+// — judged by MOUNTING each viewport's page,
 // never by reading canvas match facts; see matchLint.ts's header) and
 // the necessity lint (necessity.ts, each declaration — an element's own or
 // a rule's — cut from the rendered page and restored) — both declaring
@@ -50,10 +49,11 @@ export default function activate(dd: DaydreamApi): void {
     title: "Static lint",
     // matchLint mounts each viewport's page (the live-strategy seam it
     // shares with necessity.ts, pageMount.ts), so the static gate's run is
-    // async here too. Each reads a viewport's page through the context.
+    // async here too. Each reads a viewport's page through the context,
+    // and mounts it through the context too, never `dd.mountViewport`.
     run: async (doc, ctx) => [
       ...staticLint(dd.core, doc, ctx.page),
-      ...(await matchLint(dd, doc, ctx.page)),
+      ...(await matchLint(dd.core, doc, ctx)),
     ],
   });
   dd.registerGate({
@@ -61,7 +61,7 @@ export default function activate(dd: DaydreamApi): void {
     title: "Necessity lint",
     // Its width sweep ends inside the runner's time for a gate.
     run: (doc, ctx) =>
-      necessityLint(dd, doc, ctx.page, {
+      necessityLint(dd.core, doc, ctx, {
         deadline: Date.now() + NECESSITY_BUDGET_MS,
       }),
   });

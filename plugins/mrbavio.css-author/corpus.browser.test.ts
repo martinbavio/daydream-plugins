@@ -9,14 +9,14 @@
 // example shows, linking the css it shows — is bridge/corpus.test.ts's;
 // core's reading of the document and the index's currency are the core
 // knowledge facility's (tools/knowledge/corpus.test.ts in Daydream).
-import { afterAll, describe, expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import { commands } from "vitest/browser";
 
 import type { DreamPage } from "@daydream/plugin-api";
 import {
   coreApi,
-  createTestKernel,
   documentFrom,
+  gateContext,
 } from "@daydream/plugin-testing";
 
 import { matchLint } from "./matchLint";
@@ -34,9 +34,6 @@ const examples = await Promise.all(
       [match[1]!, await commands.readFile(`${KNOWLEDGE}/${match[1]!}`)] as const,
   ),
 );
-
-const kernel = createTestKernel();
-afterAll(() => kernel.dispose());
 
 /** The one fenced block of `lang` in the example. */
 function blockOf(text: string, lang: string): string {
@@ -73,10 +70,10 @@ describe("css-author examples", () => {
 
   test.each(examples)("%s: its page passes both gates", async (_file, text) => {
     const project = projectOf(text);
-    kernel.store.loadProject(project);
     const pages = pagesOf(project);
+    const ctx = gateContext({ page: pages });
     expect(staticLint(coreApi(), project.document, pages)).toEqual([]);
-    expect(await matchLint(kernel.dd, project.document, pages)).toEqual([]);
-    expect(await necessityLint(kernel.dd, project.document, pages)).toEqual([]);
+    expect(await matchLint(coreApi(), project.document, ctx)).toEqual([]);
+    expect(await necessityLint(coreApi(), project.document, ctx)).toEqual([]);
   });
 });

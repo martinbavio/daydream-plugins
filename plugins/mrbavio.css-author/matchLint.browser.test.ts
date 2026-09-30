@@ -5,16 +5,17 @@
 // viewport need not be rendered there (matchLint.ts's own header; the
 // eval bug this file guards against: a `.card`/`nav`/`li` rule refused as
 // dead because the old code read canvas match facts for a page that was
-// never rendered there). `dd.mountViewport` is the same live-strategy
-// seam necessity.browser.test.ts uses, and mounts a viewport's page from
-// the open project, so each test loads its project into the app store
-// first — and renders no canvas. Real Chromium only.
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+// never rendered there). The mount is a gate's (`ctx.mountViewport`,
+// from plugin-testing's `gateContext` over the test's pages), the same
+// live-strategy seam necessity.browser.test.ts uses, and no canvas is
+// rendered. Real Chromium only.
+import { afterEach, describe, expect, test } from "vitest";
 
 import type { Finding, PageSheet } from "@daydream/plugin-api";
 import {
+  coreApi,
   createPageItem,
-  createTestKernel,
+  gateContext,
   testProject,
   type TestPage,
   type TestProject,
@@ -23,16 +24,10 @@ import {
 import { matchLint as lintWith } from "./matchLint";
 import { pagesOf, withSheets } from "./testPages.test-support";
 
-const kernel = createTestKernel();
-afterAll(() => kernel.dispose());
-
-/** The lint over a project, opened as the gate's lint runs over the open
- * one: its pages are what the mount reads and what the gate's context
- * hands the lint. */
-const matchLint = (project: TestProject): Promise<Finding[]> => {
-  kernel.store.loadProject(project);
-  return lintWith(kernel.dd, project.document, pagesOf(project));
-};
+/** The lint over a project, as a gate runs it: a gate's context over
+ * its pages, which the lint reads and mounts. */
+const matchLint = (project: TestProject): Promise<Finding[]> =>
+  lintWith(coreApi(), project.document, gateContext({ page: pagesOf(project) }));
 
 afterEach(() => {
   // matchLint mounts and disposes its own iframe per page; a leftover is

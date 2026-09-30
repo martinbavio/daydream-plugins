@@ -3,9 +3,10 @@
 // declares — blocking — and each judging on its own: what the two say of
 // ONE declaration is the runner's to fold (src/ai/gates.ts dropCovered,
 // tested in src/ai/gates.test.ts). Real Chromium: both gates read the
-// page through the browser, and the necessity gate mounts it. A gate runs
-// over the open project (decision #78), so each judgement opens its
-// project and hands the gate its pages as the runner's context does.
+// page through the browser, and both mount it. A gate runs over the open
+// project (decision #78), so each judgement opens its project and hands
+// the gate a context as the runner builds it (plugin-testing's
+// `gateContext`) over its pages.
 import { afterAll, describe, expect, test } from "vitest";
 
 import type {
@@ -18,6 +19,7 @@ import {
   createPageItem,
   createTestKernel,
   flush,
+  gateContext,
   pageFixtureProject,
   testProject,
   type TestProject,
@@ -50,10 +52,7 @@ async function judge(id: string, project: TestProject): Promise<Finding[]> {
   const gate = gates().get(id);
   if (gate === undefined) throw new Error(`no gate ${id}`);
   kernel.store.loadProject(project);
-  return gate.run(project.document, {
-    measure: kernel.dd.measure,
-    page: pagesOf(project),
-  });
+  return gate.run(project.document, gateContext({ page: pagesOf(project) }));
 }
 
 /** The fixture project's one page (PAGE_FIXTURE_HTML, its one sheet
@@ -363,12 +362,10 @@ describe("the static gate on an explicit initial value the UA sheet overrides", 
 // A gate at a `draft_finalize` (kernel src/ai/draftFinalize.ts): the
 // document is the one viewport of the page about to be written, and
 // `ctx.page` answers that page for its path and the store's for the rest.
-// A lint's mount shows the store's page (`dd.mountViewport`), so the two
-// mounting lints judge only a page the store holds as handed in, and say
-// of the other that they did not (pageMount.ts `mountable`); the texts'
-// own lint judges the page handed in. Until the kernel mounts the page a
-// gate is handed.
-describe("css-author gates over a page the project does not hold yet", () => {
+// Both lints mount it through the context (`ctx.mountViewport`), so they
+// judge the page about to be written — a new page no file holds, a rework
+// as it will be read — never the store's.
+describe("css-author gates at a finalize, over the page about to be written", () => {
   const HTML =
     '<!doctype html><html><head><title>t</title></head><body><div class="a">x</div></body></html>';
 
@@ -395,45 +392,39 @@ describe("css-author gates over a page the project does not hold yet", () => {
           },
         ],
       },
-      {
-        measure: kernel.dd.measure,
+      gateContext({
         page: (p) => (p === path ? { ...candidate, path } : kernel.dd.page(p)),
-      },
+      }),
     );
   }
 
-  function unread(viewport: string, path: string, lint: string): string {
-    return `viewport ${viewport} shows a version of ${path} the project does not hold yet, and a lint can mount only the project's own, so the ${lint} did not judge it; \`lint\` judges it once it is written`;
-  }
+  const addressed = (findings: Finding[]) =>
+    findings.map((f) => [f.severity, f.elementId, f.rule, f.property]);
 
-  test("a new page is not refused: each mounting lint says it did not read it, and throws nothing", async () => {
+  test("a new page is judged as it will be written, and a clean one is not refused", async () => {
     const project = testProject([
       createPageItem({ html: HTML, css: ".a { color: red }\n" }, { id: "old" }),
     ]);
-    const candidate = testProject([
-      createPageItem({ html: HTML, css: ".a { color: blue }\n" }, { id: "old" }),
-    ]).pages[0]!;
+    const pageOf = (css: string) =>
+      testProject([createPageItem({ html: HTML, css }, { id: "old" })]).pages[0]!;
+    // Clean: no file holds brand-new.html, and neither gate refuses it or
+    // throws.
+    const clean = pageOf(".a { color: blue }\n");
+    expect(await finalizing(STATIC_GATE, project, "brand-new.html", clean)).toEqual([]);
+    expect(await finalizing(NECESSITY_GATE, project, "brand-new.html", clean)).toEqual([]);
+    // Flawed: a rule nothing in the new page matches, which only a mount
+    // of the new page can tell, is dead to both.
+    const flawed = pageOf(".a { color: blue }\n.gone { color: red }\n");
+    const statics = await finalizing(STATIC_GATE, project, "brand-new.html", flawed);
+    expect(addressed(statics)).toEqual([["blocking", "html", 1, undefined]]);
+    expect(statics[0]!.message).toMatch(/^rule `\.gone` of `[^`]+` in viewport old matches no element/);
     expect(
-      await finalizing(STATIC_GATE, project, "brand-new.html", candidate),
-    ).toEqual([
-      {
-        tier: "static",
-        severity: "advisory",
-        message: unread("old", "brand-new.html", "match-dependent static lint"),
-      },
-    ]);
-    expect(
-      await finalizing(NECESSITY_GATE, project, "brand-new.html", candidate),
-    ).toEqual([
-      {
-        tier: "necessity",
-        severity: "advisory",
-        message: unread("old", "brand-new.html", "necessity lint"),
-      },
-    ]);
+      addressed(await finalizing(NECESSITY_GATE, project, "brand-new.html", flawed)),
+    ).toEqual([["blocking", undefined, 1, "color"]]);
+    expect(document.querySelectorAll("iframe")).toHaveLength(0);
   });
 
-  test("a rework is never judged as the page it replaces: a dead line the draft removed is no finding, and the texts' lint reads the draft", async () => {
+  test("a rework is judged as it will be read, never as the page it replaces", async () => {
     const project = testProject([
       createPageItem(
         { html: HTML, css: ".a { color: red; float: none }\n" },
@@ -441,33 +432,36 @@ describe("css-author gates over a page the project does not hold yet", () => {
       ),
     ]);
     const stored = project.pages[0]!;
-    // The draft drops the dead `float` and adds a length with no unit,
-    // which the texts alone decide.
+    // Control: the stored page's `float` restates the initial and is dead.
+    expect(addressed(await judge(STATIC_GATE, project))).toEqual([
+      ["blocking", undefined, 0, "float"],
+    ]);
+    expect(addressed(await judge(NECESSITY_GATE, project))).toEqual([
+      ["blocking", undefined, 0, "float"],
+    ]);
+    // The draft drops the `float`, adds a length with no unit (the texts
+    // decide it) and a rule nothing matches (a mount of the draft does):
+    // the stored page's `float` is no finding, the draft's flaws are.
     const candidate = {
       ...stored,
       html: HTML.replace('class="a"', 'class="a" style="width: 100"'),
-      sheets: stored.sheets.map((sheet) => ({ ...sheet, text: ".a { color: red }\n" })),
+      sheets: stored.sheets.map((sheet) => ({
+        ...sheet,
+        text: ".a { color: red }\n.gone { color: red }\n",
+      })),
     };
-    const statics = await finalizing(STATIC_GATE, project, stored.path, candidate);
-    expect(statics.map((f) => [f.severity, f.elementId, f.property])).toEqual([
-      ["blocking", "div.a", "width"],
-      ["advisory", undefined, undefined],
-    ]);
-    expect(statics[1]!.message).toBe(
-      unread("ed", stored.path, "match-dependent static lint"),
-    );
     expect(
-      await finalizing(NECESSITY_GATE, project, stored.path, candidate),
+      addressed(await finalizing(STATIC_GATE, project, stored.path, candidate)),
     ).toEqual([
-      {
-        tier: "necessity",
-        severity: "advisory",
-        message: unread("ed", stored.path, "necessity lint"),
-      },
+      ["blocking", "div.a", undefined, "width"],
+      ["blocking", "html", 1, undefined],
     ]);
-    // Control: handed the page the store holds, both judge it in full.
     expect(
-      (await judge(NECESSITY_GATE, project)).map((f) => [f.severity, f.property]),
-    ).toEqual([["blocking", "float"]]);
+      addressed(await finalizing(NECESSITY_GATE, project, stored.path, candidate)),
+    ).toEqual([
+      ["blocking", "div.a", undefined, "width"],
+      ["blocking", undefined, 1, "color"],
+    ]);
+    expect(document.querySelectorAll("iframe")).toHaveLength(0);
   });
 });

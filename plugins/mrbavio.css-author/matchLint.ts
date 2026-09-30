@@ -12,9 +12,10 @@
 // asked about a page that never was, every one of them reports empty (the
 // eval bug of 2026-09-17: a plainly-matching `.card` rule refused because
 // the gate read the wrong DOM). So each viewport's page is MOUNTED
-// (`dd.mountViewport`, the live face: the page's own text in an iframe,
-// each live sheet a `<style>` of its own) and every match is asked of
-// that document through native `Element.matches`.
+// (the gate's `ctx.mountViewport`, the live face of the page the gate is
+// judging — at a finalize the page about to be written: the page's own
+// text in an iframe, each live sheet a `<style>` of its own) and every
+// match is asked of that document through native `Element.matches`.
 //
 // The rules are the copy's sheets, in cascade order, each paired with the
 // page's sheet it renders (pageSheets.ts `writtenRules`), so a finding
@@ -129,20 +130,17 @@ import {
 } from "./pageDom";
 import {
   conditionsHold,
-  mountable,
   mountedSheets,
   readWithout,
-  unmountedNote,
   withMount,
+  type MountContext,
   type MountedSheets,
-  type MountHost,
   type SheetRange,
   type TextRange,
 } from "./pageMount";
 import {
   readSheets,
   shownPages,
-  type PageOf,
   type Viewport,
   type WrittenRule,
 } from "./pageSheets";
@@ -153,12 +151,6 @@ import {
   type RedundancyRule,
 } from "./ruleRedundancy";
 import { hasStatePseudo, stripStatePseudo } from "./statePseudo";
-
-/** What the match-dependent findings need: the pure helpers and core's
- * live mount. A gate hands in its `dd`; a test hands in a test kernel's —
- * both mount each viewport's page, never read a fact about whatever (if
- * anything) is on the canvas. */
-export type MatchHost = MountHost;
 
 /** One viewport's page mounted, read once: its elements in tree order,
  * each one's own declarations and unique selector, and the rules. */
@@ -215,12 +207,11 @@ function ruleFinding(
  * in canvas order (a rule's once, below): explicit initial values (the elements' own in tree
  * order, then the rules'), redundancy (an element's, and a rule's against
  * the rule beneath it), dead rules, and a rule's container query with no
- * container. Each viewport's page (`pageOf`, the gate's `ctx.page`) is
- * mounted once — the ranked matches are read once for every node and
- * answer every question here — and disposed before the next; a viewport
- * whose page the project does not hold is skipped (the static lint
- * reports it), and one whose page the store holds otherwise than handed
- * in is not mounted, one advisory saying so (pageMount.ts `mountable`).
+ * container. Each viewport's page (the gate's `ctx.page`) is mounted once
+ * through the same context (`ctx.mountViewport`, pageMount.ts) — the
+ * ranked matches are read once for every node and answer every question
+ * here — and disposed before the next; a viewport whose page the context
+ * does not hold is skipped (the static lint reports it).
  * A finding about a rule of a sheet several mounted pages link — a dead
  * rule, a restated initial, a restatement, a container query — holds
  * only when every viewport the rule applies in finds it (a rule one page
@@ -228,9 +219,9 @@ function ruleFinding(
  * the first.
  * Empty when nothing in the mounted pages disagrees with their css. */
 export async function matchLint(
-  dd: MatchHost,
+  core: CoreApi,
   doc: DeepReadonly<DreamDocument>,
-  pageOf: PageOf,
+  ctx: MountContext,
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
   /** Each rule finding's identity → the viewports that found it; each
@@ -239,27 +230,23 @@ export async function matchLint(
   const found = new Map<string, number>();
   const applied = new Map<string, number>();
   const kept = new Map<Finding, RuleSubject>();
-  const { mounted, unmounted } = mountable(
-    dd,
-    shownPages(dd.core, doc, pageOf).shown,
-  );
-  for (const { viewport, page } of mounted) {
+  for (const { viewport, page } of shownPages(core, doc, ctx.page).shown) {
     // Every question here is about a rule or a restated initial, so a
     // page with neither has nothing to ask and pays for no mount.
-    const stored = dd.core.parsePage(page.html);
-    const authored = readSheets(dd.core, page);
+    const stored = core.parsePage(page.html);
+    const authored = readSheets(core, page);
     const restated = lintElements(stored).some((el) =>
-      dd.core.cssDeclarations(el.getAttribute("style") ?? "").some(restatesInitial),
+      core.cssDeclarations(el.getAttribute("style") ?? "").some(restatesInitial),
     );
     if (authored.rules.length === 0 && !restated) continue;
-    await withMount(dd, viewport, undefined, async (mounted) => {
+    await withMount(ctx, viewport, undefined, async (mounted) => {
       const mdoc = mounted.document();
       const nodes = lintElements(mdoc);
       // The copy's own sheets, so a rule's values and an element's
       // `style` are compared as the copy holds both (pageDom.ts
       // mountedStyles), each paired with the page's sheet it renders.
       const sheets: MountedSheets = mountedSheets(
-        dd.core,
+        core,
         page,
         authored,
         mountedStyles(mdoc),
@@ -272,14 +259,14 @@ export async function matchLint(
         own: new Map(
           nodes.map((node) => [
             node,
-            dd.core.cssDeclarations(node.getAttribute("style") ?? ""),
+            core.cssDeclarations(node.getAttribute("style") ?? ""),
           ]),
         ),
-        nameOf: storedNames(dd.core, stored, mdoc),
+        nameOf: storedNames(core, stored, mdoc),
         match: ruleMatcher(mdoc),
         about: new Map(),
       };
-      const ranked = rankedMatches(dd.core, read);
+      const ranked = rankedMatches(core, read);
       const local: Finding[] = [];
       lintRestatedInitials(read, ranked, local);
       lintRedundancy(read, ranked, local);
@@ -312,9 +299,6 @@ export async function matchLint(
         findings.push(finding);
       }
     });
-  }
-  for (const { viewport } of unmounted) {
-    findings.push(unmountedNote("static", "match-dependent static lint", viewport));
   }
   return findings.filter((finding) => {
     const about = kept.get(finding);

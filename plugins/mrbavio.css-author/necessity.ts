@@ -3,11 +3,11 @@
 // and call it DEAD when nothing observable moved. "Observable" is the
 // browser's own answer twice over: every element's border box and its
 // computed style, both read from the live-strategy iframe core mounts
-// (`dd.mountViewport`). No layout is reimplemented and no rule of thumb
-// decides what a property "should" do: a declaration is live exactly when
-// the page differs without it. Core owns the mount; this file owns the
-// JUDGEMENT — which is why it lives in the css-author plugin and not in
-// the kernel.
+// (the gate's `ctx.mountViewport`). No layout is reimplemented and no
+// rule of thumb decides what a property "should" do: a declaration is
+// live exactly when the page differs without it. Core owns the mount;
+// this file owns the JUDGEMENT — which is why it lives in the css-author
+// plugin and not in the kernel.
 //
 // A PAGE (decision #76, #78) is text, so a declaration is removed from
 // the TEXT: the mount is the caller's alone and nothing done to it is
@@ -149,12 +149,10 @@ import {
 } from "./pageDom";
 import {
   conditionsHold,
-  mountable,
   mountedSheets,
   readWithoutReloading,
-  unmountedNote,
   withMount,
-  type MountHost,
+  type MountContext,
   type SheetRange,
   type TextRange,
 } from "./pageMount";
@@ -170,10 +168,6 @@ import {
 } from "./pageSheets";
 import { ruleMatcher } from "./ruleMatch";
 import { hasStatePseudo } from "./statePseudo";
-
-/** What the lint needs from the API object: the pure helpers and the
- * live mount (pageMount.ts). */
-export type NecessityHost = MountHost;
 
 export interface NecessityOptions {
   /** Restrict to these viewports (unknown id → error). Default: all. */
@@ -213,35 +207,27 @@ export function isExemptProperty(property: string): boolean {
 /**
  * Every dead declaration of the document, as findings — dead at every
  * swept width (rule 2) in every viewport where it exists (rule 3). Each
- * viewport's page (`pageOf`, the gate's `ctx.page`) is mounted once at its
- * frame (one iframe), baselined, then every element's own declarations
- * and every rule's are removed, read against the baseline and restored,
- * in that order; the survivors are then re-judged at each probe width in
+ * viewport's page (the gate's `ctx.page`) is mounted once at its frame
+ * through the same context (`ctx.mountViewport`, pageMount.ts; one
+ * iframe), baselined, then every element's own declarations and every
+ * rule's are removed, read against the baseline and restored, in that
+ * order; the survivors are then re-judged at each probe width in
  * a fresh mount. Every iframe is disposed, a thrown read included. A
- * viewport whose page the project does not hold is skipped (the static
- * lint reports it), and one whose page the store holds otherwise than
- * handed in is not mounted (pageMount.ts `mountable`). After the dead
- * declarations, one advisory finding per viewport whose copy could not
- * load an image, and one per viewport not mounted. Browser only.
+ * viewport whose page the context does not hold is skipped (the static
+ * lint reports it). After the dead declarations, one advisory finding
+ * per viewport whose copy could not load an image. Browser only.
  */
 export async function necessityLint(
-  dd: NecessityHost,
+  core: CoreApi,
   doc: DeepReadonly<DreamDocument>,
-  pageOf: PageOf,
+  ctx: MountContext,
   options: NecessityOptions = {},
 ): Promise<Finding[]> {
   const perViewport: Candidate[][] = [];
   const notes: Finding[] = [];
   const live = new Set<string>();
-  const { mounted, unmounted } = mountable(
-    dd,
-    selectViewports(dd.core, doc, pageOf, options.viewportIds),
-  );
-  for (const { viewport } of unmounted) {
-    notes.push(unmountedNote("necessity", "necessity lint", viewport));
-  }
-  for (const shown of mounted) {
-    const judged = await lintViewport(dd, shown, live, options.deadline);
+  for (const shown of selectViewports(core, doc, ctx.page, options.viewportIds)) {
+    const judged = await lintViewport(core, ctx, shown, live, options.deadline);
     perViewport.push(judged.candidates);
     notes.push(...judged.notes);
     for (const c of judged.candidates) if (!c.dead) live.add(c.key);
@@ -324,7 +310,8 @@ interface Prepared {
  * survives names every width. `notes` is the advisory on the images the
  * copy could not load. */
 async function lintViewport(
-  dd: NecessityHost,
+  core: CoreApi,
+  ctx: MountContext,
   { viewport, page }: Shown,
   answered: ReadonlySet<string>,
   deadline: number | undefined,
@@ -333,20 +320,20 @@ async function lintViewport(
   // have the routed urls in them, and a finding should quote what the
   // author wrote; an element is named by its selector in the stored
   // markup, a rule as its sheet writes it.
-  const stored = dd.core.parsePage(page.html);
-  const authored = readSheets(dd.core, page);
+  const stored = core.parsePage(page.html);
+  const authored = readSheets(core, page);
   const started = Date.now();
   let slowest = 0;
   const { own, written, widths, candidates, unloaded } = await withMount(
-    dd,
+    ctx,
     viewport,
     undefined,
     async (m) => {
-      const prepared = await prepare(dd.core, page, authored, m);
+      const prepared = await prepare(core, page, authored, m);
       // What a mount costs, before any judging: what a probe will cost
       // at least, and so what the time left must hold for one.
       slowest = Date.now() - started;
-      const nameOf = storedNames(dd.core, stored, prepared.doc);
+      const nameOf = storedNames(core, stored, prepared.doc);
       const width =
         prepared.doc.defaultView?.innerWidth ?? viewport.frame?.width ?? 0;
       return {
@@ -355,8 +342,8 @@ async function lintViewport(
         // The breakpoints of every live sheet, as the copy renders it: a
         // sheet's `media` is an `@media` around it there.
         widths: probeWidths(
-          dd.core,
-          prepared.styles.flatMap((style) => dd.core.cssBlocks(style.textContent ?? "")),
+          core,
+          prepared.styles.flatMap((style) => core.cssBlocks(style.textContent ?? "")),
           width,
         ),
         candidates: await judgeAll(viewport, page, prepared, width, nameOf),
@@ -373,8 +360,8 @@ async function lintViewport(
     if (deadline !== undefined && Date.now() + slowest > deadline) break;
     const width = widths[next]!;
     const began = Date.now();
-    await withMount(dd, viewport, width, async (m) => {
-      const prepared = await prepare(dd.core, page, authored, m);
+    await withMount(ctx, viewport, width, async (m) => {
+      const prepared = await prepare(core, page, authored, m);
       const probe = baseline(prepared);
       for (const c of pending) {
         c.applies ||= appliesIn(prepared, c.removal[0]!);
