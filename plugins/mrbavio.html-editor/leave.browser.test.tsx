@@ -3,30 +3,29 @@
 // stopped — through the loader seam: it is saved into the page it was
 // typed in, read from the editor itself, whatever has reached the pane: a
 // keystroke not yet reported, a composition, a save waiting on its
-// debounce. And what is held for one project never reaches another's
-// page.
+// debounce. A swap writes it to the outgoing project's files before the
+// project goes (decision #78). And what is held for one project never
+// reaches another's page.
 //
-// Writing a page's file is not yet in the project model (decision #78):
-// every save that passes the guards is refused as not yet, and nothing is
-// written. So these tests read what the pane ASKED `dd.writePage` for,
-// and in which load of a project (htmlSaves.test-support.ts), in place of
-// what the outgoing project saved. A swap is `loadOpenProject()` over a
-// host whose open project the test names (`projects()`); the swaps that
-// drop a deferred save or a draft are `appStore.loadProject`, as a load
-// that runs no leave hook. The test of an undo that takes back a save
-// asked across a hidden dock returns when a page's file can be written;
-// the undo here takes back a layout edit.
+// A swap is `loadOpenProject()` over a host whose open project the test
+// names and whose files routes are faked at HTTP (`projects()`, over
+// `createFileHost`); the swaps that drop a deferred save or a draft are
+// `appStore.loadProject`, as a load that runs no leave hook.
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import { cdp } from "vitest/browser";
 
-import type { DaydreamApi, PluginManifest } from "@daydream/plugin-api";
+import type {
+  DaydreamApi,
+  PageEdit,
+  PluginManifest,
+} from "@daydream/plugin-api";
 import {
+  createFileHost,
   createPageItem,
-  createTestKernel,
   fixturePage,
   flush,
-  type HostProject,
+  type FileHost,
   loadOpenProject,
   type MountedPlugin,
   mountPlugin,
@@ -39,14 +38,6 @@ import {
 } from "@daydream/plugin-testing";
 
 import { APPLY_DEBOUNCE_MS } from "./HtmlPanel";
-import {
-  clearSaves,
-  HTML_NOT_YET,
-  lastAskedHtml,
-  recorded,
-  recordedApi,
-  saves,
-} from "./htmlSaves.test-support";
 import activate from "./index";
 import rawManifest from "./manifest.json";
 
@@ -55,12 +46,10 @@ const manifest = rawManifest as PluginManifest;
 /** The plugin mounted by the test running, or null. */
 let mounted: MountedPlugin | null = null;
 
-/** Dispose of what the test mounted, and forget its saves: each test
- * file's `afterEach`. */
+/** Dispose of what the test mounted: each test file's `afterEach`. */
 function disposeMounted(): void {
   mounted?.dispose();
   mounted = null;
-  clearSaves();
 }
 
 /** The page as its author wrote it: a doctype, indentation, a comment. */
@@ -101,8 +90,7 @@ const onePage = (): TestProject =>
   ]);
 
 /** Mount the plugin over a fresh one-page project (or `project`) and wait
- * for its first page to mount. `entry` stands in for the plugin's entry —
- * by default the entry with its saves recorded. */
+ * for its first page to mount. `entry` stands in for the plugin's entry. */
 async function mountPage(
   project: TestProject = onePage(),
   options: { entry?: typeof activate } = {},
@@ -111,7 +99,7 @@ async function mountPage(
   itemId = viewport.id;
   pagePath = viewport.payload.page;
   mounted = await mountPlugin({
-    entry: options.entry ?? recorded,
+    entry: options.entry ?? activate,
     manifest,
     project,
   });
@@ -158,7 +146,7 @@ async function settled(): Promise<void> {
   flush();
 }
 
-/** Type and let the live save be asked for. */
+/** Type and let the live save land. */
 async function type(next: string): Promise<void> {
   await typeAll(next);
   await settled();
@@ -200,14 +188,6 @@ function select(id: string | null): void {
   flush();
 }
 
-/** The not-yet refusal of the last save, as the pane shows it: the
- * kernel's own sentence, once, its one period. */
-function refusedAsNotYet(): void {
-  expect(message()).toBe(saves.at(-1)!.answer);
-  expect(message()).toMatch(HTML_NOT_YET);
-  expect(message()).not.toMatch(/\.\.$/);
-}
-
 /** Longer than the kernel's edit burst (decision #20, 500ms). */
 async function pause(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 700));
@@ -230,21 +210,48 @@ const pageIn = (project: TestProject["project"]): TestProject =>
     { project },
   );
 
-/** A host whose open project is `open.current` — each read a fresh copy
- * of the one-page project under it — so `loadOpenProject()` swaps the
- * project as Open… does. Put in after the mount, so the shell's own
- * start reads nothing from it. */
-function projects(): { current: TestProject["project"] } {
+/** A host over the page's files whose open project is `open.current` —
+ * each read a fresh copy of the one-page project under it — so
+ * `loadOpenProject()` swaps the project as Open… does. Put in after the
+ * mount, so the shell's own start reads nothing from it. */
+function projects(): {
+  open: { current: TestProject["project"] };
+  files: FileHost;
+} {
   const open = { current: OTHER as TestProject["project"] };
-  const project: HostProject = {
-    read: async () => pageIn(open.current),
-    open: async () => ({ cancelled: true }),
-    saveManifest: async () => {},
-  };
-  overrideHostForTests({ project });
+  const files = createFileHost(
+    { "page.html": HTML, "page.css": CSS },
+    { project: () => pageIn(open.current) },
+  );
+  overrideHostForTests({ project: files.project });
   onTestFinished(() => overrideHostForTests(null));
-  return open;
+  return { open, files };
 }
+
+/** The last write of the page's file: its text, and the project it
+ * named. */
+const lastPageWrite = (
+  files: FileHost,
+): { text: string | undefined; project: string | null | undefined } => {
+  const write = files
+    .writes()
+    .filter((request) => request.path === "page.html")
+    .at(-1);
+  return { text: write?.body?.text, project: write?.project };
+};
+
+/** The plugin's entry over a `dd` whose writePage throws while
+ * `failing()` answers true. */
+const throwingWhile =
+  (failing: () => boolean) =>
+  (dd: DaydreamApi): void =>
+    activate({
+      ...dd,
+      writePage: ((edit: PageEdit) => {
+        if (failing()) throw new Error("the disk is full");
+        return dd.writePage(edit);
+      }) as DaydreamApi["writePage"],
+    });
 
 /** A keystroke: the whole text replaced by an un-annotated transaction,
  * whose report reaches the pane a microtask later — not awaited. */
@@ -268,21 +275,20 @@ const compose = (text: string): Promise<unknown> =>
   });
 
 describe("mrbavio.html-editor: typing when the project goes", () => {
-  test("a keystroke and the swap in the same task: it is asked for in the outgoing project", async () => {
+  test("a keystroke and the swap in the same task: it is written into the outgoing project", async () => {
     await mountPage(pageIn(MINE));
-    const load = mounted!.store.loadVersion();
-    projects();
+    const { files } = projects();
     select(itemId);
     content().focus();
     const typed = edited("Old headline", "Typed before the swap");
     keystroke(typed);
     await expect(loadOpenProject()).resolves.toEqual({ ok: true });
-    lastAskedHtml(pagePath, HTML, typed);
-    expect(saves.at(-1)!.load).toBe(load);
+    expect(lastPageWrite(files)).toEqual({ text: typed, project: MINE.root });
+    expect(files.text(pagePath)).toBe(typed);
     expect(mounted!.store.project()).toEqual(OTHER);
   });
 
-  test("a keystroke and a deactivation in the same task, before the edit reaches the pane: it is asked for before the pane goes", async () => {
+  test("a keystroke and a deactivation in the same task, before the edit reaches the pane: it is written before the pane goes", async () => {
     await mountPage();
     select(itemId);
     content().focus();
@@ -290,11 +296,10 @@ describe("mrbavio.html-editor: typing when the project goes", () => {
     keystroke(typed);
     mounted!.pluginHost.deactivate(manifest.id);
     flush();
-    lastAskedHtml(pagePath, HTML, typed);
-    expect(stored()).toBe(HTML);
+    expect(stored()).toBe(typed);
   });
 
-  test("a deactivation with a save waiting on its debounce asks for it once, and the timer goes with the pane", async () => {
+  test("a deactivation with a save waiting on its debounce writes it once, and the timer goes with the pane", async () => {
     const reported = vi.spyOn(window, "reportError");
     onTestFinished(() => reported.mockRestore());
     await mountPage();
@@ -303,22 +308,20 @@ describe("mrbavio.html-editor: typing when the project goes", () => {
     // Reported: the save is on its debounce now.
     const typed = edited("Old headline", "Pending");
     await typeAll(typed);
-    const before = mounted!.store.historyVersion();
     mounted!.pluginHost.deactivate(manifest.id);
     flush();
-    lastAskedHtml(pagePath, HTML, typed);
+    expect(stored()).toBe(typed);
+    const after = mounted!.store.historyVersion();
     await pause();
     flush();
-    expect(saves).toHaveLength(1);
-    expect(stored()).toBe(HTML);
-    expect(mounted!.store.historyVersion()).toBe(before);
+    expect(stored()).toBe(typed);
+    expect(mounted!.store.historyVersion()).toBe(after);
     expect(reported).not.toHaveBeenCalled();
   });
 
-  test("what an input method is composing is asked for as the editor holds it", async () => {
+  test("what an input method is composing is written as the editor holds it", async () => {
     await mountPage(pageIn(MINE));
-    const load = mounted!.store.loadVersion();
-    projects();
+    const { files } = projects();
     select(itemId);
     const v = view();
     v.focus();
@@ -328,30 +331,25 @@ describe("mrbavio.html-editor: typing when the project goes", () => {
     await compose(" zh");
     expect(v.composing).toBe(true);
     await expect(loadOpenProject()).resolves.toEqual({ ok: true });
-    const mine = saves.filter((save) => save.load === load);
-    expect(mine.at(-1)!.edit).toEqual({
-      kind: "html",
-      path: pagePath,
-      expected: HTML,
-      html: edited("Old headline", "Old zh headline"),
+    expect(lastPageWrite(files)).toEqual({
+      text: edited("Old headline", "Old zh headline"),
+      project: MINE.root,
     });
   });
 
-  test("a write that throws through a swap is held as the page's draft with its reason, never thrown into the swap, and the next swap is asked", async () => {
+  test("a write that throws through a swap is held as the page's draft with its reason, never thrown into the swap, and the next swap is written", async () => {
     const reported = vi.spyOn(window, "reportError");
     onTestFinished(() => reported.mockRestore());
     // Every write throws through the first swap, and none after it.
     let failing = true;
-    const entry = (dd: DaydreamApi): void =>
-      activate(recordedApi(dd, () => failing));
-    await mountPage(pageIn(MINE), { entry });
-    const open = projects();
+    await mountPage(pageIn(MINE), { entry: throwingWhile(() => failing) });
+    const { open, files } = projects();
     select(itemId);
     content().focus();
     keystroke(edited("Old headline", "Lost with the swap"));
     await expect(loadOpenProject()).resolves.toEqual({ ok: true });
     failing = false;
-    expect(saves).toHaveLength(0);
+    expect(files.writes()).toEqual([]);
     expect(mounted!.store.project()).toEqual(OTHER);
     // Held as a save that throws is held, never thrown into the swap.
     expect(reported).not.toHaveBeenCalled();
@@ -359,17 +357,15 @@ describe("mrbavio.html-editor: typing when the project goes", () => {
     await waitMounted("page", "h1");
     select("page");
     content().focus();
-    const load = mounted!.store.loadVersion();
-    const typed = edited("Body copy", "Asked with the next swap");
+    const typed = edited("Body copy", "Written with the next swap");
     keystroke(typed);
     open.current = MINE;
     await expect(loadOpenProject()).resolves.toEqual({ ok: true });
-    lastAskedHtml("page.html", HTML, typed);
-    expect(saves.at(-1)!.load).toBe(load);
+    expect(lastPageWrite(files)).toEqual({ text: typed, project: OTHER.root });
     expect(mounted!.store.project()).toEqual(MINE);
   });
 
-  test("a save the hidden dock deferred is dropped when another project loads, or an undo runs, before it is asked", async () => {
+  test("a save the hidden dock deferred is dropped when another project loads, or an undo runs, before it lands", async () => {
     const m = await mountPage();
     // The dock hidden is the shell's state: shown again whatever happens,
     // as the next test expects to find it.
@@ -384,30 +380,26 @@ describe("mrbavio.html-editor: typing when the project goes", () => {
       m.store.loadProject(onePage());
       await new Promise((resolve) => setTimeout(resolve, 0));
       flush();
-      expect(saves).toHaveLength(0);
+      expect(stored()).toBe(HTML);
+      expect(m.store.canUndo()).toBe(false);
 
       // An undo before it runs: the typing belonged to the state undone.
-      // The step undone is a move of the viewport — a layout edit, which
-      // the canvas writes.
       key(window, { key: "\\", code: "Backslash", metaKey: true });
       await waitMounted(itemId, "h1");
-      const kernel = createTestKernel();
-      kernel.dd.updateItem(itemId, (item) => {
-        item.position = { x: 40, y: 0 };
-      });
-      kernel.dispose();
-      flush();
-      expect(m.store.canUndo()).toBe(true);
       select(itemId);
       content().focus();
-      await typeAll(edited("Body copy", "Pending"));
+      const saved = edited("Old headline", "Saved");
+      await type(saved);
+      expect(stored()).toBe(saved);
+      await pause();
+      await typeAll(edited("Body copy", "Pending", saved));
       key(content(), { key: "\\", code: "Backslash", metaKey: true });
       expect(m.panel()).toBeNull();
       m.kernel.commands.runCommand("core.undo");
       await new Promise((resolve) => setTimeout(resolve, 0));
       flush();
-      expect(saves).toHaveLength(0);
-      expect(items()[0]!.position).toEqual({ x: 0, y: 0 });
+      expect(stored()).toBe(HTML);
+      expect(items()).toHaveLength(1);
     } finally {
       if (m.panel() === null) {
         key(window, { key: "\\", code: "Backslash", metaKey: true });
@@ -442,11 +434,11 @@ describe("mrbavio.html-editor: typing when the project goes", () => {
     expect(text()).toBe(theirs);
     expect(message()).toBeNull();
 
-    // Typing there is asked for over B's page, never A's markup.
+    // Typing there saves over B's page, never A's markup.
     content().focus();
     const mine = edited("Project B", "Project B, edited", theirs);
     await type(mine);
-    lastAskedHtml("page.html", theirs, mine);
-    refusedAsNotYet();
+    expect(message()).toBeNull();
+    expect(stored()).toBe(mine);
   });
 });

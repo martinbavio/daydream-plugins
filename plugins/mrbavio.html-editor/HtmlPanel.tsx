@@ -74,9 +74,9 @@ export interface PanelState {
    * Several viewports may show one page (decision #78), and a draft is
    * still kept by the viewport it was typed in, not by the page's path:
    * it is that pane's typing, and another viewport of the page shows the
-   * file as it is. Once a page's file can be written, a save from one is,
-   * to the other's draft, a change made elsewhere — carried onto it
-   * (`rebase`) or held, as any other is. */
+   * file as it is. A save from one is, to the other's draft, a change
+   * made elsewhere — carried onto it (`rebase`) or held, as any other
+   * is. */
   drafts: { load: number; pages: Map<string, Draft> };
 }
 
@@ -92,12 +92,10 @@ export function draftsNow(state: PanelState): Map<string, Draft> {
 export const APPLY_DEBOUNCE_MS = 150;
 
 /** The sentence for text typed where the page changed on the canvas
- * meanwhile (another viewport of the page, the CSS editor): nothing is
- * written, and the typed text is kept as the page's draft. Typing
- * elsewhere in the page is carried onto the change and saved. Not said
- * yet: until a page's file can be written (decision #78), its text
- * changes only when the project is loaded again, which drops what is
- * typed. */
+ * meanwhile (another viewport of the page, the CSS editor, an agent's
+ * finalize, the file changed on disk): nothing is written, and the typed
+ * text is kept as the page's draft. Typing elsewhere in the page is
+ * carried onto the change and saved. */
 export const CHANGED_UNDERNEATH =
   "The page's HTML changed on the canvas where you were typing, so nothing was saved. Your text is kept here: ⌘S saves it over the page as it is now, and ⌘Z drops it.";
 
@@ -160,8 +158,9 @@ export function pageHtml(
 }
 
 /** The kernel's refusal as the pane shows it: a sentence of its own. A
- * guard's refusal is a clause; a "not yet" one (decision #78) is a whole
- * sentence already, its period included. */
+ * guard's refusal is a clause ("the edit brings in …", "the page's
+ * markup changed since it was shown; …"); one that is a whole sentence
+ * already keeps its one period. */
 const sentence = (problem: string): string => {
   const text = problem.charAt(0).toUpperCase() + problem.slice(1);
   return text.endsWith(".") ? text : `${text}.`;
@@ -190,20 +189,21 @@ interface Resolution {
  * page into a model and back: what is typed is what is stored.
  *
  * Saved LIVE, after a short debounce, through `dd.writePage`'s `html`
- * edit, which names the page's file by its path (decision #78) and whose
- * verdict is the kernel's: it refuses, by name, whatever the edit brings
- * in that the render walk takes out (a `<script>`, an `on*`, a url a page
- * cannot reach through, a `<style>`), and refuses a save over a page
- * whose html is no longer the one the editor showed. Every save is an
- * undo step, and saves in quick succession join one — the kernel's edit
- * burst, so a typing session is one undo step for as long as no pause
- * outlasts the burst.
+ * edit, which writes the page's file, named by its path, as typed
+ * (decision #78) and whose verdict is the kernel's: it refuses, by name,
+ * whatever the edit brings in that the render walk takes out (a
+ * `<script>`, an `on*`, a url a page cannot reach through, a `<style>`),
+ * and refuses a save over a page whose html is no longer the one the
+ * editor showed. Every save is an undo step, and saves in quick
+ * succession join one — the kernel's edit burst, so a typing session is
+ * one undo step for as long as no pause outlasts the burst.
  *
- * Writing a page's file is not yet in the project model (decision #78):
- * a save that passes every guard is refused, in the kernel's one sentence
- * for it, and nothing is written — so for now every save ends as a
- * refused draft, and what follows about saves that write, remounts and
- * pages changed elsewhere is what the pane does once writes land.
+ * The edit is on the canvas at once, and the host writes the file after.
+ * A file that changed on disk since the tab read it wins: the kernel
+ * drops the edit, reads the file again and says so on its status line,
+ * and the page's html changes under the pane as any change made
+ * elsewhere does — shown as it is now, or, with typing pending, the
+ * typing carried onto it or held.
  *
  * A REFUSED text is never lost: it stays on screen as the page's DRAFT
  * with the sentence under it, and comes back with the page when another

@@ -4,18 +4,17 @@
 // span marked, and the element the caret is in selected on the canvas.
 // Saved live as you type through `dd.writePage`, whose verdict is the
 // kernel's: what the edit brings in that the render walk takes out is
-// refused by name. Typing over a page that changed underneath is carried
-// onto the change, or, where the two meet, kept as the page's draft until
-// ⌘S saves it over; a refused text is kept as the draft too. Writing a
-// page's file is not yet in the project model (decision #78): every save
-// and every Delete that passes the guards is refused, and nothing is
-// written — the typing kept as the draft, the selection put back. Once
-// writes land, a person can change a page's structure — edit a headline,
-// add an element, change a tag or an attribute — the way they would in a
-// file. Delete and Backspace on an inner element remove that element
-// alone, cut out of the text where it was written (core's own Delete
-// removes the whole item when the page is selected; the `html`, `head`
-// and `body` stay, since a page has them).
+// refused by name, and a save writes the page's file (decision #78).
+// Typing over a page that changed underneath is carried onto the change,
+// or, where the two meet, kept as the page's draft until ⌘S saves it
+// over; a refused text is kept as the draft too. With it, a person can
+// change a page's structure — edit a headline, add an element, change a
+// tag or an attribute — the way they would in a file. Delete and
+// Backspace on an inner element remove that element alone, cut out of the
+// text where it was written (core's own Delete removes the whole item
+// when the page is selected; the `html`, `head` and `body` stay, since a
+// page has them); one the kernel cannot cut narrowly is refused, and said
+// on the console.
 //
 // NOT here, on purpose: in-place text editing on the canvas. Nor a
 // resizer: the dock's width and the split between this pane and the CSS
@@ -159,9 +158,10 @@ export default function activate(dd: DaydreamApi): void {
       // The parent first, while its id is this mount's: the write
       // remounts the page, and the canvas carries the selection by its
       // place — the parent's is unchanged by the removal. A refusal puts
-      // the selection back, and is said on the console: every removal is
-      // refused as not yet for now (decision #78), and the key would
-      // otherwise do nothing anyone could see.
+      // the selection back, and is said on the console, since the key
+      // would otherwise do nothing anyone could see: an element the
+      // browser supplied has no tag in the file to cut, and a cut the
+      // browser would read back otherwise is not made (decision #78).
       dd.select(target.parentId);
       const problem = dd.writePage({ kind: "remove", elementId: target.id });
       if (problem === null) return;

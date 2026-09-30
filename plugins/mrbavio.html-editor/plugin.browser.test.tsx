@@ -3,47 +3,39 @@
 // shell, the plugin enabled by config, a page of the project on the
 // canvas, assertions from the DOM and the API — what a person sees. The
 // pane shows the page's html as its text and marks the selected element
-// in it, and the caret selects the element it is in; typing is saved
-// live, verbatim, through the kernel's writePage; a save the kernel
-// refuses says why as you type; Delete on an inner element asks to cut it
-// out of the text and never removes the viewport. What a save cannot
-// write is kept as a draft (drafts.browser.test.tsx), and what is typed
-// when the project goes is saved into it first (leave.browser.test.tsx).
+// in it, and the caret selects the element it is in; typing saves live,
+// verbatim, through the kernel's writePage, into the page's file
+// (decision #78), and quick saves join one undo step; a save the kernel
+// refuses says why as you type; Delete on an inner element cuts it out of
+// the text and never removes the viewport, and one the kernel cannot cut
+// is said on the console. What a save cannot write is kept as a draft
+// (drafts.browser.test.tsx), and what is typed when the project goes is
+// saved into it first (leave.browser.test.tsx).
 //
-// Writing a page's file is not yet in the project model (decision #78):
-// every save that passes the guards is refused, and nothing is written.
-// So these tests read what the pane ASKS `dd.writePage` for, and its
-// answer (htmlSaves.test-support.ts), and that the page is as it was, the
-// typing held as its draft. The tests of saves that write — their undo
-// steps, the remount after one, a page changed on the canvas shown as it
-// is now — return when a page's file can be written.
+// With no host the edits live in the tab's memory, as a page's file
+// does until the host writes it; the tests of what reaches the disk put
+// the host's files routes in, faked at HTTP (`createFileHost`).
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, onTestFinished, test, vi } from "vitest";
 
 import type { PluginManifest } from "@daydream/plugin-api";
 import {
+  createFileHost,
   createPageItem,
+  createTestKernel,
   fixturePage,
   flush,
   type MountedPlugin,
   mountPlugin,
+  overrideHostForTests,
   pageElementId,
+  pageNode,
   testProject,
   type TestProject,
   viewportItems,
 } from "@daydream/plugin-testing";
 
 import { APPLY_DEBOUNCE_MS } from "./HtmlPanel";
-import {
-  askedHtml,
-  askedRemove,
-  clearSaves,
-  HTML_NOT_YET,
-  lastAskedHtml,
-  recorded,
-  REMOVE_NOT_YET,
-  saves,
-} from "./htmlSaves.test-support";
 import activate, {
   BLUR_COMMAND,
   DELETE_COMMAND,
@@ -58,12 +50,10 @@ const manifest = rawManifest as PluginManifest;
 /** The plugin mounted by the test running, or null. */
 let mounted: MountedPlugin | null = null;
 
-/** Dispose of what the test mounted, and forget its saves: each test
- * file's `afterEach`. */
+/** Dispose of what the test mounted: each test file's `afterEach`. */
 function disposeMounted(): void {
   mounted?.dispose();
   mounted = null;
-  clearSaves();
 }
 
 /** The page as its author wrote it: a doctype, indentation, a comment. */
@@ -94,18 +84,15 @@ let itemId = "";
 /** The path of the page `itemId` shows. */
 let pagePath = "";
 
-/** A project of one page, `page.html`, shown by the viewport `page`. */
-const onePage = (): TestProject =>
+/** A project of one page, `page.html` (its markup `html`), shown by the
+ * viewport `page`. */
+const onePage = (html = HTML): TestProject =>
   testProject([
-    createPageItem(
-      { html: HTML, css: CSS },
-      { id: "page", frame: { width: 960 } },
-    ),
+    createPageItem({ html, css: CSS }, { id: "page", frame: { width: 960 } }),
   ]);
 
 /** Mount the plugin over a fresh one-page project (or `project`) and wait
- * for its first page to mount. `entry` stands in for the plugin's entry —
- * by default the entry with its saves recorded. */
+ * for its first page to mount. `entry` stands in for the plugin's entry. */
 async function mountPage(
   project: TestProject = onePage(),
   options: { entry?: typeof activate } = {},
@@ -114,7 +101,7 @@ async function mountPage(
   itemId = viewport.id;
   pagePath = viewport.payload.page;
   mounted = await mountPlugin({
-    entry: options.entry ?? recorded,
+    entry: options.entry ?? activate,
     manifest,
     project,
   });
@@ -182,7 +169,7 @@ async function settled(): Promise<void> {
   flush();
 }
 
-/** Type and let the live save be asked for. */
+/** Type and let the live save land. */
 async function type(next: string): Promise<void> {
   await typeAll(next);
   await settled();
@@ -241,12 +228,29 @@ async function caret(offset: number): Promise<void> {
   await marks();
 }
 
-/** The not-yet refusal of the last save, as the pane shows it: the
- * kernel's own sentence, once, its one period. */
-function refusedAsNotYet(): void {
-  expect(message()).toBe(saves.at(-1)!.answer);
-  expect(message()).toMatch(HTML_NOT_YET);
-  expect(message()).not.toMatch(/\.\.$/);
+/** A change made from outside the pane — another plugin, another
+ * viewport's editor — through a second API instance over the same app
+ * store: the page's markup written whole, as an edit of its file. */
+function outsideEdit(html: string, id = itemId): void {
+  const kernel = createTestKernel();
+  const viewport = viewportItems(mounted!.store.document).find(
+    (item) => item.id === id,
+  )!;
+  const problem = kernel.dd.writePage({
+    kind: "html",
+    path: viewport.payload.page,
+    expected: stored(id),
+    html,
+  });
+  kernel.dispose();
+  if (problem !== null) throw new Error(problem);
+  flush();
+}
+
+/** Longer than the kernel's edit burst (decision #20, 500ms): the next
+ * write starts an undo step of its own. */
+async function pause(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 700));
 }
 
 afterEach(disposeMounted);
@@ -309,25 +313,19 @@ describe("mrbavio.html-editor", () => {
     expect(styles[0]!.textContent).toMatch(/^@layer dream-plugin \{/);
   });
 
-  test("typing is asked for live and verbatim, as the page's file; refused as not yet, it is kept as the draft and nothing is written", async () => {
+  test("typing saves the text verbatim, live; the page remounts, and saves in quick succession are one undo step", async () => {
     const m = await mountPage();
+    const store = m.store;
     select(idOf("h1"));
     content().focus();
     const first = edited("Old headline", "New head");
     await typeAll(first);
     // Nothing yet: the debounce.
-    expect(saves).toHaveLength(0);
-    await settled();
-    // The page's path, its html as shown, the text as typed.
-    lastAskedHtml(pagePath, HTML, first);
-    refusedAsNotYet();
     expect(stored()).toBe(HTML);
+    await settled();
+    expect(stored()).toBe(first);
     // Still focused, still the user's text, no rewrite under the caret.
     expect(document.activeElement).toBe(content());
-    expect(text()).toBe(first);
-
-    // More typing is asked for from the page as it still is: the doctype,
-    // the comment, the spacing, as typed.
     const second = edited(
       "    <p>Body copy</p>",
       "    <p>Body copy</p>\n    <p>More,  spaced   as typed</p>",
@@ -335,15 +333,128 @@ describe("mrbavio.html-editor", () => {
     );
     await type(second);
     blur();
-    lastAskedHtml(pagePath, HTML, second);
-    expect(askedHtml()).toHaveLength(2);
-    expect(stored()).toBe(HTML);
+
+    // Stored exactly as typed: the doctype, the comment, the spacing.
+    expect(stored()).toBe(second);
+    await vi.waitFor(() => {
+      expect(pageNode(itemId, "h1")?.textContent).toBe("New headline");
+    });
+    expect(pageNode(itemId, "p:last-of-type")?.textContent).toBe(
+      "More,  spaced   as typed",
+    );
+    // The selection was carried through the remount to the heading, and
+    // the mark with it.
+    expect(store.selectedId()).toBe(idOf("h1"));
     expect(text()).toBe(second);
-    refusedAsNotYet();
+    expect(message()).toBeNull();
+    await marks();
+    expect(marked()).toBe('<h1 class="headline">New headline</h1>');
+
+    // The whole session — two saves, well inside the kernel's edit
+    // burst of each other — is one undo step.
+    expect(store.canUndo()).toBe(true);
+    store.undo();
+    flush();
+    expect(stored()).toBe(HTML);
+    expect(store.canUndo()).toBe(false);
+    expect(text()).toBe(HTML);
+  });
+
+  test("a save is written to the page's file, byte for byte, in the open project; its undo writes the file back", async () => {
+    const files = createFileHost({ [pagePath]: HTML, "page.css": CSS });
+    overrideHostForTests({ project: files.project });
+    onTestFinished(() => overrideHostForTests(null));
+    const m = await mountPage();
+    select(itemId);
+    content().focus();
+    const typed = edited("Old headline", "On disk");
+    await type(typed);
+    await vi.waitFor(() => expect(files.text(pagePath)).toBe(typed));
+    // One write of the page's file, over the bytes the tab read, and no
+    // other file touched.
+    expect(files.writes().map((write) => write.path)).toEqual([pagePath]);
+    expect(files.text("page.css")).toBe(CSS);
+
+    blur();
+    m.store.undo();
+    flush();
+    expect(stored()).toBe(HTML);
+    expect(text()).toBe(HTML);
+    await vi.waitFor(() => expect(files.text(pagePath)).toBe(HTML));
+  });
+
+  test("a save over a file changed on disk since it was read: the disk wins, and the pane shows the page as the disk holds it", async () => {
+    const files = createFileHost({ [pagePath]: HTML, "page.css": CSS });
+    overrideHostForTests({ project: files.project });
+    onTestFinished(() => overrideHostForTests(null));
+    const m = await mountPage();
+    select(itemId);
+    content().focus();
+    // Another editor wrote the file; the tab has not heard of it yet.
+    const theirs = edited("Body copy", "Written in another editor");
+    files.change(pagePath, theirs);
+    await type(edited("Old headline", "Mine"));
+    // The kernel drops the edit, reads the file again and forgets the
+    // undo step that would write over it; the pane follows the page.
+    await vi.waitFor(() => expect(stored()).toBe(theirs));
+    expect(files.text(pagePath)).toBe(theirs);
+    await vi.waitFor(() => expect(text()).toBe(theirs));
+    expect(message()).toBeNull();
     expect(m.store.canUndo()).toBe(false);
   });
 
-  test("a save asked for while typing leaves the caret where it was", async () => {
+  test("a pause longer than the edit burst splits the typing into two undo steps", async () => {
+    // Every save is its own writePage, and the kernel joins them by time
+    // alone: nothing holds a typing session open across a pause.
+    const m = await mountPage();
+    const store = m.store;
+    select(itemId);
+    content().focus();
+    const first = edited("Old headline", "First");
+    await type(first);
+    await pause();
+    const second = edited("Body copy", "Second", first);
+    await type(second);
+    blur();
+    expect(stored()).toBe(second);
+
+    store.undo();
+    flush();
+    expect(stored()).toBe(first);
+    expect(text()).toBe(first);
+    store.undo();
+    flush();
+    expect(stored()).toBe(HTML);
+    expect(store.canUndo()).toBe(false);
+  });
+
+  test("undoing a markup edit keeps the pane on its page, and the mark follows the next selection", async () => {
+    const m = await mountPage();
+    const store = m.store;
+    select(idOf("p"));
+    content().focus();
+    await type(edited("Old headline", "New headline"));
+    blur();
+    // The save remounted the page: the selection was carried to the new
+    // mount's paragraph, and the mark with it.
+    expect(store.selectedId()).toBe(idOf("p"));
+    await marks();
+    expect(marked()).toBe("<p>Body copy</p>");
+
+    store.undo();
+    flush();
+    expect(stored()).toBe(HTML);
+    await waitMounted(itemId, "h1");
+    await marks();
+    // Whatever id the undo restored, the pane stays on the page it was
+    // showing, re-synced to the text undone to.
+    expect(text()).toBe(HTML);
+    select(idOf("h1"));
+    await marks();
+    expect(marked()).toBe('<h1 class="headline">Old headline</h1>');
+  });
+
+  test("a save while typing leaves the caret where it was; a selection made on the canvas moves it", async () => {
     await mountPage();
     select(idOf("h1"));
     await marks();
@@ -356,9 +467,17 @@ describe("mrbavio.html-editor", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     await settled();
-    lastAskedHtml(pagePath, HTML, edited("Body copy", "More Body copy"));
+    expect(stored()).toBe(edited("Body copy", "More Body copy"));
     expect(view().state.selection.main.head).toBe(at + 5);
     expect(document.activeElement).toBe(content());
+
+    // Clicking the canvas takes the caret first; the new selection is
+    // then shown where it was written.
+    blur();
+    select(idOf("p"));
+    await marks();
+    expect(marked()).toBe("<p>More Body copy</p>");
+    expect(view().state.selection.main.head).toBe(stored().indexOf("<p>More"));
   });
 
   test("the caret selects the element it is in on the canvas, and the mark never moves it", async () => {
@@ -402,59 +521,58 @@ describe("mrbavio.html-editor", () => {
     expect(store.selectedId()).toBe(h1);
   });
 
-  test("⌘Z while typing asks for what is pending first, then drops the refused draft and shows the page", async () => {
+  test("⌘Z while typing undoes the typing and re-syncs the editor under the caret", async () => {
     const m = await mountPage();
     select(idOf("h1"));
     content().focus();
-    const typed = edited("Old headline", "Typed");
-    await type(typed);
-    refusedAsNotYet();
-    // ⌘Z through the router while the editor holds the caret: the draft
-    // the page never held is dropped, and the key goes no further.
-    const event = key(content(), { key: "z", metaKey: true });
-    expect(event.defaultPrevented).toBe(true);
-    expect(text()).toBe(HTML);
-    expect(message()).toBeNull();
+    await type(edited("Old headline", "Typed"));
+    expect(stored()).toBe(edited("Old headline", "Typed"));
+    // ⌘Z through the router while the editor holds the caret.
+    key(content(), { key: "z", metaKey: true });
     expect(stored()).toBe(HTML);
+    expect(text()).toBe(HTML);
     expect(m.store.canUndo()).toBe(false);
     expect(document.activeElement).toBe(content());
 
-    // Text still inside the debounce is asked for first, then dropped
-    // with the draft its refusal leaves: never lost unasked.
-    const pending = edited("Old headline", "Again and more");
-    await typeAll(pending);
+    // Text still inside the debounce is saved first and undone with the
+    // burst it joined: one ⌘Z, never the pending text lost and an older
+    // step undone besides.
+    await type(edited("Old headline", "Again"));
+    await typeAll(edited("Old headline", "Again and more"));
     key(content(), { key: "z", metaKey: true });
-    lastAskedHtml(pagePath, HTML, pending);
+    expect(stored()).toBe(HTML);
     expect(text()).toBe(HTML);
-    expect(message()).toBeNull();
     expect(m.store.canUndo()).toBe(false);
   });
 
-  test("⇧⌘Z while typing asks for what is pending first, and keeps it as the draft: a redo never drops typing", async () => {
+  test("⇧⌘Z while typing saves what is pending first: a redo never drops typing", async () => {
     const m = await mountPage();
     select(itemId);
     content().focus();
-    // Typed, still inside the debounce, then ⇧⌘Z: the typing is asked
-    // for, refused, and kept; core's redo finds nothing to redo.
+    await type(edited("Old headline", "Undone"));
+    key(content(), { key: "z", metaKey: true });
+    expect(stored()).toBe(HTML);
+    expect(m.store.canRedo()).toBe(true);
+
+    // Typed, still inside the debounce, then ⇧⌘Z: the typing is saved,
+    // a new edit, so there is nothing left to redo, and nothing is lost.
     const typed = edited("Body copy", "Pending copy");
     await typeAll(typed);
     key(content(), { key: "Z", metaKey: true, shiftKey: true });
-    lastAskedHtml(pagePath, HTML, typed);
+    expect(stored()).toBe(typed);
     expect(text()).toBe(typed);
-    refusedAsNotYet();
-    expect(stored()).toBe(HTML);
     expect(m.store.canRedo()).toBe(false);
   });
 
-  test("a save the guards refuse shows their sentence as you type, never the not-yet one", async () => {
+  test("a save the kernel refuses shows its sentence as you type and writes nothing", async () => {
     const m = await mountPage();
     select(itemId);
     content().focus();
     await type(edited("Body copy", "Hi <script>alert(1)</script>"));
     expect(message()).toContain("<script>");
     expect(message()).toContain("nothing was saved");
-    expect(message()).toMatch(/^The edit brings in .*\.$/);
-    expect(message()).not.toMatch(HTML_NOT_YET);
+    // The kernel's clause, as the pane's sentence: one capital, one period.
+    expect(message()).toMatch(/^The edit brings in .*[^.]\.$/);
     expect(stored()).toBe(HTML);
     expect(m.store.canUndo()).toBe(false);
 
@@ -467,13 +585,10 @@ describe("mrbavio.html-editor", () => {
     expect(message()).toContain("<style>");
     expect(stored()).toBe(HTML);
 
-    // An edit the guards pass is refused as not yet, in its own
-    // sentence.
-    const lead = edited("<p>", '<p class="lead">');
-    await type(lead);
-    lastAskedHtml(pagePath, HTML, lead);
-    refusedAsNotYet();
-    expect(stored()).toBe(HTML);
+    // A good edit clears the message and saves.
+    await type(edited("<p>", '<p class="lead">'));
+    expect(message()).toBeNull();
+    expect(stored()).toBe(edited("<p>", '<p class="lead">'));
   });
 
   test("a javascript: url set through SVG's xlink:href or an animation is refused", async () => {
@@ -490,7 +605,6 @@ describe("mrbavio.html-editor", () => {
       ),
     );
     expect(message()).toContain("xlink:href");
-    expect(message()).not.toMatch(HTML_NOT_YET);
     expect(stored()).toBe(HTML);
 
     await type(
@@ -500,34 +614,27 @@ describe("mrbavio.html-editor", () => {
       ),
     );
     expect(message()).toContain("<set>");
-    expect(message()).not.toMatch(HTML_NOT_YET);
     expect(stored()).toBe(HTML);
     expect(m.store.canUndo()).toBe(false);
   });
 
-  test("blur asks for what the debounce had not yet; an untouched editor asks for nothing", async () => {
+  test("blur saves what the debounce had not yet; an untouched editor writes nothing back", async () => {
     const m = await mountPage();
+    const store = m.store;
     select(itemId);
-    // Focus, do nothing, blur: nothing asked.
     content().focus();
+    await typeAll(edited("Old headline", "Blurred"));
     blur();
-    expect(saves).toHaveLength(0);
+    expect(stored()).toBe(edited("Old headline", "Blurred"));
+    expect(store.canUndo()).toBe(true);
 
+    // Focus, do nothing, blur: no write, no new history step.
     content().focus();
-    const typed = edited("Old headline", "Blurred");
-    await typeAll(typed);
     blur();
-    lastAskedHtml(pagePath, HTML, typed);
-    expect(text()).toBe(typed);
-    refusedAsNotYet();
+    store.undo();
+    flush();
     expect(stored()).toBe(HTML);
-    expect(m.store.canUndo()).toBe(false);
-
-    // Focused and left again with nothing typed: the draft is not asked
-    // again.
-    content().focus();
-    blur();
-    expect(saves).toHaveLength(1);
+    expect(store.canUndo()).toBe(false);
   });
 
   test("Escape in the focused editor blurs it through the router and keeps the selection", async () => {
@@ -542,36 +649,54 @@ describe("mrbavio.html-editor", () => {
     expect(m.store.selectedId()).toBe(h1);
   });
 
-  test("Delete on an inner element asks to cut it out; refused as not yet, the selection is put back and the refusal said on the console", async () => {
-    const said = vi.spyOn(console, "error").mockImplementation(() => {});
-    onTestFinished(() => said.mockRestore());
+  test("Delete on an inner element cuts it out of the text, selects its parent, and is one undo step", async () => {
     const m = await mountPage();
     const store = m.store;
-    const p = idOf("p");
-    select(p);
-    key(window, { key: "Delete" });
-    expect(askedRemove()).toEqual([{ kind: "remove", elementId: p }]);
-    expect(saves.at(-1)!.answer).toMatch(REMOVE_NOT_YET);
-    expect(said).toHaveBeenCalledTimes(1);
-    expect(String(said.mock.calls[0]![0])).toMatch(
-      /^\[mrbavio\.html-editor\] delete refused: Removing an element is not yet in the project model/,
-    );
+    select(idOf("p"));
+    const event = key(window, { key: "Delete" });
+    expect(event.defaultPrevented).toBe(true);
     expect(items()).toHaveLength(1);
-    expect(stored()).toBe(HTML);
-    expect(idOf("p")).toBe(p);
-    expect(store.selectedId()).toBe(p);
+    // Its span cut; every other character as the author wrote it.
+    expect(stored()).toBe(edited("<p>Body copy</p>", ""));
+    await vi.waitFor(() => {
+      expect(pageNode(itemId, "p")).toBeNull();
+    });
+    expect(store.selectedId()).toBe(idOf("body"));
     expect(store.selectedItemIds()).toEqual([]);
+
+    // One undo step brings it back.
+    store.undo();
+    flush();
+    expect(stored()).toBe(HTML);
     expect(store.canUndo()).toBe(false);
 
     // Backspace is the same gesture.
-    const h1 = idOf("h1");
-    select(h1);
+    await waitMounted(itemId, "h1");
+    select(idOf("h1"));
     key(window, { key: "Backspace" });
-    expect(askedRemove().at(-1)).toEqual({ kind: "remove", elementId: h1 });
-    expect(said).toHaveBeenCalledTimes(2);
     expect(items()).toHaveLength(1);
-    expect(stored()).toBe(HTML);
-    expect(store.selectedId()).toBe(h1);
+    expect(stored()).toBe(edited('<h1 class="headline">Old headline</h1>', ""));
+  });
+
+  test("Delete on an element the page's file has no tag for is refused: the selection is put back and the kernel's reason said on the console", async () => {
+    const said = vi.spyOn(console, "error").mockImplementation(() => {});
+    onTestFinished(() => said.mockRestore());
+    // The browser supplies the <tbody>: the file has no span to cut.
+    const table = edited(
+      "<p>Body copy</p>",
+      "<table><tr><td>Cell</td></tr></table>",
+    );
+    const m = await mountPage(onePage(table));
+    const tbody = idOf("tbody");
+    select(tbody);
+    key(window, { key: "Delete" });
+    expect(said).toHaveBeenCalledTimes(1);
+    expect(String(said.mock.calls[0]![0])).toBe(
+      "[mrbavio.html-editor] delete refused: the <tbody> has no tag of its own in the page's file — the browser supplied it — so there is nothing to cut; edit the markup instead",
+    );
+    expect(stored()).toBe(table);
+    expect(m.store.selectedId()).toBe(tbody);
+    expect(m.store.canUndo()).toBe(false);
   });
 
   test("Delete with the page selected stays core's: the item goes, not through this plugin", async () => {
@@ -580,7 +705,6 @@ describe("mrbavio.html-editor", () => {
     expect(m.store.selectedItemIds()).toHaveLength(1);
     key(window, { key: "Delete" });
     expect(items()).toHaveLength(0);
-    expect(saves).toHaveLength(0);
   });
 
   test("Delete while typing in the editor edits text, never the page", async () => {
@@ -591,7 +715,6 @@ describe("mrbavio.html-editor", () => {
     // CodeMirror's own keymap takes the key (a character deletion); the
     // plugin's canvas-scope command never runs on an editable target.
     key(content(), { key: "Delete" });
-    expect(askedRemove()).toEqual([]);
     expect(stored()).toBe(HTML);
     expect(m.store.selectedId()).toBe(p);
   });
@@ -601,44 +724,51 @@ describe("mrbavio.html-editor", () => {
     select(idOf("body"));
     const event = key(window, { key: "Delete" });
     expect(event.defaultPrevented).toBe(false);
-    expect(askedRemove()).toEqual([]);
     expect(items()).toHaveLength(1);
     expect(stored()).toBe(HTML);
     expect(m.store.canUndo()).toBe(false);
   });
 
-  test("text that changes nothing is asked for never; blank space is text", async () => {
-    await mountPage();
+  test("text that changes nothing opens no history step; blank space is text", async () => {
+    const m = await mountPage();
     select(itemId);
     content().focus();
     // An edit that leaves the text as the page holds it.
     await type(HTML);
     blur();
-    expect(saves).toHaveLength(0);
-    expect(message()).toBeNull();
-    // Blank space is text: a changed indent is asked for as typed.
+    expect(m.store.canUndo()).toBe(false);
+    expect(stored()).toBe(HTML);
+    // Blank space is text: a changed indent is saved as typed.
     content().focus();
-    const indented = edited("    <p>", "      <p>");
-    await type(indented);
+    await type(edited("    <p>", "      <p>"));
     blur();
-    lastAskedHtml(pagePath, HTML, indented);
+    expect(m.store.canUndo()).toBe(true);
+    expect(stored()).toBe(edited("    <p>", "      <p>"));
   });
 
-  test("hiding the dock mid-edit asks for what is pending, and the draft comes back with the dock", async () => {
+  test("hiding the dock mid-edit saves what is pending", async () => {
     const m = await mountPage();
     select(itemId);
     content().focus();
-    const typed = edited("Old headline", "Kept");
-    await typeAll(typed);
+    await typeAll(edited("Old headline", "Kept"));
     key(content(), { key: "\\", code: "Backslash", metaKey: true });
     expect(m.panel()).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 0));
     flush();
-    lastAskedHtml(pagePath, HTML, typed);
-    expect(stored()).toBe(HTML);
+    expect(stored()).toBe(edited("Old headline", "Kept"));
+    expect(m.store.canUndo()).toBe(true);
     key(window, { key: "\\", code: "Backslash", metaKey: true });
     expect(m.panel()).not.toBeNull();
-    expect(text()).toBe(typed);
-    refusedAsNotYet();
+    expect(text()).toBe(edited("Old headline", "Kept"));
+  });
+
+  test("a page changed on the canvas with nothing pending is shown as it is now", async () => {
+    await mountPage();
+    select(itemId);
+    content().focus();
+    const theirs = edited("Body copy", "Another editor's copy");
+    outsideEdit(theirs);
+    expect(text()).toBe(theirs);
+    expect(document.activeElement).toBe(content());
   });
 });
