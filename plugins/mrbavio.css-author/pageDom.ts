@@ -13,10 +13,11 @@
 // answer and resolve, and so what an agent can address it back with: the
 // kernel's own parse and unique selector (`dd.core.parsePage`,
 // `dd.core.uniqueSelector`), over a parse this plugin holds. A lint that
-// reads a mounted copy (`dd.mountViewport`) names each of its nodes by the
-// node's twin in that parse (`storedNames`). `dd.pageElement` answers the
-// same name, but only for an element of a page mounted ON THE CANVAS: a
-// gate reads a copy of its own, whose nodes are in no registry.
+// reads a mounted copy (the gate's mount, `ctx.mountViewport`) names each
+// of its nodes by the node's twin in that parse (`storedNames`).
+// `dd.pageElement` answers the same name, but only for an element of a
+// page mounted ON THE CANVAS: a gate reads a copy of its own, whose nodes
+// are in no registry.
 
 import type { CoreApi } from "@daydream/plugin-api";
 
@@ -33,16 +34,16 @@ const NOT_CONTENT: ReadonlySet<string> = new Set([
   "base",
 ]);
 
-/** In a page MOUNTED by `dd.mountViewport` bare (pageMount.ts), the
- * `<style>`s holding the page's live sheets, in cascade order: the live
- * face appends one per live sheet to the head, after everything the
- * page's head holds, and takes the page's own `<style>` and `<link>`
- * elements out of the tree — so they are the head's `<style>` children
- * this plugin (`data-css-author`) did not add; the kernel's motion pin is
- * a sheet the document adopts, in no element. Each holds its sheet as
- * the copy renders it — its `@import`s out, its urls routed, under its
- * `media` — and pageSheets.ts `writtenRules` pairs it with the page's
- * sheet it renders. */
+/** In a page MOUNTED bare by the gate's mount (`ctx.mountViewport`, the
+ * live face; pageMount.ts), the `<style>`s holding the page's live
+ * sheets, in cascade order: the live face appends one per live sheet to
+ * the head, after everything the page's head holds, and takes the page's
+ * own `<style>` and `<link>` elements out of the tree — so they are the
+ * head's `<style>` children this plugin (`data-css-author`) did not add;
+ * the kernel's motion pin is a sheet the document adopts, in no element.
+ * Each holds its sheet as the copy renders it — its `@import`s out, its
+ * urls routed, under its `media` — and pageSheets.ts `writtenRules` pairs
+ * it with the page's sheet it renders. */
 export function mountedStyles(doc: Document): HTMLStyleElement[] {
   return Array.from(doc.head.children).filter(
     (el): el is HTMLStyleElement =>

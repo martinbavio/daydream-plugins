@@ -55,12 +55,15 @@ import {
 import { lintElements } from "./pageDom";
 import {
   editable,
+  pagesText,
   readSheets,
   sheetKey,
   sheetName,
   shownPages,
+  unjudgedLinks,
   type Page,
   type PageOf,
+  type ProjectPaths,
 } from "./pageSheets";
 
 /** Every static finding for the document: per page, in the order the
@@ -75,13 +78,14 @@ export function staticLint(
   core: CoreApi,
   doc: DeepReadonly<DreamDocument>,
   pageOf: PageOf,
+  project: ProjectPaths = [],
 ): Finding[] {
   const findings: Finding[] = [];
   const { shown, missing } = shownPages(core, doc, pageOf);
   const pages = [
     ...new Map(shown.map(({ page }) => [page.path, page])).values(),
   ].map((page) => readPage(core, page));
-  const faces = faceUses(pages);
+  const faces = faceUses([...pages, ...faceSharers(core, pages, doc, pageOf, project)]);
   /** A shared sheet's text is judged once (`sheetKey`). */
   const judged = new Set<string>();
   for (const read of pages) {
@@ -353,8 +357,52 @@ export function lintUnitlessLengthsOnRules(
 // "Noto Serif", serif` and `font-family: var(--stack)`) is named in the
 // custom property's value, so every `--*` value is searched the same way.
 // A sheet several pages link is one text: its face is dead when no page
-// linking it names the family. Necessity cannot see this either — a font
+// linking it names the family — every page of the project that links it,
+// read for this whether the document shows it or not (at a finalize it
+// holds the page about to be written alone), since text is all it takes. Necessity cannot see this either — a font
 // face is not a rule's declaration to remove — so it is static by nature.
+
+/** The pages the document does not show that link a sheet with a face
+ * of the shown ones (`pages`) — at a finalize, every other page of the
+ * project (`project`; pageSheets.ts `unjudgedLinks`) — read for what they
+ * name: a face in a sheet they link is used when they use it, and their
+ * text alone says so. Each is read with every sheet a shown page carries
+ * as the shown page has it — at a finalize, the text about to be written,
+ * which is what that page will render too. */
+function faceSharers(
+  core: CoreApi,
+  pages: readonly ReadPage[],
+  doc: DeepReadonly<DreamDocument>,
+  pageOf: PageOf,
+  project: ProjectPaths,
+): ReadPage[] {
+  const outside = unjudgedLinks(
+    doc,
+    pageOf,
+    project,
+    new Set(pages.map((read) => read.page.path)),
+  );
+  const paths = new Set<string>();
+  const shared = new Map<string, Page["sheets"][number]>();
+  for (const read of pages) {
+    read.page.sheets.forEach((each, sheet) => {
+      const key = sheetKey(read.page, sheet);
+      if (!shared.has(key)) shared.set(key, each);
+    });
+    read.blocks.forEach((blocks, sheet) => {
+      if (!editable(read.page, sheet) || fontFaceBlocks(blocks).length === 0) return;
+      for (const path of outside.get(sheetKey(read.page, sheet)) ?? []) paths.add(path);
+    });
+  }
+  return [...paths].flatMap((path) => {
+    const page = pageOf(path);
+    if (page === undefined) return [];
+    const sheets = page.sheets.map(
+      (each, sheet) => shared.get(sheetKey(page, sheet)) ?? each,
+    );
+    return [readPage(core, { ...page, sheets })];
+  });
+}
 
 /** Every face of an editable sheet the pages hold (`faceKey`), with the
  * pages carrying it and whether one of them names its family. A face in
@@ -447,13 +495,6 @@ function lintUnusedFontFaces(
       });
     }
   });
-}
-
-/** `page \`a.html\``, or `pages \`a.html\` and \`b.html\``. */
-function pagesText(paths: readonly string[]): string {
-  const named = [...new Set(paths)].map((path) => `\`${path}\``);
-  if (named.length === 1) return `page ${named[0]}`;
-  return `pages ${named.slice(0, -1).join(", ")} and ${named.at(-1)}`;
 }
 
 /** The family list the browser reads out of a `font` shorthand, or ""

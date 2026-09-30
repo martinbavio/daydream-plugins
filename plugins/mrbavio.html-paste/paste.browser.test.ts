@@ -610,6 +610,22 @@ describe("the file a paste writes", () => {
     ]);
   });
 
+  test("a byte order mark the pasted text begins with stays first: a document's doctype after it is its own, and a fragment's is written after it", async () => {
+    quiet();
+    const { shell, fake } = await mountMade();
+    const BOM = "\uFEFF";
+    const page =
+      "<!doctype html><html><head><title>Marked</title></head><body><h1>Marked</h1><p>page</p></body></html>";
+    paste(document.body, { "text/plain": BOM + page });
+    await placed(shell, 1);
+    paste(document.body, { "text/plain": `${BOM}<h2>a</h2><p>fragment</p>` });
+    await placed(shell, 2);
+    expect(fake.made.map((made) => made.html)).toEqual([
+      BOM + page,
+      `${BOM}<!doctype html>\n<h2>a</h2><p>fragment</p>`,
+    ]);
+  });
+
   test("a viewport made that could not be selected is said as what it is, never a refused paste", async () => {
     quiet();
     const { shell } = await mountMade({

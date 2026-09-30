@@ -47,9 +47,20 @@ export const VIEWPORT_WIDTH = 960;
 /** DOMParser over the whole clipboard text: a fragment gets a synthetic
  * `html`/`body`, a Chrome copy (`<meta charset>` and StartFragment
  * comments around the fragment) parses as the document it claims to be,
- * and a real document keeps its own root, head, title and doctype. */
+ * and a real document keeps its own root, head, title and doctype. A
+ * leading byte order mark is left out of the parse, as a browser
+ * decoding the file takes it out: DOMParser would read it as text, and a
+ * doctype after it as no doctype at all. */
 export function parseHtml(html: string): Document {
-  return new DOMParser().parseFromString(html, "text/html");
+  return new DOMParser().parseFromString(withoutBom(html), "text/html");
+}
+
+/** A byte order mark: an encoding's mark at a file's start, never its
+ * text. */
+const BOM = "\uFEFF";
+
+function withoutBom(text: string): string {
+  return text.startsWith(BOM) ? text.slice(BOM.length) : text;
 }
 
 /** How many elements a page made of `doc` would hold, as the element cap
@@ -83,9 +94,12 @@ export const DOCTYPE = "<!doctype html>\n";
 /** The file a paste writes: the text as it arrived, after `DOCTYPE`
  * when its parse has none — a fragment, which a browser would otherwise
  * render in quirks mode. A document's own doctype, whatever it says, is
- * the author's. */
+ * the author's. A byte order mark the text begins with stays first, the
+ * doctype after it, as a file carries one. */
 export function pageFile(source: HtmlSource): string {
-  return source.doc.doctype === null ? DOCTYPE + source.text : source.text;
+  if (source.doc.doctype !== null) return source.text;
+  const rest = withoutBom(source.text);
+  return source.text.slice(0, source.text.length - rest.length) + DOCTYPE + rest;
 }
 
 /** Whether plain text is markup and not prose that happens to open with

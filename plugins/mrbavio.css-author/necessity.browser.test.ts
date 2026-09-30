@@ -2,7 +2,8 @@
 // "Testing Decisions", seam 1): a page goes in, findings come out, and
 // every assertion is on the findings' shape and words — never on how the
 // lint decided. Real Chromium only (vite.config.ts): the lint removes
-// declarations from a live iframe core mounts (`dd.mountViewport`) and
+// declarations from a live iframe core mounts (the gate's mount,
+// `ctx.mountViewport`, the live face) and
 // reads the CSS engine's answer back. The context is a gate's as core
 // builds it (plugin-testing's `gateContext`), over the test's project:
 // the lint reads each viewport's page through it and mounts that page

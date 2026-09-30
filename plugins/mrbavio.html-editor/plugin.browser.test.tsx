@@ -842,6 +842,30 @@ describe("mrbavio.html-editor: a CRLF page", () => {
     expect(stored()).toBe(mixed.replace("<p>", "<p>New</p>\r\n    <p>"));
   });
 
+  test("a break typed beside a lone \\r never fuses with it into one \\r\\n: the file holds the line typed, and reads back as the editor shows it", async () => {
+    // The comment's break is a lone \r; the file's others are \n, so a
+    // typed break is a \n — which, right after the \r, would read back
+    // as one \r\n and lose the line.
+    const lone = HTML.replace("<!-- the copy -->\n", "<!-- the copy -->\r");
+    const files = createFileHost({ "page.html": lone, "page.css": CSS });
+    overrideHostForTests({ project: files.project });
+    onTestFinished(() => overrideHostForTests(null));
+    await mountPage(onePage(lone));
+    select(itemId);
+    content().focus();
+    const shown = edited("<!-- the copy -->\n", "<!-- the copy -->\n\n");
+    view().dispatch({ changes: { from: text().indexOf("    <p>"), insert: "\n" } });
+    expect(text()).toBe(shown);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settled();
+    const written = lone.replace("<!-- the copy -->\r", "<!-- the copy -->\r\r\n");
+    expect(stored()).toBe(written);
+    await vi.waitFor(() => expect(files.text("page.html")).toBe(written));
+    // Read back from the file, the empty line is still there.
+    blur();
+    await vi.waitFor(() => expect(text()).toBe(shown));
+  });
+
   test("focus and blur with nothing typed, and the plugin stopping, write nothing", async () => {
     const m = await mountPage(onePage(CRLF));
     select(itemId);

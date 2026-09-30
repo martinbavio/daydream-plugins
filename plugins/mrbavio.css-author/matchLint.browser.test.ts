@@ -959,4 +959,50 @@ describe("matchLint over a sheet several pages link", () => {
       ),
     ).toEqual(["float: none in rule `.a` of `site.css` in viewport v1 restates the initial value"]);
   });
+
+  // What a rule does to what it styles is judged where it styles
+  // something: a page that links the sheet and holds no element the rule
+  // reaches has no say (matchLint.ts `Say`), so it never vetoes the
+  // finding — while a page the rule styles otherwise still acquits it.
+  test("a page the rule reaches nothing in never vetoes a restated initial, a restatement or a container query; one it styles otherwise does", async () => {
+    const without = (site: string, body: string) =>
+      testProject([
+        sharing("v1", body, site),
+        // Links site.css, and uses `.b` so no rule of it is dead.
+        sharing("v2", '<p class="b">b</p>', site),
+      ]);
+    expect(
+      await messages(without(".a { float: none; }\n.b { color: red; }", '<div class="a"></div>')),
+    ).toEqual(["float: none in rule `.a` of `site.css` in viewport v1 restates the initial value"]);
+    expect(
+      await messages(
+        without(
+          ".a { color: red; }\n.x .a { color: red; }\n.b { color: blue; }",
+          '<div class="x"><div class="a"></div></div>',
+        ),
+      ),
+    ).toEqual([
+      "color: red in rule `.x .a` of `site.css` in viewport v1 restates rule `.a` for every element it reaches; remove it from `.x .a`",
+    ]);
+    expect(
+      await messages(
+        without(
+          "@container (min-width: 300px) { .a { color: red; } }\n.b { color: blue; }",
+          '<div class="a"></div>',
+        ),
+      ),
+    ).toEqual([
+      "container query `@container (min-width: 300px)` in rule `.a` of `site.css` in viewport v1 can never match: no ancestor of an element it matches declares container-type",
+    ]);
+    // v2's `.a` is an open dialog, which the UA sheet positions: there
+    // the rule's `position: static` is the override the page needs.
+    expect(
+      await messages(
+        testProject([
+          sharing("v1", '<div class="a"></div>', ".a { position: static; }"),
+          sharing("v2", '<dialog open class="a">d</dialog>', ".a { position: static; }"),
+        ]),
+      ),
+    ).toEqual([]);
+  });
 });

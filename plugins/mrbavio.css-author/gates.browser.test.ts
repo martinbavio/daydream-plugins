@@ -26,7 +26,7 @@ import {
 } from "@daydream/plugin-testing";
 
 import activate, { NECESSITY_GATE, STATIC_GATE } from "./index";
-import { pagesOf } from "./testPages.test-support";
+import { pagesOf, withSheets } from "./testPages.test-support";
 
 /** What the real manifest declares of gates (the manifests test pins the
  * file itself; a JSON import needs a compiler flag the plugins do not
@@ -405,8 +405,10 @@ describe("css-author gates at a finalize, over the page about to be written", ()
     const project = testProject([
       createPageItem({ html: HTML, css: ".a { color: red }\n" }, { id: "old" }),
     ]);
+    // Its own sheet, brand-new.css: a sheet old.html links too is judged
+    // apart (the describe below).
     const pageOf = (css: string) =>
-      testProject([createPageItem({ html: HTML, css }, { id: "old" })]).pages[0]!;
+      testProject([createPageItem({ html: HTML, css }, { id: "brand-new" })]).pages[0]!;
     // Clean: no file holds brand-new.html, and neither gate refuses it or
     // throws.
     const clean = pageOf(".a { color: blue }\n");
@@ -463,5 +465,192 @@ describe("css-author gates at a finalize, over the page about to be written", ()
       ["blocking", undefined, 1, "color"],
     ]);
     expect(document.querySelectorAll("iframe")).toHaveLength(0);
+  });
+});
+
+// A sheet several pages link, judged where the document shows only some
+// of them (pageSheets.ts `unjudgedLinks`): at a finalize the document is
+// the one page about to be written, and under `lint {viewportIds}` the
+// named viewports. A rule another page may use is never a refusal there
+// — nothing in the draft could satisfy one without breaking that page —
+// but one advisory per sheet naming the pages; a flaw of the page's own
+// sheet, or one its text shows, is still refused.
+describe("css-author gates over a sheet pages outside the judged document link", () => {
+  const SITE = ".home { color: red; }\n.about { color: blue; }\n";
+
+  /** Viewport `id` of page `<id>.html`, linking `site.css` and, if
+   * given, a sheet of its own (`<id>.css`). */
+  function sharing(id: string, body: string, own?: string) {
+    const link = (href: string) => `<link rel="stylesheet" href="${href}">`;
+    return withSheets(
+      createPageItem(
+        {
+          html: `<!doctype html><html><head>${link("site.css")}${own === undefined ? "" : link(`${id}.css`)}</head><body>${body}</body></html>`,
+        },
+        { id, frame: { width: 960 } },
+      ),
+      [
+        { source: { file: "site.css" }, text: SITE, readOnly: false },
+        ...(own === undefined
+          ? []
+          : [{ source: { file: `${id}.css` }, text: own, readOnly: false }]),
+      ],
+    );
+  }
+
+  /** home.html (`.home`, and its own home.css) and about.html (`.about`),
+   * both linking site.css. */
+  function site(): TestProject {
+    return testProject([
+      sharing("home", '<div class="home">h</div>', ".home { padding: 4px; }\n"),
+      sharing("about", '<div class="about">a</div>'),
+    ]);
+  }
+
+  /** The gates as a finalize runs them (kernel src/ai/draftFinalize.ts):
+   * `project` in the store, the document one viewport showing `path`,
+   * its `pages` that path alone, and `ctx.page` answering `candidate`
+   * for it and the store's page for every other. */
+  async function finalizing(
+    id: string,
+    project: TestProject,
+    path: string,
+    candidate: TestProject["pages"][number],
+  ): Promise<Finding[]> {
+    kernel.store.loadProject(project);
+    const viewport = project.document.canvases[0]!.items[0]! as DreamViewport;
+    return gates().get(id)!.run(
+      {
+        version: 8,
+        pages: [{ path }],
+        canvases: [
+          {
+            id: "finalize",
+            name: "First Canvas",
+            items: [{ ...viewport, payload: { ...viewport.payload, page: path } }],
+          },
+        ],
+      },
+      gateContext({
+        page: (p) => (p === path ? { ...candidate, path } : kernel.dd.page(p)),
+      }),
+    );
+  }
+
+  /** The gates as `lint {viewportIds}` runs them (kernel src/ai/gates.ts
+   * `runGates`): the document narrowed to the named viewports, its pages
+   * the project's, and the ids in the context. */
+  async function narrowed(
+    id: string,
+    project: TestProject,
+    viewportIds: string[],
+  ): Promise<Finding[]> {
+    kernel.store.loadProject(project);
+    const doc = project.document;
+    return gates().get(id)!.run(
+      {
+        ...doc,
+        canvases: [
+          {
+            ...doc.canvases[0]!,
+            items: doc.canvases[0]!.items.filter((item) => viewportIds.includes(item.id)),
+          },
+        ],
+      },
+      gateContext({ page: pagesOf(project), viewportIds }),
+    );
+  }
+
+  const said = (findings: Finding[]) => findings.map((f) => [f.severity, f.message]);
+
+  const ABOUT_STATIC = (where: string, pages: string) =>
+    `rule \`.about\` of \`site.css\` matches no element in viewport ${where}; ${pages} too and ${pages.startsWith("pages") ? "were" : "was"} not judged, so it is not refused`;
+  const ABOUT_NECESSITY = (where: string, pages: string) =>
+    `declaration \`color: blue\` in \`.about\` of \`site.css\` changes nothing in viewport ${where}; ${pages} too and ${pages.startsWith("pages") ? "were" : "was"} not judged, so it is not refused`;
+
+  test("over the whole project, a rule of the shared sheet each page uses is no finding", async () => {
+    const project = site();
+    expect(await judge(STATIC_GATE, project)).toEqual([]);
+    expect(await judge(NECESSITY_GATE, project)).toEqual([]);
+  });
+
+  test("a rework's finalize is not refused for a rule of the shared sheet only another page uses; a dead rule of the page's own sheet still is", async () => {
+    const project = site();
+    const stored = project.pages.find((p) => p.path === "home.html")!;
+    const candidate = {
+      ...stored,
+      html: stored.html.replace(">h<", ">home, edited<"),
+      sheets: stored.sheets.map((sheet) =>
+        "file" in sheet.source && sheet.source.file === "home.css"
+          ? { ...sheet, text: ".home { padding: 4px; }\n.gone { color: red; }\n" }
+          : sheet,
+      ),
+    };
+    expect(said(await finalizing(STATIC_GATE, project, "home.html", candidate))).toEqual([
+      ["blocking", "rule `.gone` of `home.css` in viewport home matches no element"],
+      ["advisory", ABOUT_STATIC("home", "page `about.html` links `site.css`")],
+    ]);
+    const necessity = await finalizing(NECESSITY_GATE, project, "home.html", candidate);
+    expect(necessity.map((f) => [f.severity, f.rule, f.property])).toEqual([
+      ["blocking", 3, "color"],
+      ["advisory", undefined, undefined],
+    ]);
+    expect(necessity[1]!.message).toBe(
+      ABOUT_NECESSITY("home", "page `about.html` links `site.css`"),
+    );
+    expect(document.querySelectorAll("iframe")).toHaveLength(0);
+  });
+
+  test("a new page linking the shared sheet is not refused for the rules the pages already there use", async () => {
+    const project = site();
+    const about = project.pages.find((p) => p.path === "about.html")!;
+    // A page no file holds yet: `.about`'s markup under another path.
+    const fresh = { ...about, path: "new.html" };
+    const pages = "pages `home.html` and `about.html` link `site.css`";
+    expect(said(await finalizing(STATIC_GATE, project, "new.html", fresh))).toEqual([
+      [
+        "advisory",
+        `rule \`.home\` of \`site.css\` matches no element in viewport home; ${pages} too and were not judged, so it is not refused`,
+      ],
+    ]);
+    expect(said(await finalizing(NECESSITY_GATE, project, "new.html", fresh))).toEqual([
+      [
+        "advisory",
+        `declaration \`color: red\` in \`.home\` of \`site.css\` changes nothing in viewport home; ${pages} too and were not judged, so it is not refused`,
+      ],
+    ]);
+  });
+
+  test("`lint {viewportIds}` of one page is not refused for a rule of the shared sheet another page uses", async () => {
+    const project = site();
+    expect(said(await narrowed(STATIC_GATE, project, ["home"]))).toEqual([
+      ["advisory", ABOUT_STATIC("home", "page `about.html` links `site.css`")],
+    ]);
+    expect(said(await narrowed(NECESSITY_GATE, project, ["home"]))).toEqual([
+      ["advisory", ABOUT_NECESSITY("home", "page `about.html` links `site.css`")],
+    ]);
+  });
+
+  test("what the shared sheet's text shows is still refused, and a font face another page names is used", async () => {
+    const project = testProject([
+      sharing("home", '<div class="home">h</div>'),
+      // about.html names the face through its own style.
+      sharing("about", '<div class="about" style="font-family: Brand">a</div>'),
+    ]);
+    const home = project.pages.find((p) => p.path === "home.html")!;
+    const candidate = {
+      ...home,
+      sheets: home.sheets.map((sheet) => ({
+        ...sheet,
+        text: `@font-face { font-family: Brand; src: local(Arial); }\n${SITE}.home { width: 100; }\n`,
+      })),
+    };
+    expect(said(await finalizing(STATIC_GATE, project, "home.html", candidate))).toEqual([
+      [
+        "blocking",
+        "width: 100 in rule `.home` of `site.css` has no unit; a length needs one (px, rem, %, …)",
+      ],
+      ["advisory", ABOUT_STATIC("home", "page `about.html` links `site.css`")],
+    ]);
   });
 });

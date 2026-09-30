@@ -231,7 +231,12 @@ export function createHtmlEditor(options: HtmlEditorOptions): HtmlEditorHandle {
       EditorView.updateListener.of((update) => {
         for (const tr of update.transactions) {
           if (!tr.docChanged || tr.annotation(storeSync) !== undefined) continue;
-          breaks = spliceBreaks(breaks, breakEdits(tr), eol);
+          breaks = spliceBreaks(
+            breaks,
+            breakEdits(tr),
+            eol,
+            (line) => tr.newDoc.line(line + 1).length === 0,
+          );
         }
       }),
       html({ matchClosingTags: true, autoCloseTags: true }),

@@ -20,13 +20,25 @@
 // agent knows which file to edit: the project file, the page's `<style>`
 // block, or the remote url.
 //
-// A MOUNTED copy (`dd.mountViewport`) holds one `<style>` per LIVE sheet,
-// in cascade order — never a disabled one, its text the face's own (its
-// `@import`s out, its urls routed, under its `media`). `writtenRules`
-// pairs each with the page sheet it renders, by its rules' selectors and
-// declarations, so a lint that reads the copy names and numbers a rule
-// as the page's text has it; a copy it cannot pair is never a finding's
-// subject. DOM-free.
+// A MOUNTED copy (the gate's mount, `ctx.mountViewport`, the live face)
+// holds one `<style>` per LIVE sheet, in cascade order — never a disabled
+// one, its text the face's own (its `@import`s out, its urls routed,
+// under its `media`). `writtenRules` pairs each with the page sheet it
+// renders, by its rules' selectors and declarations, so a lint that reads
+// the copy names and numbers a rule as the page's text has it; a copy it
+// cannot pair is never a finding's subject.
+//
+// A SHEET PAGES THE LINT DID NOT JUDGE LINK TOO (`unjudgedLinks`): the
+// judged document is narrower than the project at a finalize (one
+// viewport, the page about to be written), under `lint {viewportIds}`,
+// and for a page no viewport shows. What a lint finds of a rule of such
+// a sheet by what the judged pages render — that it matches nothing,
+// that a line changes nothing, restates the initial or a rule beneath,
+// or asks a container no ancestor is — may be false of a page it never
+// mounted, and no fix in the draft could satisfy it without breaking
+// that page. So such a finding is advisory, naming the pages
+// (`unjudgedClause`), and the "nothing here uses it" ones are folded to
+// one per sheet (`unjudgedNote`). DOM-free.
 
 import type {
   CoreApi,
@@ -35,6 +47,7 @@ import type {
   DreamDocument,
   DreamPage,
   DreamViewport,
+  Finding,
 } from "@daydream/plugin-api";
 
 import { sheetRules, type PageRule } from "./pageCss";
@@ -111,6 +124,107 @@ export function sheetKey(page: Page, sheet: number): string {
   if ("file" in source) return `file\u0000${source.file}`;
   if ("url" in source) return `url\u0000${source.url}`;
   return `style\u0000${page.path}\u0000${source.style}`;
+}
+
+/** The open project's pages by path, as the gate knows them beside the
+ * document it judges (`dd.document().pages`): at a finalize the judged
+ * document lists the page about to be written alone. */
+export type ProjectPaths = readonly string[];
+
+/**
+ * The pages a lint did NOT judge that link each sheet, by `sheetKey` —
+ * every page of the project (`project`, and the judged document's own
+ * `pages`) but the ones `judged` names, each read through the gate's
+ * `ctx.page` — in the project's order. The judged document is narrower
+ * than the project at a finalize (the one page about to be written),
+ * under `lint {viewportIds}`, and for a page no viewport shows; so a
+ * rule of a sheet such a page links can be used there and nowhere the
+ * lint looked. A `<style>` block is its own page's alone, and never
+ * listed.
+ */
+export function unjudgedLinks(
+  doc: DeepReadonly<DreamDocument>,
+  pageOf: PageOf,
+  project: ProjectPaths,
+  judged: ReadonlySet<string>,
+): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const paths = new Set([...project, ...doc.pages.map((entry) => entry.path)]);
+  for (const path of paths) {
+    if (judged.has(path)) continue;
+    const page = pageOf(path);
+    if (page === undefined) continue;
+    page.sheets.forEach((sheet, index) => {
+      if ("style" in sheet.source) return;
+      const key = sheetKey(page, index);
+      const list = out.get(key) ?? [];
+      if (!list.includes(path)) list.push(path);
+      out.set(key, list);
+    });
+  }
+  return out;
+}
+
+/** `\`a\``, `\`a\` and \`b\``, `\`a\`, \`b\` and \`c\``; past `cap`,
+ * the rest counted: `\`a\`, \`b\`, \`c\` and 2 more`. */
+export function listText(names: readonly string[], cap = Infinity): string {
+  const shown = names.slice(0, cap);
+  const rest = names.length - shown.length;
+  if (rest > 0) return `${shown.join(", ")} and ${rest} more`;
+  if (shown.length < 2) return shown.join("");
+  return `${shown.slice(0, -1).join(", ")} and ${shown.at(-1)}`;
+}
+
+/** `page \`a.html\``, or `pages \`a.html\` and \`b.html\``. */
+export function pagesText(paths: readonly string[]): string {
+  const named = [...new Set(paths)].map((path) => `\`${path}\``);
+  return `${named.length === 1 ? "page" : "pages"} ${listText(named, UNJUDGED_NAMED)}`;
+}
+
+/** How many pages, rules or viewports an advisory about an unjudged
+ * page names before it counts the rest. */
+export const UNJUDGED_NAMED = 3;
+
+/** `viewport a`, or `viewports a and b`: where a lint judged. */
+export function viewportsText(ids: readonly string[]): string {
+  return `${ids.length === 1 ? "viewport" : "viewports"} ${listText(ids, UNJUDGED_NAMED)}`;
+}
+
+/**
+ * The advisory a lint answers instead of refusals for what it found of
+ * rules of `sheet` — `count` of them, named in `subject` (`rules \`.a\`
+ * and \`.b\``) — that pages it did not judge link too (`pages`,
+ * `unjudgedLinks`): that a rule matches no element, or a declaration
+ * changes nothing, where the lint looked (`found`: `match no element in
+ * viewport home`) says nothing of a page it never mounted. One per
+ * sheet, so a site-wide sheet whose rules each serve one page is one
+ * line at a finalize, not one per rule.
+ */
+export function unjudgedNote(
+  tier: string,
+  sheet: string,
+  subject: string,
+  found: string,
+  pages: readonly string[],
+  count: number,
+): Finding {
+  return {
+    tier,
+    severity: "advisory",
+    message: `${subject} of ${sheet} ${found}${unjudgedClause(sheet, pages, count)}`,
+  };
+}
+
+/** What a finding about a rule of `sheet` adds when pages the lint did
+ * not judge link `sheet` too, so it is advisory: which pages, and why
+ * `count` findings are not refusals. */
+export function unjudgedClause(
+  sheet: string,
+  pages: readonly string[],
+  count = 1,
+): string {
+  const one = new Set(pages).size === 1;
+  return `; ${pagesText(pages)} ${one ? "links" : "link"} ${sheet} too and ${one ? "was" : "were"} not judged, so ${count === 1 ? "it is" : "they are"} not refused`;
 }
 
 /** What a finding calls a mounted sheet no sheet of the page renders. */

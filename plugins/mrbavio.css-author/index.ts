@@ -11,7 +11,10 @@
 // its `draft_finalize`, before its files are written, a blocking finding
 // refusing the write (decision #78). Each lint reads, and mounts, the
 // page the gate is handed (`ctx.page`, `ctx.mountViewport`: at a
-// finalize, the page about to be written; pageMount.ts). The lints: the
+// finalize, the page about to be written; pageMount.ts), and knows the
+// project's other pages (`dd.document().pages`): what a lint finds of a
+// rule of a sheet a page it did not judge links too is advisory, never a
+// refusal (pageSheets.ts `unjudgedLinks`). The lints: the
 // static lint (staticLint.ts's facts from the texts, a stray `;` that
 // drops a rule among them, plus matchLint.ts's match-dependent ones: an
 // explicit initial value the page computes without, redundancy — an
@@ -36,6 +39,7 @@ import type { DaydreamApi } from "@daydream/plugin-api";
 
 import { matchLint } from "./matchLint";
 import { NECESSITY_BUDGET_MS, necessityLint } from "./necessity";
+import type { ProjectPaths } from "./pageSheets";
 import { staticLint } from "./staticLint";
 
 /** The two gate ids; the runner's dedupe (src/ai/gates.ts) names the same
@@ -51,10 +55,13 @@ export default function activate(dd: DaydreamApi): void {
     // shares with necessity.ts, pageMount.ts), so the static gate's run is
     // async here too. Each reads a viewport's page through the context,
     // and mounts it through the context too, never `dd.mountViewport`.
-    run: async (doc, ctx) => [
-      ...staticLint(dd.core, doc, ctx.page),
-      ...(await matchLint(dd.core, doc, ctx)),
-    ],
+    run: async (doc, ctx) => {
+      const project = projectPaths(dd);
+      return [
+        ...staticLint(dd.core, doc, ctx.page, project),
+        ...(await matchLint(dd.core, doc, ctx, project)),
+      ];
+    },
   });
   dd.registerGate({
     id: NECESSITY_GATE,
@@ -63,6 +70,15 @@ export default function activate(dd: DaydreamApi): void {
     run: (doc, ctx) =>
       necessityLint(dd.core, doc, ctx, {
         deadline: Date.now() + NECESSITY_BUDGET_MS,
+        project: projectPaths(dd),
       }),
   });
+}
+
+/** The open project's pages by path: beside the judged document's own,
+ * which at a finalize lists the page about to be written alone, the
+ * pages a lint must not judge a shared sheet without (pageSheets.ts
+ * `unjudgedLinks`). Each is read through the gate's `ctx.page`. */
+function projectPaths(dd: DaydreamApi): ProjectPaths {
+  return dd.document().pages.map((entry) => entry.path);
 }

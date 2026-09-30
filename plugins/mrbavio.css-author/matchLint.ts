@@ -85,6 +85,19 @@
 // two stops the walk — and measures each restatement the same way: the
 // rule's line cut from the copy's css, every element it reaches read.
 //
+// A SHEET SEVERAL PAGES LINK is one sheet: a rule finding is said once,
+// and holds only where every judged viewport with a say finds it — for a
+// dead rule, each one its conditions hold in (one page matching the rule
+// acquits it: the INTERSECTION of the dead verdicts); for a restated
+// initial, a restatement or a container query, each one the rule
+// reaches an element in (what a rule does to what it styles is judged
+// where it styles something, and a page it styles nothing in has no
+// say: never a veto). A page the judged document does not show — every
+// other page at a finalize, the rest under `lint {viewportIds}`, a page
+// no viewport shows — was never mounted, so a finding about a rule of a
+// sheet it links is advisory, naming it, and the dead rules of such a
+// sheet are one advisory (pageSheets.ts `unjudgedLinks`).
+//
 // A selector member's trailing `::pseudo-element` has no element for
 // `Element.matches` to test, so every match strips it first
 // (pageCss.ts `trailingPseudoElement`) and keeps its name for the
@@ -139,8 +152,15 @@ import {
   type TextRange,
 } from "./pageMount";
 import {
+  listText,
   readSheets,
   shownPages,
+  unjudgedClause,
+  unjudgedLinks,
+  unjudgedNote,
+  UNJUDGED_NAMED,
+  viewportsText,
+  type ProjectPaths,
   type Viewport,
   type WrittenRule,
 } from "./pageSheets";
@@ -177,29 +197,53 @@ interface MountedPage {
 }
 
 /** What a rule finding says of which rule: the rule across pages (its
- * sheet's `sheetKey` and its place there) and the finding's identity. */
+ * sheet's `sheetKey` and its place there), the finding's identity, which
+ * viewports have a say in it (`Say`), and its sheet — its key and its
+ * name — and its rule's name, for an advisory about pages not judged. */
 interface RuleSubject {
   rule: string;
   id: string;
+  say: Say;
+  key: string;
+  sheet: string;
+  name: string;
+}
+
+/** Which viewports have a say in a rule finding: `applies`, every one
+ * where the rule's `@media` and `@supports` hold (a dead rule: one page
+ * matching it acquits it); `reaches`, every one where it reaches an
+ * element (a restated initial, a restatement, a container query: said of
+ * what the rule styles, so a page it styles nothing in has nothing to
+ * say, and never vetoes what the pages it styles find). */
+type Say = "applies" | "reaches";
+
+/** The rule across pages: its sheet's `sheetKey` and its place there. */
+function ruleKey({ key, at }: WrittenRule): string {
+  return `${key}\u0000${at}`;
 }
 
 /** Push a finding whose subject is the rule at `index` of the copy,
  * `what` saying what it finds of it (the kind and the declaration), so
  * the lint can tell the same finding in every page that links the rule's
  * sheet (`matchLint`). */
-function ruleKey({ key, at }: WrittenRule): string {
-  return `${key}\u0000${at}`;
-}
-
 function ruleFinding(
   read: MountedPage,
   index: number,
   what: string,
+  say: Say,
   finding: Finding,
   findings: Finding[],
 ): void {
-  const rule = ruleKey(read.written[index]!);
-  read.about.set(finding, { rule, id: `${rule}\u0000${what}` });
+  const written = read.written[index]!;
+  const rule = ruleKey(written);
+  read.about.set(finding, {
+    rule,
+    id: `${rule}\u0000${what}`,
+    say,
+    key: written.key,
+    sheet: written.sheet,
+    name: ruleName(written.written),
+  });
   findings.push(finding);
 }
 
@@ -214,23 +258,30 @@ function ruleFinding(
  * does not hold is skipped (the static lint reports it).
  * A finding about a rule of a sheet several mounted pages link — a dead
  * rule, a restated initial, a restatement, a container query — holds
- * only when every viewport the rule applies in finds it (a rule one page
- * matches is not dead because another does not), and is said once, from
- * the first.
+ * only when every viewport with a say in it finds it (`Say`: a rule one
+ * page matches is not dead because another does not, and a line that
+ * restates the initial wherever the rule styles an element is not
+ * acquitted by a page it styles nothing in), and is said once, from the
+ * first. One of a sheet a page the lint did not judge links too
+ * (`project`, the project's pages; pageSheets.ts `unjudgedLinks`) is
+ * advisory, naming those pages, and the dead rules of each such sheet
+ * are one advisory, after the rest.
  * Empty when nothing in the mounted pages disagrees with their css. */
 export async function matchLint(
   core: CoreApi,
   doc: DeepReadonly<DreamDocument>,
   ctx: MountContext,
+  project: ProjectPaths = [],
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
   /** Each rule finding's identity → the viewports that found it; each
-   * editable rule → the viewports it applies in (its conditions hold
-   * there); the finding kept. */
+   * editable rule, by what gives a viewport a say (`Say`) → the
+   * viewports that have one; the finding kept. */
   const found = new Map<string, number>();
-  const applied = new Map<string, number>();
+  const says = new Map<string, number>();
   const kept = new Map<Finding, RuleSubject>();
-  for (const { viewport, page } of shownPages(core, doc, ctx.page).shown) {
+  const { shown } = shownPages(core, doc, ctx.page);
+  for (const { viewport, page } of shown) {
     // Every question here is about a rule or a restated initial, so a
     // page with neither has nothing to ask and pays for no mount.
     const stored = core.parsePage(page.html);
@@ -273,16 +324,20 @@ export async function matchLint(
       lintRuleRestatements(read, ranked, local);
       lintDeadRules(read, local);
       lintContainerQueries(read, local);
-      const rules = new Set(
-        read.rules
-          .filter(
-            (rule) =>
-              judgeable(read, rule.index) &&
-              conditionsHold(mdoc, rule.conditions),
-          )
-          .map((rule) => ruleKey(read.written[rule.index]!)),
-      );
-      for (const rule of rules) applied.set(rule, (applied.get(rule) ?? 0) + 1);
+      const say = new Set<string>();
+      for (const rule of read.rules) {
+        if (!judgeable(read, rule.index)) continue;
+        if (conditionsHold(mdoc, rule.conditions)) {
+          say.add(`applies\u0000${ruleKey(read.written[rule.index]!)}`);
+        }
+      }
+      for (const matches of ranked.values()) {
+        for (const { index } of matches) {
+          if (!judgeable(read, index)) continue;
+          say.add(`reaches\u0000${ruleKey(read.written[index]!)}`);
+        }
+      }
+      for (const key of say) says.set(key, (says.get(key) ?? 0) + 1);
       const ids = new Set<string>();
       for (const finding of local) {
         const about = read.about.get(finding);
@@ -300,13 +355,69 @@ export async function matchLint(
       }
     });
   }
-  return findings.filter((finding) => {
+  const held = findings.filter((finding) => {
     const about = kept.get(finding);
     return (
       about === undefined ||
-      (found.get(about.id) ?? 0) >= (applied.get(about.rule) ?? 0)
+      (found.get(about.id) ?? 0) >=
+        (says.get(`${about.say}\u0000${about.rule}`) ?? 0)
     );
   });
+  return unjudged(
+    held,
+    kept,
+    unjudgedLinks(doc, ctx.page, project, new Set(shown.map(({ page }) => page.path))),
+    shown.map(({ viewport }) => viewport.id),
+  );
+}
+
+/** Each held finding about a rule of a sheet a page not judged links too
+ * (`outside`, pageSheets.ts `unjudgedLinks`) made advisory, naming those
+ * pages; the dead rules among them — what the judged pages do not use
+ * says nothing of a page that was not mounted — folded to one advisory
+ * per sheet, after the rest (`unjudgedNote`), naming the viewports that
+ * were judged (`viewports`). */
+function unjudged(
+  held: readonly Finding[],
+  kept: ReadonlyMap<Finding, RuleSubject>,
+  outside: ReadonlyMap<string, string[]>,
+  viewports: readonly string[],
+): Finding[] {
+  const out: Finding[] = [];
+  const dead = new Map<string, { sheet: string; names: string[] }>();
+  for (const finding of held) {
+    const about = kept.get(finding);
+    const pages = about === undefined ? undefined : outside.get(about.key);
+    if (about === undefined || pages === undefined) {
+      out.push(finding);
+      continue;
+    }
+    if (about.id.endsWith("\u0000dead")) {
+      const fold = dead.get(about.key) ?? { sheet: about.sheet, names: [] };
+      fold.names.push(about.name);
+      dead.set(about.key, fold);
+      continue;
+    }
+    out.push({
+      ...finding,
+      severity: "advisory",
+      message: `${finding.message}${unjudgedClause(about.sheet, pages)}`,
+    });
+  }
+  for (const [key, { sheet, names }] of dead) {
+    const one = names.length === 1;
+    out.push(
+      unjudgedNote(
+        "static",
+        sheet,
+        `${one ? "rule" : "rules"} ${listText(names, UNJUDGED_NAMED)}`,
+        `${one ? "matches" : "match"} no element in ${viewportsText(viewports)}`,
+        outside.get(key)!,
+        names.length,
+      ),
+    );
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -568,6 +679,7 @@ function lintRestatedInitials(
       read,
       rule.index,
       `initial\u0000${declaration.property}\u0000${declaration.value}`,
+      "reaches",
       {
         tier: "static",
         severity: "blocking",
@@ -664,6 +776,7 @@ function lintRuleRestatements(
       read,
       hit.rule,
       `restates\u0000${hit.property}\u0000${hit.value}`,
+      "reaches",
       {
         tier: "static",
         severity: "blocking",
@@ -741,6 +854,7 @@ function lintDeadRules(read: MountedPage, findings: Finding[]): void {
       read,
       rule.index,
       "dead",
+      "applies",
       {
         tier: "static",
         severity: "blocking",
@@ -835,7 +949,7 @@ function lintContainerQueries(read: MountedPage, findings: Finding[]): void {
           ? "declares container-type"
           : "declares container-type: scroll-state"
         : `declares a container named \`${name}\``;
-      ruleFinding(read, rule.index, `container\u0000${condition}`, {
+      ruleFinding(read, rule.index, `container\u0000${condition}`, "reaches", {
         tier: "static",
         severity: "blocking",
         rule: written.rule,

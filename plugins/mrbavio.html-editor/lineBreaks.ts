@@ -5,7 +5,9 @@
  * is the author's, and a save writes it as typed (decision #78). So the
  * editor keeps each break of the file as the file writes it, in order,
  * and puts them back: an edit changes only the breaks it removes or
- * types, a typed one written as the file writes most of its own. Offsets
+ * types, a typed one written as the file writes most of its own — save
+ * where it would fuse with a lone `\r` into one `\r\n` (`spliceBreaks`),
+ * so the file always reads back as the lines the editor shows. Offsets
  * go between the two texts the same way: the kernel's (`dd.pageSource`,
  * `dd.pageElementAt`) are the file's.
  *
@@ -65,16 +67,38 @@ export interface BreakEdit {
 }
 
 /** The breaks after `edits`, each by the lines of the text before any of
- * them (a transaction's changes), in order. */
+ * them (a transaction's changes), in order; `empty(line)` says whether
+ * line `line` (from 0) of the text after them is empty.
+ *
+ * A lone `\r` then a `\n` with nothing between them read back as ONE
+ * `\r\n`: the file would hold a line fewer than the editor shows, the
+ * keystroke lost and the empty line gone at the next read. No file read
+ * holds that pair, so an edit made it — a break typed beside the other,
+ * or the line between them emptied — and the break the edit typed is
+ * written as `\r\n` instead (`\r` then `\r\n`, or `\r\n` then `\n`,
+ * each two breaks read back); with neither typed, the `\n`, so a break
+ * the file holds is never the one rewritten when one typed could be. */
 export function spliceBreaks(
   breaks: readonly string[],
   edits: readonly BreakEdit[],
   eol: string,
+  empty: (line: number) => boolean,
 ): string[] {
   const out = breaks.slice();
+  const typed = new Set<number>();
+  let shift = 0;
+  for (const { at, removed, added } of edits) {
+    for (let k = 0; k < added; k++) typed.add(at + shift + k);
+    shift += added - removed;
+  }
   for (let k = edits.length - 1; k >= 0; k--) {
     const { at, removed, added } = edits[k]!;
     out.splice(at, removed, ...new Array<string>(added).fill(eol));
+  }
+  // Break `k - 1` ends line `k`'s start; break `k` its end.
+  for (let k = 1; k < out.length; k++) {
+    if (out[k - 1] !== "\r" || out[k] !== "\n" || !empty(k)) continue;
+    out[typed.has(k - 1) && !typed.has(k) ? k - 1 : k] = "\r\n";
   }
   return out;
 }

@@ -111,6 +111,15 @@
 //    in the first viewport.
 //    So a declaration found live in one viewport is answered: a later
 //    viewport where it reads dead at the frame sweeps nothing for it.
+//    A viewport the rule styles nothing in reads its line dead, and so
+//    never acquits it: what makes a line live is a page it changes.
+//    The pages judged are the document's, and the document is narrower
+//    than the project at a finalize (the one page about to be written),
+//    under `lint {viewportIds}`, and for a page no viewport shows; a
+//    rule's line of a sheet such a page links too was never read where
+//    that page renders it, so it is no refusal: the dead lines of each
+//    such sheet are one advisory naming the pages (pageSheets.ts
+//    `unjudgedLinks`, `unjudgedNote`).
 //
 // Cost model: one write, one read, one restore per declaration, where the
 // read walks every element and stops at the first difference — so LIVE
@@ -157,10 +166,16 @@ import {
   type TextRange,
 } from "./pageMount";
 import {
+  listText,
   readSheets,
   shownPages,
+  UNJUDGED_NAMED,
+  unjudgedLinks,
+  unjudgedNote,
+  viewportsText,
   type Page,
   type PageOf,
+  type ProjectPaths,
   type ReadSheets,
   type Shown,
   type Viewport,
@@ -176,6 +191,10 @@ export interface NecessityOptions {
    * no probe the time left could not see through (rule 2). Default: no
    * bound. */
   deadline?: number;
+  /** The open project's pages by path (`dd.document().pages`), beside
+   * the document's own: a dead line of a sheet one of them links, and no
+   * judged viewport shows, is not refused (rule 3). Default: none. */
+  project?: ProjectPaths;
 }
 
 /** How long the necessity gate gives itself: the runner stops a gate
@@ -226,13 +245,27 @@ export async function necessityLint(
   const perViewport: Candidate[][] = [];
   const notes: Finding[] = [];
   const live = new Set<string>();
-  for (const shown of selectViewports(core, doc, ctx.page, options.viewportIds)) {
+  const selected = selectViewports(core, doc, ctx.page, options.viewportIds);
+  for (const shown of selected) {
     const judged = await lintViewport(core, ctx, shown, live, options.deadline);
     perViewport.push(judged.candidates);
     notes.push(...judged.notes);
     for (const c of judged.candidates) if (!c.dead) live.add(c.key);
   }
-  return [...intersect(perViewport), ...notes];
+  const outside = unjudgedLinks(
+    doc,
+    ctx.page,
+    options.project ?? [],
+    new Set(selected.map(({ page }) => page.path)),
+  );
+  return [
+    ...intersect(
+      perViewport,
+      outside,
+      selected.map(({ viewport }) => viewport.id),
+    ),
+    ...notes,
+  ];
 }
 
 /** The document's viewports with their pages, or the named subset in
@@ -284,6 +317,10 @@ interface Candidate {
    * declaration dead at every width it did read (rule 2). */
   unswept: number[];
   finding: Finding;
+  /** A rule's declaration: its sheet across pages (`sheetKey`) and by
+   * name, and the line as a note about pages not judged names it (rule
+   * 3). */
+  sheet?: { key: string; name: string; line: string };
 }
 
 /** A mounted page prepared for removals. */
@@ -539,6 +576,7 @@ async function judgeAll(
     declaration: CssDeclaration;
     removal: At[];
     unjudged: boolean;
+    sheet?: Candidate["sheet"];
   }[] = [];
   const record = (
     key: string,
@@ -546,8 +584,16 @@ async function judgeAll(
     declaration: CssDeclaration,
     removal: At[],
     unjudged: boolean,
+    sheet?: Candidate["sheet"],
   ): void => {
-    judged.push({ key, element, declaration, removal, unjudged });
+    judged.push({
+      key,
+      element,
+      declaration,
+      removal,
+      unjudged,
+      ...(sheet === undefined ? {} : { sheet }),
+    });
   };
 
   // An element's own declarations, paired with the certain rules
@@ -585,7 +631,7 @@ async function judgeAll(
   // keyed across viewports (rule 3) as its sheet writes it, in that sheet.
   const occurrences = new Map<string, number>();
   rules.forEach((rule, r) => {
-    const { written, key, editable } = prepared.written[r]!;
+    const { written, key, editable, sheet } = prepared.written[r]!;
     const shape = `${key}\u0000${[...written.parents, written.prelude].join(" › ")}\u0000${written.conditions.join("\u0000")}`;
     const occurrence = occurrences.get(shape) ?? 0;
     occurrences.set(shape, occurrence + 1);
@@ -619,6 +665,13 @@ async function judgeAll(
           removal.push({ node, at: k });
         }
       }
+      // Named as the page writes it, as the finding names it.
+      const as = written.declarations[at];
+      const line = `\`${declaration.property}: ${
+        as !== undefined && as.property === declaration.property
+          ? shown(as)
+          : shown(declaration)
+      }\` in ${ruleName(written)}`;
       record(
         `\u0001${shape}\u0000${occurrence}\u0000${declaration.property}`,
         false,
@@ -626,12 +679,13 @@ async function judgeAll(
         removal,
         isImageSizing(declaration.property) &&
           reached[r]!.some((node) => unloaded[node]),
+        { key, name: sheet, line },
       );
     });
   });
 
   const candidates: Candidate[] = [];
-  for (const { key, element, declaration, removal, unjudged } of judged) {
+  for (const { key, element, declaration, removal, unjudged, sheet } of judged) {
     const candidate: Candidate = {
       key,
       element,
@@ -642,6 +696,7 @@ async function judgeAll(
       dead: !unjudged && (await isDead(prepared, probe, removal)),
       unswept: [],
       finding: { tier: "necessity", severity: "blocking", message: "" },
+      ...(sheet === undefined ? {} : { sheet }),
     };
     candidate.finding = findingFor(viewport, candidate, [own], prepared.written, nameAt);
     candidates.push(candidate);
@@ -790,18 +845,39 @@ function isDead(
 /** Rule 3: dead only where dead everywhere the declaration exists. Order
  * is first appearance — the first viewport's order, then whatever later
  * viewports add — elements' own before rules', and the finding is the
- * first viewport's; advisory when some viewport's sweep was cut short. */
-function intersect(perViewport: readonly Candidate[][]): Finding[] {
+ * first viewport's; advisory when some viewport's sweep was cut short.
+ * A rule's line of a sheet a page no judged viewport shows links too
+ * (`outside`, pageSheets.ts `unjudgedLinks`) was never read where that
+ * page renders it, so it is no finding of its own: the lines of each
+ * such sheet are one advisory, after the rest, naming the pages and the
+ * viewports judged (`viewports`). */
+function intersect(
+  perViewport: readonly Candidate[][],
+  outside: ReadonlyMap<string, string[]>,
+  viewports: readonly string[],
+): Finding[] {
   const merged = new Map<
     string,
-    { dead: boolean; cut: boolean; element: boolean; finding: Finding }
+    {
+      dead: boolean;
+      cut: boolean;
+      element: boolean;
+      finding: Finding;
+      sheet: Candidate["sheet"];
+    }
   >();
   for (const candidates of perViewport) {
     for (const c of candidates) {
       const cut = c.unswept.length > 0;
       const seen = merged.get(c.key);
       if (seen === undefined) {
-        merged.set(c.key, { dead: c.dead, cut, element: c.element, finding: c.finding });
+        merged.set(c.key, {
+          dead: c.dead,
+          cut,
+          element: c.element,
+          finding: c.finding,
+          sheet: c.sheet,
+        });
       } else {
         seen.dead = seen.dead && c.dead;
         seen.cut ||= cut;
@@ -809,12 +885,35 @@ function intersect(perViewport: readonly Candidate[][]): Finding[] {
     }
   }
   const entries = [...merged.values()].filter((entry) => entry.dead);
-  return [
+  const out: Finding[] = [];
+  const unjudged = new Map<string, { name: string; lines: string[] }>();
+  for (const entry of [
     ...entries.filter((entry) => entry.element),
     ...entries.filter((entry) => !entry.element),
-  ].map((entry) =>
-    entry.cut ? { ...entry.finding, severity: "advisory" } : entry.finding,
-  );
+  ]) {
+    const { sheet } = entry;
+    if (sheet !== undefined && outside.has(sheet.key)) {
+      const fold = unjudged.get(sheet.key) ?? { name: sheet.name, lines: [] };
+      fold.lines.push(sheet.line);
+      unjudged.set(sheet.key, fold);
+      continue;
+    }
+    out.push(entry.cut ? { ...entry.finding, severity: "advisory" } : entry.finding);
+  }
+  for (const [key, { name, lines }] of unjudged) {
+    const one = lines.length === 1;
+    out.push(
+      unjudgedNote(
+        "necessity",
+        name,
+        `${one ? "declaration" : "declarations"} ${listText(lines, UNJUDGED_NAMED)}`,
+        `${one ? "changes" : "change"} nothing in ${viewportsText(viewports)}`,
+        outside.get(key)!,
+        lines.length,
+      ),
+    );
+  }
+  return out;
 }
 
 /** The finding's sentence names every width the declaration was dead at,
