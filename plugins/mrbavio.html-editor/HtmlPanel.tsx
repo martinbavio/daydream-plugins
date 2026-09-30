@@ -25,7 +25,7 @@ interface Typed {
 /** Text a save did not write, held on screen and kept per page, so a
  * refusal, a page that changed underneath, another page's selection or a
  * hidden dock never loses what was typed. Panel memory, never the
- * document. `kind` is what ⌘S goes by: a HELD draft was typed over a page
+ * project. `kind` is what ⌘S goes by: a HELD draft was typed over a page
  * that moved — it changed where the text was typed, or it left the
  * canvas — and ⌘S saves it over the page as it is now; a REFUSED one is
  * text the kernel refused, kept until it is corrected or dropped. A held
@@ -60,19 +60,27 @@ export interface PanelState {
    * is saved over the page as it is now. Never handles the key (false),
    * so it goes on to core's save. Set by the panel once mounted. */
   saveOver: () => boolean;
-  /** The document is about to be swapped, or the plugin to stop (the
+  /** The project is about to be swapped, or the plugin to stop (the
    * entry's `leave` hook): what the editor holds is saved now,
    * synchronously, into the page it was typed in, or held as its draft;
    * it never throws. Set by the panel once mounted. */
   leave: () => void;
-  /** By viewport id, of the document loaded when they were held: a
-   * page id names a page of one document only, so another load (a page
-   * of the same id in it, the same document reopened) must never show
-   * them. `load` is `dd.loadVersion()` then. Read through `draftsNow`. */
+  /** By viewport id, of the project loaded when they were held: a
+   * viewport id names a viewport of one load only, so another load (a
+   * viewport of the same id in it, the same project reopened) must never
+   * show them. `load` is `dd.loadVersion()` then. Read through
+   * `draftsNow`.
+   *
+   * Several viewports may show one page (decision #78), and a draft is
+   * still kept by the viewport it was typed in, not by the page's path:
+   * it is that pane's typing, and another viewport of the page shows the
+   * file as it is. Once a page's file can be written, a save from one is,
+   * to the other's draft, a change made elsewhere — carried onto it
+   * (`rebase`) or held, as any other is. */
   drafts: { load: number; pages: Map<string, Draft> };
 }
 
-/** The drafts held for the document loaded now: those of an earlier load
+/** The drafts held for the project loaded now: those of an earlier load
  * are dropped on the first read after it. */
 export function draftsNow(state: PanelState): Map<string, Draft> {
   const load = untrack(state.dd.loadVersion);
@@ -84,15 +92,18 @@ export function draftsNow(state: PanelState): Map<string, Draft> {
 export const APPLY_DEBOUNCE_MS = 150;
 
 /** The sentence for text typed where the page changed on the canvas
- * meanwhile (an agent, the CSS editor, a draft finalizing): nothing is
+ * meanwhile (another viewport of the page, the CSS editor): nothing is
  * written, and the typed text is kept as the page's draft. Typing
- * elsewhere in the page is carried onto the change and saved. */
+ * elsewhere in the page is carried onto the change and saved. Not said
+ * yet: until a page's file can be written (decision #78), its text
+ * changes only when the project is loaded again, which drops what is
+ * typed. */
 export const CHANGED_UNDERNEATH =
   "The page's HTML changed on the canvas where you were typing, so nothing was saved. Your text is kept here: ⌘S saves it over the page as it is now, and ⌘Z drops it.";
 
 /** The sentence for a held draft whose page is back as the typing found
- * it: the page left the canvas mid-save and an undo or a redo brought it
- * back, or the change made under the typing was undone. */
+ * it: the viewport left the canvas mid-save and an undo or a redo brought
+ * it back, or the change made under the typing was undone. */
 export const PAGE_BACK =
   "The page left the canvas, or changed on it, while you were typing, so nothing was saved; it is back as your typing found it. Your text is kept here: ⌘S saves it over the page, and ⌘Z drops it.";
 
@@ -126,17 +137,35 @@ export function targetOf(dd: DaydreamApi, id: string | null): Target | null {
   return element === null ? null : { pageId: element.viewportId, elementId: id };
 }
 
-/** A page's stored markup, or null when it is not on the canvas. */
-export function pageHtml(dd: DaydreamApi, pageId: string): string | null {
-  const page = dd.core
+/** The path of the page viewport `pageId` shows (its `payload.page`,
+ * decision #78), or null when the viewport is not on the canvas. */
+export function pagePath(
+  dd: Pick<DaydreamApi, "core" | "document">,
+  pageId: string,
+): string | null {
+  const viewport = dd.core
     .viewportItems(dd.document())
     .find((item) => item.id === pageId);
-  return page === undefined ? null : page.payload.html;
+  return viewport === undefined ? null : viewport.payload.page;
 }
 
-/** The kernel's refusal as the pane shows it: a sentence of its own. */
-const sentence = (problem: string): string =>
-  problem.charAt(0).toUpperCase() + problem.slice(1) + ".";
+/** The stored markup of the page viewport `pageId` shows, or null when
+ * the viewport is not on the canvas or the project holds no such page. */
+export function pageHtml(
+  dd: Pick<DaydreamApi, "core" | "document" | "page">,
+  pageId: string,
+): string | null {
+  const path = pagePath(dd, pageId);
+  return path === null ? null : (dd.page(path)?.html ?? null);
+}
+
+/** The kernel's refusal as the pane shows it: a sentence of its own. A
+ * guard's refusal is a clause; a "not yet" one (decision #78) is a whole
+ * sentence already, its period included. */
+const sentence = (problem: string): string => {
+  const text = problem.charAt(0).toUpperCase() + problem.slice(1);
+  return text.endsWith(".") ? text : `${text}.`;
+};
 
 /** A save's verdict. Saved: `text` is what the page holds now — the
  * typed text, or the typing carried onto a page that changed elsewhere.
@@ -161,13 +190,20 @@ interface Resolution {
  * page into a model and back: what is typed is what is stored.
  *
  * Saved LIVE, after a short debounce, through `dd.writePage`'s `html`
- * edit, whose verdict is the kernel's: it refuses, by name, whatever a
- * landing would take out of the text (a `<script>`, an `on*`, a url a
- * page cannot reach through, a `<style>`), and refuses a save over a page
+ * edit, which names the page's file by its path (decision #78) and whose
+ * verdict is the kernel's: it refuses, by name, whatever the edit brings
+ * in that the render walk takes out (a `<script>`, an `on*`, a url a page
+ * cannot reach through, a `<style>`), and refuses a save over a page
  * whose html is no longer the one the editor showed. Every save is an
  * undo step, and saves in quick succession join one — the kernel's edit
  * burst, so a typing session is one undo step for as long as no pause
  * outlasts the burst.
+ *
+ * Writing a page's file is not yet in the project model (decision #78):
+ * a save that passes every guard is refused, in the kernel's one sentence
+ * for it, and nothing is written — so for now every save ends as a
+ * refused draft, and what follows about saves that write, remounts and
+ * pages changed elsewhere is what the pane does once writes land.
  *
  * A REFUSED text is never lost: it stays on screen as the page's DRAFT
  * with the sentence under it, and comes back with the page when another
@@ -322,12 +358,14 @@ export default function createHtmlPanel(state: PanelState) {
       synced = current;
       return { ok: true, text: current };
     }
+    const path = untrack(() => pagePath(dd, id));
+    if (path === null) return { ok: false, kind: "held" };
     let problem: string | null;
     writing = next;
     try {
       problem = dd.writePage({
         kind: "html",
-        viewportId: id,
+        path,
         expected: current,
         html: next,
       });
@@ -455,10 +493,10 @@ export default function createHtmlPanel(state: PanelState) {
     saveEditor(id);
   };
 
-  // The document is about to be swapped, or the plugin to stop: what the
+  // The project is about to be swapped, or the plugin to stop: what the
   // editor holds is saved into the page it was typed in, now, while that
-  // page is still the document's — the debounce would fire into another
-  // document, or never. Read from the editor itself: text other than
+  // page is still the project's — the debounce would fire into another
+  // project, or never. Read from the editor itself: text other than
   // what the page last showed or held as its draft is typing, whether or
   // not its report has reached the pane yet (a microtask after the
   // keystroke). A second call finds nothing typed and writes nothing. A
@@ -530,7 +568,7 @@ export default function createHtmlPanel(state: PanelState) {
   // mid-edit: save what is pending the way blur would, after the disposal
   // has run (never a write inside it). Only into the state the typing
   // belongs to: a load or an undo, a redo, before the save runs — the
-  // same document reopened, a page of the same id — drops it, as the
+  // same project reopened, a viewport of the same id — drops it, as the
   // restore drops what is pending while the panel is up.
   onSettled(() => () => {
     clearDebounce();

@@ -3,15 +3,19 @@
 // CodeMirror — the page the selection is in, with the selected element's
 // span marked, and the element the caret is in selected on the canvas.
 // Saved live as you type through `dd.writePage`, whose verdict is the
-// kernel's: what a landing would take out is refused by name. Typing over
-// a page that changed underneath is carried onto the change, or, where the
-// two meet, kept as the page's draft until ⌘S saves it over; a refused
-// text is kept as the draft too. With it, a person can change a page's
-// structure — edit a headline, add an element, change a tag or an
-// attribute — the way they would in a file. Delete and Backspace on an
-// inner element remove that element alone, cut out of the text where it
-// was written (core's own Delete removes the whole item when the page is
-// selected; the `html`, `head` and `body` stay, since a page has them).
+// kernel's: what the edit brings in that the render walk takes out is
+// refused by name. Typing over a page that changed underneath is carried
+// onto the change, or, where the two meet, kept as the page's draft until
+// ⌘S saves it over; a refused text is kept as the draft too. Writing a
+// page's file is not yet in the project model (decision #78): every save
+// and every Delete that passes the guards is refused, and nothing is
+// written — the typing kept as the draft, the selection put back. Once
+// writes land, a person can change a page's structure — edit a headline,
+// add an element, change a tag or an attribute — the way they would in a
+// file. Delete and Backspace on an inner element remove that element
+// alone, cut out of the text where it was written (core's own Delete
+// removes the whole item when the page is selected; the `html`, `head`
+// and `body` stay, since a page has them).
 //
 // NOT here, on purpose: in-place text editing on the canvas. Nor a
 // resizer: the dock's width and the split between this pane and the CSS
@@ -112,7 +116,7 @@ export default function activate(dd: DaydreamApi): void {
   // it is now: the one way to write over that change, asked for. ⌘S is
   // core's save (core.save, in `always` scope); this editor-scope command
   // is tried first and always declines, so the key goes on to it and the
-  // document is saved as well.
+  // project's layout is saved as well.
   dd.registerCommand({
     id: SAVE_OVER_COMMAND,
     title: "Save the typing over the page",
@@ -122,7 +126,7 @@ export default function activate(dd: DaydreamApi): void {
   });
   dd.bindShortcut(SAVE_OVER_COMMAND, "Mod+S");
 
-  // The document is about to be swapped for another, or this plugin to
+  // The project is about to be swapped for another, or this plugin to
   // stop: typing waiting on the save's debounce is saved now, into the
   // page it was typed in (the panel's `leave`).
   dd.on("leave", () => state.leave());
@@ -155,12 +159,14 @@ export default function activate(dd: DaydreamApi): void {
       // The parent first, while its id is this mount's: the write
       // remounts the page, and the canvas carries the selection by its
       // place — the parent's is unchanged by the removal. A refusal puts
-      // the selection back.
+      // the selection back, and is said on the console: every removal is
+      // refused as not yet for now (decision #78), and the key would
+      // otherwise do nothing anyone could see.
       dd.select(target.parentId);
-      if (dd.writePage({ kind: "remove", elementId: target.id }) === null) {
-        return;
-      }
+      const problem = dd.writePage({ kind: "remove", elementId: target.id });
+      if (problem === null) return;
       dd.select(target.id);
+      console.error(`[${dd.plugin.id}] delete refused: ${problem}`);
       return false;
     },
   });

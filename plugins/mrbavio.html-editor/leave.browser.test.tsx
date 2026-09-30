@@ -1,28 +1,52 @@
-// What is typed in the HTML pane when the document goes — swapped for
-// another (a library pick, an agent's open_document) or the plugin stopped
-// — through the loader seam: it is saved into the page it was typed in,
-// read from the editor itself, whatever has reached the pane: a keystroke
-// not yet reported, a composition, a save waiting on its debounce. And
-// what is held for one document never reaches another's page.
+// What is typed in the HTML pane when the project goes — swapped for
+// another (Open…, which loads the host's open project) or the plugin
+// stopped — through the loader seam: it is saved into the page it was
+// typed in, read from the editor itself, whatever has reached the pane: a
+// keystroke not yet reported, a composition, a save waiting on its
+// debounce. And what is held for one project never reaches another's
+// page.
+//
+// Writing a page's file is not yet in the project model (decision #78):
+// every save that passes the guards is refused as not yet, and nothing is
+// written. So these tests read what the pane ASKED `dd.writePage` for,
+// and in which load of a project (htmlSaves.test-support.ts), in place of
+// what the outgoing project saved. A swap is `loadOpenProject()` over a
+// host whose open project the test names (`projects()`); the swaps that
+// drop a deferred save or a draft are `appStore.loadProject`, as a load
+// that runs no leave hook. The test of an undo that takes back a save
+// asked across a hidden dock returns when a page's file can be written;
+// the undo here takes back a layout edit.
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import { cdp } from "vitest/browser";
 
-import type { DaydreamApi, DreamDocument, PluginManifest } from "@daydream/plugin-api";
+import type { DaydreamApi, PluginManifest } from "@daydream/plugin-api";
 import {
   createPageItem,
+  createTestKernel,
+  fixturePage,
   flush,
-  type HostStorage,
+  type HostProject,
+  loadOpenProject,
   type MountedPlugin,
   mountPlugin,
-  openSlug,
   overrideHostForTests,
   pageElementId,
   pageNode,
+  testProject,
+  type TestProject,
   viewportItems,
 } from "@daydream/plugin-testing";
 
 import { APPLY_DEBOUNCE_MS } from "./HtmlPanel";
+import {
+  clearSaves,
+  HTML_NOT_YET,
+  lastAskedHtml,
+  recorded,
+  recordedApi,
+  saves,
+} from "./htmlSaves.test-support";
 import activate from "./index";
 import rawManifest from "./manifest.json";
 
@@ -31,10 +55,12 @@ const manifest = rawManifest as PluginManifest;
 /** The plugin mounted by the test running, or null. */
 let mounted: MountedPlugin | null = null;
 
-/** Dispose of what the test mounted: each test file's `afterEach`. */
+/** Dispose of what the test mounted, and forget its saves: each test
+ * file's `afterEach`. */
 function disposeMounted(): void {
   mounted?.dispose();
   mounted = null;
+  clearSaves();
 }
 
 /** The page as its author wrote it: a doctype, indentation, a comment. */
@@ -60,30 +86,34 @@ const edited = (from: string, to: string, html = HTML): string => {
   return html.replace(from, to);
 };
 
-/** The id of the first page of the document the test mounted. */
+/** The viewport of the page the test mounted first. */
 let itemId = "";
+/** The path of the page `itemId` shows. */
+let pagePath = "";
 
-/** Mount the plugin over a fresh one-page document (or `doc`) and wait for
- * the page to mount. `entry` stands in for the plugin's entry — its API
- * wrapped — and `slug` names the document as saved in a library. */
-async function mountPage(
-  doc?: DreamDocument,
-  options: { entry?: typeof activate; slug?: string } = {},
-): Promise<MountedPlugin> {
-  let document = doc;
-  if (document === undefined) {
-    const item = createPageItem(
+/** A project of one page, `page.html`, shown by the viewport `page`. */
+const onePage = (): TestProject =>
+  testProject([
+    createPageItem(
       { html: HTML, css: CSS },
-      { frame: { width: 960 } },
-    );
-    document = { version: 7, items: [item] };
-  }
-  itemId = document.items[0]!.id;
+      { id: "page", frame: { width: 960 } },
+    ),
+  ]);
+
+/** Mount the plugin over a fresh one-page project (or `project`) and wait
+ * for its first page to mount. `entry` stands in for the plugin's entry —
+ * by default the entry with its saves recorded. */
+async function mountPage(
+  project: TestProject = onePage(),
+  options: { entry?: typeof activate } = {},
+): Promise<MountedPlugin> {
+  const viewport = fixturePage(project);
+  itemId = viewport.id;
+  pagePath = viewport.payload.page;
   mounted = await mountPlugin({
-    entry: options.entry ?? activate,
+    entry: options.entry ?? recorded,
     manifest,
-    document,
-    ...(options.slug === undefined ? {} : { slug: options.slug }),
+    project,
   });
   await waitMounted(itemId, "h1");
   return mounted;
@@ -128,7 +158,7 @@ async function settled(): Promise<void> {
   flush();
 }
 
-/** Type and let the live save land. */
+/** Type and let the live save be asked for. */
 async function type(next: string): Promise<void> {
   await typeAll(next);
   await settled();
@@ -154,48 +184,67 @@ function blur(): void {
 const message = (): string | null =>
   panel().querySelector('[role="status"]')?.textContent ?? null;
 
-/** The stored markup of the page `id`. */
-const stored = (id = itemId): string =>
-  viewportItems(mounted!.store.document).find((item) => item.id === id)!.payload
-    .html;
+/** The stored markup of the page viewport `id` shows. */
+function stored(id = itemId): string {
+  const viewport = viewportItems(mounted!.store.document).find(
+    (item) => item.id === id,
+  )!;
+  return mounted!.store.pages[viewport.payload.page]!.html;
+}
+
+/** The items on the shown canvas. */
+const items = () => mounted!.store.document.canvases[0]!.items;
 
 function select(id: string | null): void {
   mounted!.store.setSelectedId(id);
   flush();
 }
 
-/** Longer than the kernel's edit burst (decision #20, 500ms): the next
- * write starts an undo step of its own. */
+/** The not-yet refusal of the last save, as the pane shows it: the
+ * kernel's own sentence, once, its one period. */
+function refusedAsNotYet(): void {
+  expect(message()).toBe(saves.at(-1)!.answer);
+  expect(message()).toMatch(HTML_NOT_YET);
+  expect(message()).not.toMatch(/\.\.$/);
+}
+
+/** Longer than the kernel's edit burst (decision #20, 500ms). */
 async function pause(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 700));
 }
 
-
-
 afterEach(disposeMounted);
 
-/** A library whose every document is one page, `next`, and the markup of
- * every save written to it, by slug. */
-function library(): { slug: string; html: string }[] {
-  const saved: { slug: string; html: string }[] = [];
-  overrideHostForTests({
-    storage: {
-      save: async (slug: string, doc: DreamDocument) => {
-        saved.push({ slug, html: viewportItems(doc)[0]!.payload.html });
-      },
-      load: async () => ({
-        version: 7,
-        items: [createPageItem({ html: HTML, css: CSS }, { id: "next", frame: { width: 960 } })],
-      }),
-    } as unknown as HostStorage,
-  });
-  onTestFinished(() => overrideHostForTests(null));
-  return saved;
-}
+const MINE = { root: "/test/mine", name: "mine" };
+const OTHER = { root: "/test/other", name: "other" };
 
-/** The last markup saved under `slug`. */
-const lastSaved = (saved: { slug: string; html: string }[], slug: string): string | undefined =>
-  saved.filter((save) => save.slug === slug).at(-1)?.html;
+/** One page, `page.html`, shown by the viewport `page`, in `project`. */
+const pageIn = (project: TestProject["project"]): TestProject =>
+  testProject(
+    [
+      createPageItem(
+        { html: HTML, css: CSS },
+        { id: "page", frame: { width: 960 } },
+      ),
+    ],
+    { project },
+  );
+
+/** A host whose open project is `open.current` — each read a fresh copy
+ * of the one-page project under it — so `loadOpenProject()` swaps the
+ * project as Open… does. Put in after the mount, so the shell's own
+ * start reads nothing from it. */
+function projects(): { current: TestProject["project"] } {
+  const open = { current: OTHER as TestProject["project"] };
+  const project: HostProject = {
+    read: async () => pageIn(open.current),
+    open: async () => ({ cancelled: true }),
+    saveManifest: async () => {},
+  };
+  overrideHostForTests({ project });
+  onTestFinished(() => overrideHostForTests(null));
+  return open;
+}
 
 /** A keystroke: the whole text replaced by an un-annotated transaction,
  * whose report reaches the pane a microtask later — not awaited. */
@@ -208,55 +257,68 @@ function keystroke(next: string): void {
  * not committed. The session is Playwright's; its type comes with the
  * provider, which this plugin's package does not declare. */
 const compose = (text: string): Promise<unknown> =>
-  (cdp() as unknown as { send: (method: string, params: object) => Promise<unknown> }).send(
-    "Input.imeSetComposition",
-    { text, selectionStart: text.length, selectionEnd: text.length },
-  );
-
-describe("mrbavio.html-editor: typing when the document goes", () => {
-  test("a keystroke and the swap in the same task: it is saved into the outgoing document", async () => {
-    const saved = library();
-    await mountPage(undefined, { slug: "mine" });
-    select(itemId);
-    content().focus();
-    keystroke(edited("Old headline", "Typed before the swap"));
-    await expect(openSlug("other")).resolves.toEqual({ ok: true });
-    expect(lastSaved(saved, "mine")).toBe(edited("Old headline", "Typed before the swap"));
-    expect(mounted!.store.docSlug()).toBe("other");
+  (
+    cdp() as unknown as {
+      send: (method: string, params: object) => Promise<unknown>;
+    }
+  ).send("Input.imeSetComposition", {
+    text,
+    selectionStart: text.length,
+    selectionEnd: text.length,
   });
 
-  test("a keystroke and a deactivation in the same task, before the edit reaches the pane: it is written before the pane goes", async () => {
+describe("mrbavio.html-editor: typing when the project goes", () => {
+  test("a keystroke and the swap in the same task: it is asked for in the outgoing project", async () => {
+    await mountPage(pageIn(MINE));
+    const load = mounted!.store.loadVersion();
+    projects();
+    select(itemId);
+    content().focus();
+    const typed = edited("Old headline", "Typed before the swap");
+    keystroke(typed);
+    await expect(loadOpenProject()).resolves.toEqual({ ok: true });
+    lastAskedHtml(pagePath, HTML, typed);
+    expect(saves.at(-1)!.load).toBe(load);
+    expect(mounted!.store.project()).toEqual(OTHER);
+  });
+
+  test("a keystroke and a deactivation in the same task, before the edit reaches the pane: it is asked for before the pane goes", async () => {
     await mountPage();
     select(itemId);
     content().focus();
-    keystroke(edited("Body copy", "Typed before the plugin stops"));
+    const typed = edited("Body copy", "Typed before the plugin stops");
+    keystroke(typed);
     mounted!.pluginHost.deactivate(manifest.id);
     flush();
-    expect(stored()).toBe(edited("Body copy", "Typed before the plugin stops"));
+    lastAskedHtml(pagePath, HTML, typed);
+    expect(stored()).toBe(HTML);
   });
 
-  test("a deactivation with a save waiting on its debounce writes it once, and the timer goes with the pane", async () => {
+  test("a deactivation with a save waiting on its debounce asks for it once, and the timer goes with the pane", async () => {
     const reported = vi.spyOn(window, "reportError");
     onTestFinished(() => reported.mockRestore());
     await mountPage();
     select(itemId);
     content().focus();
     // Reported: the save is on its debounce now.
-    await typeAll(edited("Old headline", "Pending"));
+    const typed = edited("Old headline", "Pending");
+    await typeAll(typed);
     const before = mounted!.store.historyVersion();
     mounted!.pluginHost.deactivate(manifest.id);
     flush();
-    expect(stored()).toBe(edited("Old headline", "Pending"));
+    lastAskedHtml(pagePath, HTML, typed);
     await pause();
     flush();
-    expect(stored()).toBe(edited("Old headline", "Pending"));
+    expect(saves).toHaveLength(1);
+    expect(stored()).toBe(HTML);
     expect(mounted!.store.historyVersion()).toBe(before);
     expect(reported).not.toHaveBeenCalled();
   });
 
-  test("what an input method is composing is saved as the editor holds it", async () => {
-    const saved = library();
-    await mountPage(undefined, { slug: "mine" });
+  test("what an input method is composing is asked for as the editor holds it", async () => {
+    await mountPage(pageIn(MINE));
+    const load = mounted!.store.loadVersion();
+    projects();
     select(itemId);
     const v = view();
     v.focus();
@@ -265,120 +327,126 @@ describe("mrbavio.html-editor: typing when the document goes", () => {
     await compose(" z");
     await compose(" zh");
     expect(v.composing).toBe(true);
-    await expect(openSlug("other")).resolves.toEqual({ ok: true });
-    expect(lastSaved(saved, "mine")).toBe(edited("Old headline", "Old zh headline"));
+    await expect(loadOpenProject()).resolves.toEqual({ ok: true });
+    const mine = saves.filter((save) => save.load === load);
+    expect(mine.at(-1)!.edit).toEqual({
+      kind: "html",
+      path: pagePath,
+      expected: HTML,
+      html: edited("Old headline", "Old zh headline"),
+    });
   });
 
-  test("a write that throws through a swap is held as the page's draft with its reason, and the next swap is saved", async () => {
-    const saved = library();
+  test("a write that throws through a swap is held as the page's draft with its reason, never thrown into the swap, and the next swap is asked", async () => {
     const reported = vi.spyOn(window, "reportError");
     onTestFinished(() => reported.mockRestore());
     // Every write throws through the first swap, and none after it.
     let failing = true;
-    const entry = (dd: DaydreamApi): void => {
-      const api = Object.create(dd) as DaydreamApi;
-      Object.defineProperty(api, "writePage", {
-        value: (edit: Parameters<DaydreamApi["writePage"]>[0]) => {
-          if (failing) throw new Error("the disk is full");
-          return dd.writePage(edit);
-        },
-      });
-      activate(api);
-    };
-    await mountPage(undefined, { entry, slug: "mine" });
+    const entry = (dd: DaydreamApi): void =>
+      activate(recordedApi(dd, () => failing));
+    await mountPage(pageIn(MINE), { entry });
+    const open = projects();
     select(itemId);
     content().focus();
     keystroke(edited("Old headline", "Lost with the swap"));
-    await expect(openSlug("other")).resolves.toEqual({ ok: true });
+    await expect(loadOpenProject()).resolves.toEqual({ ok: true });
     failing = false;
-    expect(saved.some((save) => save.html.includes("Lost with the swap"))).toBe(false);
-    expect(mounted!.store.docSlug()).toBe("other");
+    expect(saves).toHaveLength(0);
+    expect(mounted!.store.project()).toEqual(OTHER);
     // Held as a save that throws is held, never thrown into the swap.
     expect(reported).not.toHaveBeenCalled();
 
-    await waitMounted("next", "h1");
-    select("next");
+    await waitMounted("page", "h1");
+    select("page");
     content().focus();
-    keystroke(edited("Body copy", "Saved with the next swap"));
-    await expect(openSlug("mine")).resolves.toEqual({ ok: true });
-    expect(lastSaved(saved, "other")).toBe(edited("Body copy", "Saved with the next swap"));
+    const load = mounted!.store.loadVersion();
+    const typed = edited("Body copy", "Asked with the next swap");
+    keystroke(typed);
+    open.current = MINE;
+    await expect(loadOpenProject()).resolves.toEqual({ ok: true });
+    lastAskedHtml("page.html", HTML, typed);
+    expect(saves.at(-1)!.load).toBe(load);
+    expect(mounted!.store.project()).toEqual(MINE);
   });
 
-  test("a save the hidden dock deferred is dropped when another document loads, or an undo runs, before it lands", async () => {
-    const a = createPageItem({ html: HTML, css: CSS }, { id: "same", frame: { width: 600 } });
-    const m = await mountPage({ version: 7, items: [a] });
+  test("a save the hidden dock deferred is dropped when another project loads, or an undo runs, before it is asked", async () => {
+    const m = await mountPage();
     // The dock hidden is the shell's state: shown again whatever happens,
     // as the next test expects to find it.
     try {
-      select("same");
+      select(itemId);
       content().focus();
       await typeAll(edited("Old headline", "Typed before the load"));
       key(content(), { key: "\\", code: "Backslash", metaKey: true });
       expect(m.panel()).toBeNull();
-      // Before the deferred save runs: the same document reopened — a page
-      // of the same id, the same text.
-      const b = createPageItem({ html: HTML, css: CSS }, { id: "same", frame: { width: 600 } });
-      m.store.loadDocument({ version: 7, items: [b] }, { slug: null });
+      // Before the deferred save runs: the same project loaded again — a
+      // viewport of the same id, a page of the same path and text.
+      m.store.loadProject(onePage());
       await new Promise((resolve) => setTimeout(resolve, 0));
       flush();
-      expect(stored("same")).toBe(HTML);
-      expect(m.store.canUndo()).toBe(false);
+      expect(saves).toHaveLength(0);
 
       // An undo before it runs: the typing belonged to the state undone.
+      // The step undone is a move of the viewport — a layout edit, which
+      // the canvas writes.
       key(window, { key: "\\", code: "Backslash", metaKey: true });
-      await waitMounted("same", "h1");
-      select("same");
+      await waitMounted(itemId, "h1");
+      const kernel = createTestKernel();
+      kernel.dd.updateItem(itemId, (item) => {
+        item.position = { x: 40, y: 0 };
+      });
+      kernel.dispose();
+      flush();
+      expect(m.store.canUndo()).toBe(true);
+      select(itemId);
       content().focus();
-      const saved = edited("Old headline", "Saved");
-      await type(saved);
-      expect(stored("same")).toBe(saved);
-      await pause();
-      await typeAll(edited("Body copy", "Pending", saved));
+      await typeAll(edited("Body copy", "Pending"));
       key(content(), { key: "\\", code: "Backslash", metaKey: true });
       expect(m.panel()).toBeNull();
       m.kernel.commands.runCommand("core.undo");
       await new Promise((resolve) => setTimeout(resolve, 0));
       flush();
-      expect(stored("same")).toBe(HTML);
+      expect(saves).toHaveLength(0);
+      expect(items()[0]!.position).toEqual({ x: 0, y: 0 });
     } finally {
-      if (m.panel() === null) key(window, { key: "\\", code: "Backslash", metaKey: true });
+      if (m.panel() === null) {
+        key(window, { key: "\\", code: "Backslash", metaKey: true });
+      }
     }
   });
 
-
-  test("a draft stays with its document: another document's page of the same id shows as it is", async () => {
-    const a = createPageItem(
-      { html: HTML, css: CSS },
-      { id: "same", frame: { width: 600 } },
-    );
-    const m = await mountPage({ version: 7, items: [a] });
-    select("same");
+  test("a draft stays with its project: another project's page of the same path shows as it is", async () => {
+    const m = await mountPage();
+    select(itemId);
     content().focus();
     const refused = edited("<p>", '<p onclick="x()">');
     await type(refused);
     blur();
     expect(message()).toContain("p[onclick]");
 
-    // Another document, whose page has the same id.
-    const theirs = "<!doctype html>\n<body>\n  <h1>Document B</h1>\n</body>";
-    const b = createPageItem(
-      { html: theirs, css: "" },
-      { id: "same", frame: { width: 600 } },
+    // Another project, whose viewport and page have the same id and path.
+    const theirs = "<!doctype html>\n<body>\n  <h1>Project B</h1>\n</body>";
+    m.store.loadProject(
+      testProject([
+        createPageItem(
+          { html: theirs, css: "" },
+          { id: "page", frame: { width: 960 } },
+        ),
+      ]),
     );
-    m.store.loadDocument({ version: 7, items: [b] }, { slug: null });
     flush();
     await vi.waitFor(() => {
-      expect(pageNode("same", "h1")?.textContent).toBe("Document B");
+      expect(pageNode("page", "h1")?.textContent).toBe("Project B");
     });
-    select("same");
+    select("page");
     expect(text()).toBe(theirs);
     expect(message()).toBeNull();
 
-    // Typing there saves over B's page, never A's markup.
+    // Typing there is asked for over B's page, never A's markup.
     content().focus();
-    const mine = edited("Document B", "Document B, edited", theirs);
+    const mine = edited("Project B", "Project B, edited", theirs);
     await type(mine);
-    expect(message()).toBeNull();
-    expect(stored("same")).toBe(mine);
+    lastAskedHtml("page.html", theirs, mine);
+    refusedAsNotYet();
   });
 });
