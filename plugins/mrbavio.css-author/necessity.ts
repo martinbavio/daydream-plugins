@@ -188,6 +188,7 @@ import { hasStatePseudo } from "./statePseudo";
 import {
   inRound,
   markupClause,
+  overriddenClause,
   siteClause,
   type VariantRound,
 } from "./variantRound";
@@ -260,7 +261,14 @@ export async function necessityLint(
   const selected = selectViewports(core, doc, ctx.page, options.viewportIds);
   const round = options.round ?? null;
   for (const shown of selected) {
-    const judged = await lintViewport(core, ctx, shown, live, options.deadline);
+    const judged = await lintViewport(
+      core,
+      ctx,
+      shown,
+      live,
+      options.deadline,
+      inRound(round, shown.viewport) ? round.own : undefined,
+    );
     if (inRound(round, shown.viewport)) {
       for (const c of judged.candidates) {
         const selector = c.finding.elementId;
@@ -346,6 +354,10 @@ interface Candidate {
   /** An element's own line its page already has there, at a variant's
    * finalize (`VariantRound.hadStyle`): no refusal of the variant's. */
   had?: boolean;
+  /** A rule's line, at a variant's finalize, that reads dead at the
+   * frame and live there without the variant's own sheet
+   * (`markOverridden`): the variant's css overrides it. */
+  overridden?: boolean;
 }
 
 /** A mounted page prepared for removals. */
@@ -370,13 +382,16 @@ interface Prepared {
  * earlier viewport — each probe width a fresh mount of the same window at
  * that width, while `deadline` leaves time for one. A finding that
  * survives names every width. `notes` is the advisory on the images the
- * copy could not load. */
+ * copy could not load. At a variant's finalize, `ownSheet` is the
+ * variant's own sheet (`sheetKey`), and the dead lines of the other sheets are
+ * read again without it at the frame (`markOverridden`). */
 async function lintViewport(
   core: CoreApi,
   ctx: MountContext,
   { viewport, page }: Shown,
   answered: ReadonlySet<string>,
   deadline: number | undefined,
+  ownSheet?: string,
 ): Promise<{ candidates: Candidate[]; notes: Finding[] }> {
   // The page as its files hold it, for naming: the mounted copy's sheets
   // have the routed urls in them, and a finding should quote what the
@@ -398,6 +413,10 @@ async function lintViewport(
       const nameOf = storedNames(core, stored, prepared.doc);
       const width =
         prepared.doc.defaultView?.innerWidth ?? viewport.frame?.width ?? 0;
+      const judged = await judgeAll(viewport, page, prepared, width, nameOf);
+      if (ownSheet !== undefined) {
+        await markOverridden(prepared, judged, ownSheet);
+      }
       return {
         own: width,
         written: prepared.written,
@@ -408,7 +427,7 @@ async function lintViewport(
           prepared.styles.flatMap((style) => core.cssBlocks(style.textContent ?? "")),
           width,
         ),
-        candidates: await judgeAll(viewport, page, prepared, width, nameOf),
+        candidates: judged,
         unloaded: prepared.nodes.filter(isUnloadedImage).map(nameOf),
       };
     },
@@ -729,6 +748,39 @@ async function judgeAll(
   return candidates;
 }
 
+/** At a variant's finalize, mark each rule's line of a sheet other than
+ * the variant's own (`own`, its `sheetKey`) that read dead as
+ * `overridden` when it is live with that sheet cut from the copy: read
+ * against a baseline taken without it, the line and its own sheet cut
+ * together. A sheet with no rules overrides nothing. */
+async function markOverridden(
+  prepared: Prepared,
+  candidates: readonly Candidate[],
+  own: string,
+): Promise<void> {
+  const at = prepared.written.findIndex((rule) => rule.key === own);
+  if (at < 0) return;
+  const sheet = prepared.rules[at]!.sheet;
+  const dead = candidates.filter(
+    (c) => c.dead && c.sheet !== undefined && c.sheet.key !== own,
+  );
+  if (dead.length === 0) return;
+  const whole: SheetRange = {
+    sheet,
+    range: [0, (prepared.styles[sheet]?.textContent ?? "").length],
+  };
+  const without = await readWithoutReloading(
+    prepared.doc,
+    prepared.styles,
+    [whole],
+    new Map(),
+    () => baseline(prepared),
+  );
+  for (const c of dead) {
+    c.overridden = !(await isDead(prepared, without, c.removal, whole));
+  }
+}
+
 /** The earlier declarations of the same property in the same block as
  * `list[at]` — its fallbacks, judged with it (`height: 100vh; height:
  * 100dvh` is one decision; where the two agree, either alone reads dead). */
@@ -838,19 +890,22 @@ function refused(doc: Document, selector: string): boolean {
  * in one write, one read once any web font the write made the page load
  * again has loaded, then everything put back as it was. The read is a
  * single sweep that stops at the first element whose observation left
- * the baseline. */
+ * the baseline. `also`, when given, is cut in the same write: a whole
+ * sheet (`markOverridden`). */
 function isDead(
   prepared: Prepared,
   probe: Probe,
   removal: readonly At[],
+  also?: SheetRange,
 ): Promise<boolean> {
-  const cssRanges: SheetRange[] = [];
+  const cssRanges: SheetRange[] = also === undefined ? [] : [also];
   const inline = new Map<Element, TextRange[]>();
   for (const where of removal) {
     if ("rule" in where) {
       const rule = prepared.rules[where.rule];
       const declaration = rule?.declarations[where.at];
-      if (declaration !== undefined) {
+      // A range of the sheet `also` cuts whole is cut with it.
+      if (declaration !== undefined && rule!.sheet !== also?.sheet) {
         cssRanges.push({ sheet: rule!.sheet, range: declaration.range });
       }
     } else {
@@ -877,8 +932,11 @@ function isDead(
  * such sheet are one advisory, after the rest, naming the pages and the
  * viewports judged (`viewports`). At a variant's finalize (`round`) the
  * site's sheets are folded the same way, saying why (variantRound.ts
- * `siteClause`), and an element's own line the page already has is
- * advisory. */
+ * `siteClause`) — but for a line the variant's css overrides, which is
+ * one advisory of its own, naming its rule (`overriddenClause`), when no
+ * page not judged links its sheet: the accept leaves it dead there, and
+ * an in-place rework of the page refuses it — and an element's own line
+ * the page already has is advisory. */
 function intersect(
   perViewport: readonly Candidate[][],
   outside: ReadonlyMap<string, string[]>,
@@ -894,6 +952,7 @@ function intersect(
       finding: Finding;
       sheet: Candidate["sheet"];
       had: boolean;
+      overridden: boolean;
     }
   >();
   for (const candidates of perViewport) {
@@ -908,6 +967,7 @@ function intersect(
           finding: c.finding,
           sheet: c.sheet,
           had: c.had === true,
+          overridden: c.overridden === true,
         });
       } else {
         seen.dead = seen.dead && c.dead;
@@ -923,6 +983,19 @@ function intersect(
     ...entries.filter((entry) => !entry.element),
   ]) {
     const { sheet } = entry;
+    if (
+      sheet !== undefined &&
+      entry.overridden &&
+      round?.site.has(sheet.key) === true &&
+      !outside.has(sheet.key)
+    ) {
+      out.push({
+        ...entry.finding,
+        severity: "advisory",
+        message: `${entry.finding.message}${overriddenClause(round, sheet.name)}`,
+      });
+      continue;
+    }
     if (
       sheet !== undefined &&
       (outside.has(sheet.key) || round?.site.has(sheet.key) === true)

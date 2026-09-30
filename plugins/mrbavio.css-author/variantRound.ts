@@ -21,16 +21,27 @@
 //   (`asEditable`), so a rule restating the initial or the page's rule
 //   beneath it, a dead line or a unit-less length in it is refused — the
 //   draft's css is that sheet, and the draft is where it is fixed.
+// - Its `<STYLE>` BLOCKS are its markup's, which the accept splices into
+//   the page: each is a subject too, and one the variant changed or
+//   added is judged like its own sheet. One whose text the page's file
+//   has in a block of its own is the site's, as it stands.
 // - The SITE'S SHEETS (every other sheet of the candidate: the page's
-//   files, its `<style>` blocks) are advisory at most (`siteClause`):
-//   what the lints find there, a line the variant's override leaves dead
-//   included, is said, but a variant round never writes them, so no fix
-//   is named.
-// - Its MARKUP is refused only where the variant changed it: an
-//   element's class or `style` declaration the page already has on that
-//   element (`hadClass`, `hadStyle`; `pageTwins` pairs the two trees) is
-//   advisory (`markupClause`), a JavaScript hook class or an inline
-//   style outside the variant's change being the page's own.
+//   files, its `<style>` blocks as the page has them) are advisory at
+//   most (`siteClause`): what the lints find there is said, but the
+//   round leaves them as they are, so no fix is named. A line of a
+//   site's sheet that the variant's own css overrides, dead once the
+//   variant is accepted, is said as such (`overriddenClause`): an
+//   in-place rework of the page will refuse it then — unless a page not
+//   judged links that sheet too, when neither refuses it.
+// - Its MARKUP is refused only for what the variant added: a class, or
+//   an element's own `style` declaration, the page's file already has
+//   on some element (`hadClass`, `hadStyle`) is advisory
+//   (`markupClause`) — a JavaScript hook class or an inline style being
+//   the page's own, wherever the variant moved or wrapped the element
+//   that carries it. Each counts as the page's on as many elements as
+//   the page has it on (`keptMarkup`), the element paired with the
+//   page's first (`pageTwins`), so a hook copied onto an element of the
+//   variant's own is still refused.
 
 import type {
   CoreApi,
@@ -39,7 +50,13 @@ import type {
   PageSheet,
 } from "@daydream/plugin-api";
 
-import { sheetKey, type Page, type PageOf, type Viewport } from "./pageSheets";
+import {
+  sheetKey,
+  sheetName,
+  type Page,
+  type PageOf,
+  type Viewport,
+} from "./pageSheets";
 
 /** A variant's finalize, as the lints judge it. */
 export interface VariantRound {
@@ -52,13 +69,18 @@ export interface VariantRound {
   /** The candidate as the lints read it: its own sheet editable. */
   candidate: Page;
   /** The candidate's sheets that are the site's (`sheetKey`): every one
-   * but the variant's own. */
+   * but the variant's own and the `<style>` blocks it changed or added. */
   site: ReadonlySet<string>;
-  /** Whether the page already has class `name` on the element the
-   * candidate's stored selector `selector` names. */
+  /** The site's `<style>` blocks, as the findings name them
+   * (`sheetName`). */
+  blocks: ReadonlySet<string>;
+  /** The variant's own sheet (`sheetKey`). */
+  own: string;
+  /** Whether class `name` on the element the candidate's stored selector
+   * `selector` names is one the page's file already has. */
   hadClass(selector: string, name: string): boolean;
-  /** Whether the page already has the element's own `property`, with the
-   * same value, on that element. */
+  /** Whether the element's own `property`, with its value, is one the
+   * page's file already has on an element. */
   hadStyle(selector: string, property: string): boolean;
 }
 
@@ -84,22 +106,24 @@ export function variantRound(
     const own = ownSheet(judged, file);
     if (own < 0) continue;
     const candidate = asEditable(judged, own);
+    const source = pageOf(judged.path);
+    const theirs = siteBlocks(core, candidate, source?.html ?? null);
     const site = new Set(
-      candidate.sheets.flatMap((_, sheet) =>
-        sheet === own ? [] : [sheetKey(candidate, sheet)],
+      candidate.sheets.flatMap((sheet, index) =>
+        index === own || ("style" in sheet.source && !theirs.has(index))
+          ? []
+          : [sheetKey(candidate, index)],
       ),
     );
-    const kept = keptMarkup(
-      core,
-      pageOf(judged.path)?.html ?? null,
-      judged.html,
-    );
+    const kept = keptMarkup(core, source?.html ?? null, judged.html);
     return {
       viewport: viewport.id,
       file,
       page: judged.path,
       candidate,
       site,
+      blocks: new Set([...theirs].map((index) => sheetName(candidate, index))),
+      own: sheetKey(candidate, own),
       hadClass: (selector, name) =>
         kept.has(`class\u0000${selector}\u0000${name}`),
       hadStyle: (selector, property) =>
@@ -130,21 +154,33 @@ export function inRound(
   );
 }
 
-/** What a finding about a rule of the site's sheet `sheet` adds at a
- * variant's finalize instead of its fix: why `count` findings are not
- * refusals. */
+/** What a finding about a rule of the site's sheet `sheet` (as
+ * `sheetName` names it) adds at a variant's finalize instead of its fix:
+ * why `count` findings are not refusals. */
 export function siteClause(
   round: VariantRound,
   sheet: string,
   count = 1,
 ): string {
-  return `; ${sheet} is a sheet of \`${round.page}\`, the page this variant is of, which a variant round never writes, so ${count === 1 ? "it is" : "they are"} not refused`;
+  const it = count === 1 ? "it is" : "they are";
+  if (round.blocks.has(sheet)) {
+    return `; ${sheet} is the page's own, which this variant leaves as it is, so ${it} not refused`;
+  }
+  return `; ${sheet} is a sheet of \`${round.page}\`, the page this variant is of, which a variant round never writes, so ${it} not refused`;
+}
+
+/** What a finding about a dead line of the site's sheet `sheet` adds at
+ * a variant's finalize when the line is live without the variant's own
+ * sheet: the accept appends that sheet's rules to the page's, so the
+ * line is dead there after it, which an in-place rework refuses. */
+export function overriddenClause(round: VariantRound, sheet: string): string {
+  return `; this variant's css overrides it, so once the variant is accepted it is dead in ${sheet}, and an in-place rework of \`${round.page}\` will refuse it until it is removed there — it is not refused here`;
 }
 
 /** What a finding about markup the page already has adds at a variant's
  * finalize instead of its fix. */
 export function markupClause(round: VariantRound): string {
-  return `; \`${round.page}\` has it there too, outside what this variant changes, so it is not refused`;
+  return `; \`${round.page}\` already has it, and this variant keeps it rather than adding it, so it is not refused`;
 }
 
 /** The candidate's own sheet: the last one, a project file named after
@@ -158,25 +194,59 @@ function ownSheet(page: Page, file: string): number {
     : -1;
 }
 
-/** The page with sheet `own` a subject of the lints: the kernel lists a
- * variant's own sheet read-only, since only a draft of the variant
- * writes it — which is what a finalize's findings are fixed in. */
+/** The page with sheet `own` and every `<style>` block subjects of the
+ * lints: the kernel lists a variant's own sheet and its blocks
+ * read-only, since only a draft of the variant writes them — which is
+ * what a finalize's findings are fixed in. */
 function asEditable(page: Page, own: number): Page {
   const sheets = page.sheets.map((sheet, index): DeepReadonly<PageSheet> => {
-    if (index !== own) return sheet;
+    if (index !== own && !("style" in sheet.source)) return sheet;
     // Its text and source alone: no `unwritable` sentence, no `error`.
     return { source: sheet.source, text: sheet.text, readOnly: false };
   });
   return { ...page, sheets };
 }
 
+/** The candidate's `<style>` blocks (by index) that are the site's as it
+ * stands: each whose text a `<style>` of the page's markup (`source`, as
+ * the project holds it) has, one of the page's for one of the
+ * variant's, so a block the variant inserted before another moves none
+ * of the page's. None when there is no page. */
+function siteBlocks(
+  core: CoreApi,
+  candidate: Page,
+  source: string | null,
+): Set<number> {
+  const theirs = new Map<string, number>();
+  if (source !== null) {
+    const styles = core.parsePage(source).getElementsByTagName("style");
+    for (const style of Array.from(styles)) {
+      const text = style.textContent ?? "";
+      theirs.set(text, (theirs.get(text) ?? 0) + 1);
+    }
+  }
+  const out = new Set<number>();
+  candidate.sheets.forEach((sheet, index) => {
+    const left = theirs.get(sheet.text) ?? 0;
+    if (!("style" in sheet.source) || left === 0) return;
+    theirs.set(sheet.text, left - 1);
+    out.add(index);
+  });
+  return out;
+}
+
 /**
  * What of the variant's markup the page's file already has, keyed by the
  * variant element's stored selector (`dd.core.uniqueSelector` over
  * `dd.core.parsePage`, as every lint names an element): each class
- * (`class␀<selector>␀<name>`) and each own declaration's property whose
- * value is the page's (`style␀<selector>␀<property>`) on an element
- * paired with the page's (`pageTwins`). Empty when there is no page.
+ * (`class␀<selector>␀<name>`) and each own declaration's property with
+ * its value (`style␀<selector>␀<property>`) the page has on some
+ * element — wherever the variant put the element, wrapped or moved —
+ * each on as many of the variant's elements as the page has it on: the
+ * elements paired with one of the page's that has it (`pageTwins`)
+ * first, then the rest in tree order. So what the variant ADDED — a
+ * class or a declaration the page has nowhere, or once more than the
+ * page has it — is not kept. Empty when there is no page.
  */
 function keptMarkup(
   core: CoreApi,
@@ -185,28 +255,54 @@ function keptMarkup(
 ): Set<string> {
   const kept = new Set<string>();
   if (source === null) return kept;
+  const page = core.parsePage(source);
   const ours = core.parsePage(variant);
-  const twins = pageTwins(
-    core.parsePage(source).documentElement,
-    ours.documentElement,
-  );
-  for (const [el, twin] of twins) {
-    const theirs = new Set(
-      (twin.getAttribute("class") ?? "").split(/\s+/).filter(Boolean),
-    );
-    const mine = (el.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
-    const styles = lastValues(core, el);
-    const had = lastValues(core, twin);
-    const same = [...styles].filter(
-      ([property, value]) => had.get(property) === value,
-    );
-    if (!mine.some((name) => theirs.has(name)) && same.length === 0) continue;
-    const selector = core.uniqueSelector(el, ours);
-    for (const name of mine) {
-      if (theirs.has(name)) kept.add(`class\u0000${selector}\u0000${name}`);
+  const twins = pageTwins(page.documentElement, ours.documentElement);
+  /** What an element carries, as keys without its selector. */
+  const carried = (el: Element): string[] => [
+    ...new Set(
+      (el.getAttribute("class") ?? "")
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((name) => `class\u0000${name}`),
+    ),
+    ...Array.from(
+      lastValues(core, el),
+      ([property, value]) => `style\u0000${property}\u0000${value}`,
+    ),
+  ];
+  const left = new Map<string, number>();
+  for (const el of Array.from(page.getElementsByTagName("*"))) {
+    for (const key of carried(el)) left.set(key, (left.get(key) ?? 0) + 1);
+  }
+  const mine = Array.from(ours.getElementsByTagName("*"));
+  const names = new Map<Element, string>();
+  const take = (el: Element, key: string): void => {
+    const count = left.get(key) ?? 0;
+    if (count === 0) return;
+    left.set(key, count - 1);
+    let selector = names.get(el);
+    if (selector === undefined) {
+      selector = core.uniqueSelector(el, ours);
+      names.set(el, selector);
     }
-    for (const [property] of same)
-      kept.add(`style\u0000${selector}\u0000${property}`);
+    // A declaration's key drops its value: the lints ask by property.
+    const [kind, name] = key.split("\u0000");
+    kept.add(`${kind}\u0000${selector}\u0000${name}`);
+  };
+  /** What each element took as its twin's, not taken again. */
+  const paired = new Map<Element, Set<string>>();
+  for (const el of mine) {
+    const twin = twins.get(el);
+    if (twin === undefined) continue;
+    const theirs = new Set(carried(twin));
+    const taken = new Set(carried(el).filter((key) => theirs.has(key)));
+    paired.set(el, taken);
+    for (const key of taken) take(el, key);
+  }
+  for (const el of mine) {
+    const taken = paired.get(el);
+    for (const key of carried(el)) if (taken?.has(key) !== true) take(el, key);
   }
   return kept;
 }
