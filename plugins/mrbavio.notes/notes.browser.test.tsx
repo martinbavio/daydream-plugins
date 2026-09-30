@@ -1,27 +1,30 @@
 // The plugin through the loader seam (decision #48, testing
 // decisions): the real shell, the plugin enabled by config, assertions
-// from the DOM. The P5 acceptance: the pane follows the selection's
-// viewport exactly as it did as a strip inside the CSS editor — the same
-// fallbacks when nothing is selected, the same markup semantics — and
-// renders nothing without meta while staying in the dock. A viewport is a
-// page (decision #76): an element inside it is selected by the id its
-// mount stamped, and the pane finds its page through the kernel.
+// from the DOM. The pane shows the project's meta (decision #78: a
+// project's title and notes, never a viewport's), with the source link of
+// the page in view — the page of the selection's viewport, or of a sole
+// viewport when nothing is selected — and renders nothing without meta
+// while staying in the dock. An element inside a page is selected by the
+// id its mount stamped, and the pane finds its viewport through the
+// kernel.
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type {
-  DreamDocument,
   DreamMeta,
-  DreamPage,
   ElementId,
   PluginManifest,
 } from "@daydream/plugin-api";
 import {
-  fixturePage,
+  createPageItem,
   flush,
   mountPlugin,
+  PAGE_FIXTURE_CSS,
+  PAGE_FIXTURE_HTML,
   pageElementId,
-  pageFixtureDocument,
+  testProject,
   type MountedPlugin,
+  type TestPage,
+  type TestProject,
 } from "@daydream/plugin-testing";
 
 import activate from "./index";
@@ -41,49 +44,56 @@ const holyGrail: DreamMeta = {
   notes:
     "**What this teaches.** Three columns\nfrom one grid.\n\n" +
     "1. Drag the frame\n   under 600px.\n2. Read the **gap**.",
-  sourceUrl: "https://example.com/holy-grail",
 };
-const sidebar: DreamMeta = { title: "Sidebar", notes: "A second page." };
-const canvas: DreamMeta = { title: "The canvas", notes: "Two pages." };
+const HOLY_GRAIL_SOURCE = "https://example.com/holy-grail";
+const SIDEBAR_SOURCE = "https://example.com/sidebar";
 
-interface TwoViewports {
-  doc: DreamDocument;
-  first: DreamPage;
-  second: DreamPage;
+/** A fixture page of its own (html › body › `.grid`), at `x`. */
+function fixturePageAt(x: number): TestPage {
+  return createPageItem(
+    { html: PAGE_FIXTURE_HTML, css: PAGE_FIXTURE_CSS },
+    { frame: { width: 960 }, position: { x, y: 0 } },
+  );
 }
 
-/** The page fixture with no meta of its own (it is titled "Viewport"). */
-function bareFixture(): DreamDocument {
-  const doc = pageFixtureDocument();
-  delete fixturePage(doc).payload.meta;
-  return doc;
-}
-
-/** Two fixture pages in one document, neither with meta, fresh ids on
- * every call, the second beside the first. */
-function twoViewports(): TwoViewports {
-  const doc = bareFixture();
-  const second = fixturePage(bareFixture());
-  second.position = { x: 1200, y: 0 };
-  doc.items.push(second);
-  return { doc, first: doc.items[0] as DreamPage, second };
+/** A project of `pages`, with `meta`, each page's source as given (in
+ * `daydream.json`'s page list, where a page's provenance lives). */
+function projectOf(
+  pages: { page: TestPage; sourceUrl?: string }[],
+  meta?: DreamMeta,
+): TestProject {
+  const project = testProject(
+    pages.map(({ page }) => page),
+    meta === undefined ? {} : { meta },
+  );
+  for (const { page, sourceUrl } of pages) {
+    if (sourceUrl === undefined) continue;
+    const entry = project.document.pages.find(
+      (listed) => listed.path === page.page.path,
+    )!;
+    entry.meta = { sourceUrl };
+  }
+  return project;
 }
 
 /** The render-time id of a page's `.grid`, once the page has mounted. */
-async function gridIn(page: DreamPage): Promise<ElementId> {
+async function gridIn(page: TestPage): Promise<ElementId> {
   let id: string | null = null;
   await vi.waitFor(() => {
-    id = pageElementId(page.id, ".grid");
+    id = pageElementId(page.item.id, ".grid");
     expect(id).not.toBeNull();
   });
   return id!;
 }
 
 const notes = (): HTMLElement | null =>
-  mounted!.panel()!.querySelector('[aria-label="Document notes"]');
+  mounted!.panel()!.querySelector('[aria-label="Project notes"]');
 
 const title = (): string | undefined =>
   notes()?.querySelector(".mrbavio-notes-title")?.textContent ?? undefined;
+
+const source = (): string | undefined =>
+  notes()?.querySelector<HTMLAnchorElement>(".mrbavio-notes-source")?.href;
 
 function select(id: ElementId | null): void {
   mounted!.store.setSelectedId(id);
@@ -97,16 +107,18 @@ describe("mrbavio.notes in the shell", () => {
     expect(manifest.unstable).toBeUndefined();
   });
 
-  test("shows the selected element's viewport meta: title, notes blocks with bold, the source link", async () => {
-    const two = twoViewports();
-    two.first.payload.meta = holyGrail;
-    two.second.payload.meta = sidebar;
+  test("shows the project's meta — title, notes blocks with bold — and the selected page's source link", async () => {
+    const first = fixturePageAt(0);
+    const second = fixturePageAt(1200);
     mounted = await mountPlugin({
       entry: activate,
       manifest,
-      document: two.doc,
+      project: projectOf(
+        [{ page: first, sourceUrl: HOLY_GRAIL_SOURCE }, { page: second }],
+        holyGrail,
+      ),
     });
-    select(await gridIn(two.first));
+    select(await gridIn(first));
     const section = notes();
     expect(section).not.toBeNull();
     expect(title()).toBe("Holy grail");
@@ -129,106 +141,117 @@ describe("mrbavio.notes in the shell", () => {
     const link = section!.querySelector<HTMLAnchorElement>(
       ".mrbavio-notes-source",
     )!;
-    expect(link.href).toBe("https://example.com/holy-grail");
+    expect(link.href).toBe(HOLY_GRAIL_SOURCE);
     expect(link.textContent).toBe("example.com/holy-grail");
     expect(link.target).toBe("_blank");
     expect(link.rel).toBe("noopener noreferrer");
   });
 
-  test("follows the selection from viewport to viewport — an element inside a page or the viewport item itself — and back to the canvas meta when nothing is selected", async () => {
-    const two = twoViewports();
-    two.doc.meta = canvas;
-    two.first.payload.meta = holyGrail;
-    two.second.payload.meta = sidebar;
+  test("the source follows the selection from page to page — an element inside a page or the viewport item itself — and the title stays the project's", async () => {
+    const first = fixturePageAt(0);
+    const second = fixturePageAt(1200);
     mounted = await mountPlugin({
       entry: activate,
       manifest,
-      document: two.doc,
+      project: projectOf(
+        [
+          { page: first, sourceUrl: HOLY_GRAIL_SOURCE },
+          { page: second, sourceUrl: SIDEBAR_SOURCE },
+        ],
+        holyGrail,
+      ),
     });
-    const gridInFirst = await gridIn(two.first);
-    const gridInSecond = await gridIn(two.second);
-    expect(title()).toBe("The canvas");
-    expect(notes()!.querySelector(".mrbavio-notes-source")).toBeNull();
+    const gridInFirst = await gridIn(first);
+    const gridInSecond = await gridIn(second);
+    // Two viewports and nothing selected: no page is in view.
+    expect(title()).toBe("Holy grail");
+    expect(source()).toBeUndefined();
 
     select(gridInFirst);
-    expect(title()).toBe("Holy grail");
+    expect(source()).toBe(HOLY_GRAIL_SOURCE);
     select(gridInSecond);
-    expect(title()).toBe("Sidebar");
-    expect(notes()!.querySelector(".mrbavio-notes-source")).toBeNull();
-    select(two.first.id);
+    expect(source()).toBe(SIDEBAR_SOURCE);
+    select(first.item.id);
+    expect(source()).toBe(HOLY_GRAIL_SOURCE);
+    select(second.item.id);
+    expect(source()).toBe(SIDEBAR_SOURCE);
     expect(title()).toBe("Holy grail");
-    select(two.second.id);
-    expect(title()).toBe("Sidebar");
     select(null);
-    expect(title()).toBe("The canvas");
+    expect(source()).toBeUndefined();
+    expect(title()).toBe("Holy grail");
   });
 
-  test("a selection whose viewport has no meta falls back to the canvas meta", async () => {
-    const two = twoViewports();
-    two.doc.meta = canvas;
-    two.second.payload.meta = sidebar;
+  test("a page with no source shows the project's meta alone, and a project with no meta shows a selected page's source alone", async () => {
+    const first = fixturePageAt(0);
+    const second = fixturePageAt(1200);
     mounted = await mountPlugin({
       entry: activate,
       manifest,
-      document: two.doc,
+      project: projectOf(
+        [{ page: first }, { page: second, sourceUrl: SIDEBAR_SOURCE }],
+        holyGrail,
+      ),
     });
-    const gridInFirst = await gridIn(two.first);
-    const gridInSecond = await gridIn(two.second);
-    select(gridInFirst);
-    expect(title()).toBe("The canvas");
-    select(gridInSecond);
-    expect(title()).toBe("Sidebar");
-  });
-
-  test("a one-viewport document falls back to its sole viewport's meta; two viewports without canvas meta show nothing", async () => {
-    const doc = pageFixtureDocument();
-    fixturePage(doc).payload.meta = holyGrail;
-    mounted = await mountPlugin({ entry: activate, manifest, document: doc });
+    select(await gridIn(first));
     expect(title()).toBe("Holy grail");
-    select(await gridIn(fixturePage(doc)));
-    expect(title()).toBe("Holy grail");
+    expect(source()).toBeUndefined();
     mounted.dispose();
 
-    const two = twoViewports();
-    two.first.payload.meta = holyGrail;
+    const third = fixturePageAt(0);
+    const fourth = fixturePageAt(1200);
     mounted = await mountPlugin({
       entry: activate,
       manifest,
-      document: two.doc,
+      project: projectOf([
+        { page: third, sourceUrl: HOLY_GRAIL_SOURCE },
+        { page: fourth },
+      ]),
     });
-    const gridInFirst = await gridIn(two.first);
-    const gridInSecond = await gridIn(two.second);
+    const gridInThird = await gridIn(third);
+    const gridInFourth = await gridIn(fourth);
     expect(notes()).toBeNull();
-    select(gridInFirst);
-    expect(title()).toBe("Holy grail");
-    select(gridInSecond);
+    select(gridInThird);
+    expect(title()).toBeUndefined();
+    expect(source()).toBe(HOLY_GRAIL_SOURCE);
+    select(gridInFourth);
     expect(notes()).toBeNull();
   });
 
-  test("the pane follows a page's meta edited while one of its elements stays selected", async () => {
-    const two = twoViewports();
-    two.first.payload.meta = holyGrail;
+  test("a one-viewport project shows its sole page's source with nothing selected", async () => {
+    const page = fixturePageAt(0);
     mounted = await mountPlugin({
       entry: activate,
       manifest,
-      document: two.doc,
+      project: projectOf([{ page, sourceUrl: HOLY_GRAIL_SOURCE }]),
     });
-    select(await gridIn(two.first));
+    expect(source()).toBe(HOLY_GRAIL_SOURCE);
+    select(await gridIn(page));
+    expect(source()).toBe(HOLY_GRAIL_SOURCE);
+  });
+
+  test("the pane follows the project's meta edited while an element stays selected", async () => {
+    const page = fixturePageAt(0);
+    mounted = await mountPlugin({
+      entry: activate,
+      manifest,
+      project: projectOf([{ page }], holyGrail),
+    });
+    select(await gridIn(page));
     expect(title()).toBe("Holy grail");
-    // A css write restyles the page in place: same nodes, same ids, same
-    // selection — and the page it belongs to is still known.
     mounted.store.setDocument((d) => {
-      const page = d.items.find((i) => i.id === two.first.id) as DreamPage;
-      page.payload.css += "\n.grid { gap: 8px; }\n";
-      page.payload.meta = { ...holyGrail, title: "Holy grail, tighter" };
+      d.meta = { ...holyGrail, title: "Holy grail, tighter" };
     });
     flush();
     expect(title()).toBe("Holy grail, tighter");
   });
 
   test("renders nothing without meta, and the panel stays in the dock", async () => {
-    const doc = bareFixture();
-    mounted = await mountPlugin({ entry: activate, manifest, document: doc });
+    const page = fixturePageAt(0);
+    mounted = await mountPlugin({
+      entry: activate,
+      manifest,
+      project: projectOf([{ page }]),
+    });
     const panel = mounted.panel()!;
     expect(panel).not.toBeNull();
     expect(notes()).toBeNull();
@@ -242,24 +265,23 @@ describe("mrbavio.notes in the shell", () => {
     const body = panel.querySelector<HTMLElement>(".mrbavio-notes-panel")!;
     expect(body.children).toHaveLength(0);
     expect(body.getBoundingClientRect().height).toBe(0);
-    select(await gridIn(fixturePage(doc)));
+    select(await gridIn(page));
     expect(notes()).toBeNull();
-    // Meta landing later (a document load) shows up without a remount.
-    const next = pageFixtureDocument();
-    fixturePage(next).payload.meta = sidebar;
-    mounted.store.loadDocument(next, { slug: null });
+    // Meta arriving later (another project opened) shows up without a
+    // remount.
+    mounted.store.loadProject(
+      projectOf([{ page: fixturePageAt(0) }], { title: "Sidebar" }),
+    );
     flush();
     expect(title()).toBe("Sidebar");
   });
 
   test("a copy under another id styles its own nodes: the class prefix derives from dd.plugin.id", async () => {
-    const doc = pageFixtureDocument();
-    fixturePage(doc).payload.meta = sidebar;
     const copy: PluginManifest = { ...manifest, id: "acme.notes" };
     mounted = await mountPlugin({
       entry: activate,
       manifest,
-      document: doc,
+      project: projectOf([{ page: fixturePageAt(0) }], { title: "Sidebar" }),
       also: [{ entry: activate, manifest: copy }],
     });
     const ours = mounted.panel()!;

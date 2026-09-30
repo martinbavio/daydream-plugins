@@ -1,21 +1,19 @@
-// The notes pane (decision #48, P5): the learning companion for library
-// documents — a viewport's meta (title, notes, source) read beside the
-// canvas. Per-viewport since v3 (decision #32): the pane shows the meta
-// of the viewport owning the current selection (the viewport item itself,
-// or the page an element sits in, decision #76), falling back to the
-// canvas-level meta, then — for one-viewport documents — to the sole
-// viewport's, when nothing is selected or the selection's viewport has
-// none. Absent meta renders nothing; the panel stays registered so the
-// dock order never shifts with the document.
+// The notes pane (decision #48, P5): the learning companion for a
+// project — its meta (title, notes) read beside the canvas, with the
+// provenance of the page in view. A project's meta is the project's
+// (decision #78: `daydream.json`'s `meta`, `{ title?, notes? }`), and a
+// viewport has none of its own: what is per page is where the page came
+// from, `pages[].meta.sourceUrl`. So the title and the notes are the
+// project's whatever is selected, and the source link is the page of the
+// viewport owning the current selection (the viewport item itself, or
+// the page an element sits in, decision #76) — or, with nothing selected
+// in a one-viewport project, the sole viewport's page. Absent meta
+// renders nothing; the panel stays registered so the dock order never
+// shifts with the document.
 
 import { createMemo, For, Show, untrack } from "solid-js";
 
-import type {
-  DaydreamApi,
-  DeepReadonly,
-  DreamMeta,
-  ElementId,
-} from "@daydream/plugin-api";
+import type { DaydreamApi, ElementId } from "@daydream/plugin-api";
 
 import { boldSegments, parseNotes } from "./notesFormat";
 import { classPrefix } from "./styles";
@@ -38,28 +36,37 @@ export default function createNotesPanel(dd: DaydreamApi) {
   const pageOf = (id: ElementId): string | null =>
     untrack(() => dd.pageElement(id))?.viewportId ?? null;
 
-  const meta = createMemo<DeepReadonly<DreamMeta> | undefined>(() => {
+  const meta = createMemo<Shown | undefined>(() => {
     const doc = dd.document();
     const id = dd.selection();
     const viewports = dd.core.viewportItems(doc);
-    if (id !== null) {
-      // A viewport item selected whole, else the page an element is in.
-      const vp =
-        viewports.find((v) => v.id === id) ??
-        (doc.items.some((item) => item.id === id)
-          ? undefined
-          : viewports.find((v) => v.id === pageOf(id)));
-      if (vp?.payload.meta !== undefined) return vp.payload.meta;
-    }
-    if (doc.meta !== undefined) return doc.meta;
-    return viewports.length === 1 ? viewports[0]?.payload.meta : undefined;
+    // A viewport item selected whole, else the page an element is in;
+    // with nothing selected, a sole viewport.
+    const vp =
+      id === null
+        ? viewports.length === 1
+          ? viewports[0]
+          : undefined
+        : (viewports.find((v) => v.id === id) ??
+          (doc.canvases[0]?.items.some((item) => item.id === id)
+            ? undefined
+            : viewports.find((v) => v.id === pageOf(id))));
+    const sourceUrl =
+      vp === undefined
+        ? undefined
+        : doc.pages.find((page) => page.path === vp.payload.page)?.meta
+            ?.sourceUrl;
+    const { title, notes } = doc.meta ?? {};
+    if (title === undefined && notes === undefined && sourceUrl === undefined)
+      return undefined;
+    return { title, notes, sourceUrl };
   });
 
   return (
     <div class={`${p}-panel`}>
       <Show when={meta()}>
         {(meta) => (
-          <section class={`${p}-body`} aria-label="Document notes">
+          <section class={`${p}-body`} aria-label="Project notes">
             <Show when={meta().title}>
               <h3 class={`${p}-title`}>{meta().title}</h3>
             </Show>
@@ -103,6 +110,14 @@ export default function createNotesPanel(dd: DaydreamApi) {
       </Show>
     </div>
   );
+}
+
+/** What the pane shows: the project's title and notes, and the source of
+ * the page in view. */
+interface Shown {
+  title: string | undefined;
+  notes: string | undefined;
+  sourceUrl: string | undefined;
 }
 
 /** Inline **bold** rendering: odd segments from boldSegments are <strong>.
