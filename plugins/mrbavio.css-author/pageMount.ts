@@ -6,19 +6,27 @@
 // query read one way by one and another way by the other. Browser only.
 //
 // A mount is the live face core renders (`dd.mountViewport`, the page's
-// own text in an iframe), bare — nothing the measurer adds for its own
-// read — and motion pinned off: a remove-and-read is synchronous, and a
-// transition would answer it with its start value.
+// own text in an iframe, each live sheet a `<style>` of its own), bare —
+// nothing the measurer adds for its own read — and motion pinned off: a
+// remove-and-read is synchronous, and a transition would answer it with
+// its start value.
 // What a condition answers is the mounted window's own — the one the page
 // renders with.
 
 import type {
   BareMountedViewport,
+  CoreApi,
   DaydreamApi,
-  DreamPage,
 } from "@daydream/plugin-api";
 
-import { atKeyword, withoutRanges } from "./pageCss";
+import { atKeyword, sheetRules, withoutRanges, type PageRule } from "./pageCss";
+import {
+  writtenRules,
+  type Page,
+  type ReadSheets,
+  type Viewport,
+  type WrittenRule,
+} from "./pageSheets";
 
 /** What a mounting lint needs from the API object: the pure helpers and
  * the live mount. A gate hands in its `dd`; a test hands in a test
@@ -26,22 +34,31 @@ import { atKeyword, withoutRanges } from "./pageCss";
 export type MountHost = Pick<DaydreamApi, "core" | "mountViewport">;
 
 /** `[start, end)` of a declaration in a text: its `style` attribute's,
- * or the page's css. */
+ * or a sheet's. */
 export type TextRange = readonly [number, number];
 
+/** A declaration's place in a mounted copy's css: which of its sheets
+ * (`MountedSheets.styles`), and where in that sheet's text. */
+export interface SheetRange {
+  sheet: number;
+  range: TextRange;
+}
+
 /** Mount (motion pinned off), run, dispose — the one lifecycle every
- * mount of a lint follows, a thrown read included. `width` undefined is
- * the frame's own; a number is the same window at that width. */
+ * mount of a lint follows, a thrown read included. The viewport's page
+ * is the project's (`dd.mountViewport` reads it from the store: the page
+ * the gate's `ctx.page` hands the lints). `width` undefined is the
+ * frame's own; a number is the same window at that width. */
 export async function withMount<T>(
   dd: MountHost,
-  page: DreamPage,
+  viewport: Viewport,
   width: number | undefined,
   run: (mounted: BareMountedViewport) => Promise<T>,
 ): Promise<T> {
-  const mounted = await dd.mountViewport(page, {
+  const mounted = await dd.mountViewport(viewport, {
     still: true,
     // The page alone: nothing of the measurer's own in the copy, so its
-    // `<style>` is the page's css (pageDom.ts mountedStyle).
+    // `<style>`s are the page's live sheets (pageDom.ts mountedStyles).
     bare: true,
     ...(width === undefined ? {} : { width }),
   });
@@ -52,21 +69,48 @@ export async function withMount<T>(
   }
 }
 
+/** A mounted copy's css, read: its `<style>`s in cascade order, every
+ * style rule across them — `index` its position in that order, `sheet`
+ * its `<style>`'s position in `styles`, its ranges in that `<style>`'s
+ * text — and each rule as the page writes it (pageSheets.ts
+ * `writtenRules`), by index: how a finding numbers and names it. */
+export interface MountedSheets {
+  styles: HTMLStyleElement[];
+  rules: PageRule[];
+  written: WrittenRule[];
+}
+
+/** Read the copy's `styles` (pageDom.ts mountedStyles), each as `texts`
+ * holds it — by default, its text as it stands — against the page's own
+ * sheets (`read`). */
+export function mountedSheets(
+  core: CoreApi,
+  page: Page,
+  read: ReadSheets,
+  styles: HTMLStyleElement[],
+  texts: readonly string[] = styles.map((style) => style.textContent ?? ""),
+): MountedSheets {
+  const rules = sheetRules(texts.map((text) => core.cssBlocks(text)));
+  const bySheet = styles.map((_, sheet) =>
+    rules.filter((rule) => rule.sheet === sheet),
+  );
+  return { styles, rules, written: writtenRules(page, read, bySheet).flat() };
+}
+
 /**
- * Remove, read, restore: `css` ranges cut from the page's `<style>` in
- * the copy (pageDom.ts mountedStyle) and `inline` ranges from each
- * element's `style`, in one write; then `read`; then everything put back
- * as it was, a thrown read included. The ranges are offsets in the texts
- * as they stand when this is called. With no `<style>`, the css ranges
- * cut nothing.
+ * Remove, read, restore: `css` ranges cut from the copy's `<style>`s
+ * (`styles`, each range from the one it names) and `inline` ranges from
+ * each element's `style`, in one write; then `read`; then everything put
+ * back as it was, a thrown read included. The ranges are offsets in the
+ * texts as they stand when this is called.
  */
 export function readWithout<T>(
-  style: HTMLStyleElement | null,
-  css: readonly TextRange[],
+  styles: readonly HTMLStyleElement[],
+  css: readonly SheetRange[],
   inline: ReadonlyMap<Element, readonly TextRange[]>,
   read: () => T,
 ): T {
-  const restore = cut(style, css, inline);
+  const restore = cut(styles, css, inline);
   try {
     return read();
   } finally {
@@ -86,12 +130,12 @@ export function readWithout<T>(
  */
 export async function readWithoutReloading<T>(
   doc: Document,
-  style: HTMLStyleElement | null,
-  css: readonly TextRange[],
+  styles: readonly HTMLStyleElement[],
+  css: readonly SheetRange[],
   inline: ReadonlyMap<Element, readonly TextRange[]>,
   read: () => T,
 ): Promise<T> {
-  const restore = cut(style, css, inline);
+  const restore = cut(styles, css, inline);
   try {
     doc.documentElement.getBoundingClientRect();
     if (doc.fonts.status === "loading") await doc.fonts.ready;
@@ -101,26 +145,37 @@ export async function readWithoutReloading<T>(
   }
 }
 
-/** The write of `readWithout`, answering what puts it back. */
+/** The write of `readWithout`, answering what puts it back: each
+ * `<style>` a range names written once, with all of its ranges cut. */
 function cut(
-  style: HTMLStyleElement | null,
-  css: readonly TextRange[],
+  styles: readonly HTMLStyleElement[],
+  css: readonly SheetRange[],
   inline: ReadonlyMap<Element, readonly TextRange[]>,
 ): () => void {
-  const sheet = style?.textContent ?? "";
+  const ranges = new Map<HTMLStyleElement, TextRange[]>();
+  for (const { sheet, range } of css) {
+    const style = styles[sheet];
+    if (style === undefined) continue;
+    const list = ranges.get(style) ?? [];
+    list.push(range);
+    ranges.set(style, list);
+  }
+  const sheets = new Map(
+    Array.from(ranges.keys(), (style) => [style, style.textContent ?? ""]),
+  );
   const attributes = new Map(
     Array.from(inline.keys(), (node) => [node, node.getAttribute("style") ?? ""]),
   );
   const restore = (): void => {
-    if (style !== null && css.length > 0) style.textContent = sheet;
+    for (const [style, text] of sheets) style.textContent = text;
     for (const [node, text] of attributes) node.setAttribute("style", text);
   };
   try {
-    if (style !== null && css.length > 0) {
-      style.textContent = withoutRanges(sheet, css);
+    for (const [style, list] of ranges) {
+      style.textContent = withoutRanges(sheets.get(style)!, list);
     }
-    for (const [node, ranges] of inline) {
-      node.setAttribute("style", withoutRanges(attributes.get(node)!, ranges));
+    for (const [node, list] of inline) {
+      node.setAttribute("style", withoutRanges(attributes.get(node)!, list));
     }
   } catch (error) {
     restore();

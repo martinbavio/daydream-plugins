@@ -13,7 +13,7 @@
 //   document's for a top-level `@scope`, and each enclosing root's in
 //   scope for one nested in another; a prelude with no start has the
 //   parent of the sheet's `<style>` for its root (the mounted copy's
-//   head, where the page's css is);
+//   head, where the page's sheets are);
 // - an element at or under a LIMIT — what the end selects beneath a root,
 //   the root itself included when the end names `:scope` — is out of that
 //   root's scope;

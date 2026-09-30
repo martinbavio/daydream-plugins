@@ -15,7 +15,7 @@ tags:
   ]
 tier: procedure
 status: v1 draft from general expertise — to be corrected against the maintainer's notes; hard budget about 1,200 tokens
-summary: Decision procedures against the three judgment failures — which formatting context, whether a declaration is needed at all, where in the cascade to set it — and the author → land → fix → land loop.
+summary: Decision procedures against the three judgment failures — which formatting context, whether a declaration is needed at all, where in the cascade to set it — and the author → write → lint → fix loop.
 ---
 
 ## 1. Which formatting context
@@ -38,7 +38,7 @@ Ask four questions; if any answers yes, do not write it.
 3. **Does the UA stylesheet already set it on this tag?** `h1` is bold and large; `p` and `h*` carry vertical margins; `ul` carries left padding; `body` carries 8px margin; `img` is inline; `button` has its own font, padding and border. Restate only to CHANGE it.
 4. **Is it implied or made inert by another declaration?** `align-items` on a box that is not flex or grid, `flex-wrap` without `display: flex`, `top` or `inset` on a static box, `width: 100%` on a block child, `justify-content` where `gap` already does the job, `min-width: 0` where nothing overflows. Drop it.
 
-Then: would the page change if this line went — at this width or at another? If at none, the necessity lint will report it dead; remove it before landing, not after.
+Then: would the page change if this line went — at this width or at another? If at none, the necessity lint will report it dead; leave it out when you write the page, not after the lint.
 
 ## 3. Cascade reasoning
 
@@ -55,6 +55,6 @@ Then: would the page change if this line went — at this width or at another? I
 
 1. This file rides the `dream-author` prompt; `knowledge_bundle {query}` brings the format rules with the nearest example.
 2. Gather the source or the intent; decide each container's formatting context with §1.
-3. Author the smallest document; pass every declaration through §2 and §3.
-4. Land it (the server instructions name the tool) and let every gate run there — format, static, necessity; a refusal's findings say what to fix, then land again.
-5. Then read what came back: it names what still needs fixing, if anything, with the element to fix it on. Your reply comes from that, not from a second look; the track summaries are `measure`'s.
+3. Author the smallest page; pass every declaration through §2 and §3.
+4. Write it into the project's files (the `dream-author` prompt says how), then `lint`: every enabled gate runs over the project's pages — static, necessity. Each finding names the element, or the rule and the stylesheet it is written in; fix it in that file and lint again.
+5. Your reply comes from what `lint` and `measure` answered, not from a second look; the track summaries are `measure`'s.

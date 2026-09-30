@@ -9,32 +9,47 @@
 // and so did an explicit initial value, which is measured.
 import { describe, expect, test } from "vitest";
 
-import type { DreamDocument, Finding } from "@daydream/plugin-api";
-import { coreApi, createPageItem } from "@daydream/plugin-testing";
+import type { Finding, PageSheet } from "@daydream/plugin-api";
+import {
+  coreApi,
+  createPageItem,
+  testProject,
+  type TestProject,
+} from "@daydream/plugin-testing";
 
 import { staticLint as lintWith } from "./staticLint";
+import { pagesOf, withSheets } from "./testPages";
 
-const staticLint = (document: DreamDocument): Finding[] =>
-  lintWith(coreApi(), document);
+/** The lint over a project, each viewport's page read as a gate's
+ * context hands it. */
+const staticLint = (project: TestProject): Finding[] =>
+  lintWith(coreApi(), project.document, pagesOf(project));
 
-/** One page, id `v1`, 960 wide: the body's markup and the css. */
-function page(body: string, css = "", html = ""): DreamDocument {
-  return {
-    version: 7,
-    items: [
-      createPageItem(
-        {
-          html: `<!doctype html><html${html}><head><title>t</title></head><body>${body}</body></html>`,
-          css,
-        },
-        { id: "v1", frame: { width: 960 } },
-      ),
-    ],
-  };
+/** The markup of a page: the body's, and attributes of its root. */
+const markup = (body: string, html = ""): string =>
+  `<!doctype html><html${html}><head><title>t</title></head><body>${body}</body></html>`;
+
+/** One page, `v1.html` in viewport `v1`, 960 wide: the body's markup and
+ * the css, its one sheet `v1.css`. */
+function page(body: string, css = "", html = ""): TestProject {
+  return testProject([
+    createPageItem({ html: markup(body, html), css }, { id: "v1", frame: { width: 960 } }),
+  ]);
+}
+
+/** One page, `v1.html` in viewport `v1`: the body's markup and its
+ * sheets, as given. */
+function sheeted(body: string, sheets: PageSheet[]): TestProject {
+  return testProject([
+    withSheets(
+      createPageItem({ html: markup(body) }, { id: "v1", frame: { width: 960 } }),
+      sheets,
+    ),
+  ]);
 }
 
 /** One element, `#box`, with the given own style. */
-function box(style: string): DreamDocument {
+function box(style: string): TestProject {
   return page(`<div id="box" style="${style}"></div>`);
 }
 
@@ -107,7 +122,7 @@ describe("staticLint: unit-less lengths (rule 1)", () => {
         rule: 1,
         property: "gap",
         message:
-          "gap: 24 in rule `#box` in `@media (width >= 600px)` of viewport v1 has no unit; a length needs one (px, rem, %, …)",
+          "gap: 24 in rule `#box` in `@media (width >= 600px)` of `v1.css` has no unit; a length needs one (px, rem, %, …)",
       },
     ]);
   });
@@ -130,7 +145,7 @@ describe("staticLint: unit-less lengths (rule 1)", () => {
         "rule `.a` in `@media (min-height: 2000px)`",
       ].map((name, i) => [
         i,
-        `gap: ${i + 1} in ${name} of viewport v1 has no unit; a length needs one (px, rem, %, …)`,
+        `gap: ${i + 1} in ${name} of \`v1.css\` has no unit; a length needs one (px, rem, %, …)`,
       ]),
     );
   });
@@ -165,7 +180,7 @@ describe("staticLint: whole document", () => {
       "body { margin: 0; }\n.grid { display: grid; grid-template-columns: 1fr 2fr; gap: 16px; }",
     );
     expect(staticLint(clean)).toEqual([]);
-    expect(staticLint({ version: 7, items: [] })).toEqual([]);
+    expect(staticLint(testProject([]))).toEqual([]);
   });
 
   test("findings come in tree order, one element's together, then the rules'", () => {
@@ -196,34 +211,150 @@ describe("staticLint: whole document", () => {
   test("a page with no doctype is read in standards mode, as it renders: a class differing only in case is another class", () => {
     // In quirks mode `div.a` would match both, and the name would need an
     // index the canvas and an agent's selector do not.
-    const doc: DreamDocument = {
-      version: 7,
-      items: [
-        createPageItem(
-          {
-            html: '<html><head></head><body><div class="a" style="width: 10"></div><div class="A"></div></body></html>',
-            css: ".a {}\n.A {}",
-          },
-          { id: "v1", frame: { width: 960 } },
-        ),
-      ],
-    };
+    const doc = testProject([
+      createPageItem(
+        {
+          html: '<html><head></head><body><div class="a" style="width: 10"></div><div class="A"></div></body></html>',
+          css: ".a {}\n.A {}",
+        },
+        { id: "v1", frame: { width: 960 } },
+      ),
+    ]);
     expect(staticLint(doc).map((f) => f.elementId)).toEqual(["div.a"]);
   });
 
-  test("a `<style>` the markup keeps in a noscript is not the page's css: its rules are never read, nor take an index", () => {
-    // The kernel's clean folds every other `<style>` into the css before
-    // a gate runs; a noscript's stays where it was written, for the
-    // script-free reader, and the canvas renders none of it.
-    const doc = page(
-      '<noscript><style>.late { width: 100 }</style></noscript><div class="card"></div>',
-      ".card { height: 20 }",
+  test("a page shown by several viewports is judged once, named by its path", () => {
+    const one = createPageItem(
+      { html: markup('<div class="card" style="width: 10"></div>'), css: ".card { height: 20 }" },
+      { id: "v1", path: "index.html", frame: { width: 960 } },
     );
-    expect(
-      staticLint(doc)
-        .filter((f) => f.rule !== undefined)
-        .map((f) => [f.rule, f.property]),
-    ).toEqual([[0, "height"]]);
+    const two = createPageItem({ html: "" }, { id: "v2", path: "index.html", frame: { width: 390 } });
+    const findings = staticLint(testProject([one, two]));
+    expect(findings.map((f) => f.message)).toEqual([
+      "width: 10 on `div.card` has no unit; a length needs one (px, rem, %, …)",
+      "height: 20 in rule `.card` of `index.css` has no unit; a length needs one (px, rem, %, …)",
+    ]);
+  });
+
+  test("a viewport whose page the project does not hold is one advisory finding, and nothing else is read of it", () => {
+    const shown = createPageItem({ html: markup("") }, { id: "v1", frame: { width: 960 } });
+    const project = testProject([
+      { ...shown.item, payload: { page: "gone.html" } },
+    ]);
+    expect(staticLint(project)).toEqual([
+      {
+        tier: "static",
+        severity: "advisory",
+        message:
+          "viewport v1 shows gone.html, which the project holds no page for, so no lint read it",
+      },
+    ]);
+  });
+});
+
+describe("staticLint: a page of several sheets", () => {
+  const sheet = (source: PageSheet["source"], text: string, readOnly = false): PageSheet => ({
+    source,
+    text,
+    readOnly,
+  });
+
+  test("its rules are numbered across its sheets in the page's order, each named with the sheet it is written in", () => {
+    const project = sheeted('<div class="a"></div>', [
+      sheet({ file: "base.css" }, ".a { gap: 1 }\n.a { gap: 2px }"),
+      sheet({ style: 0 }, ".a { margin: 3 }"),
+      sheet({ file: "css/site.css" }, "@media print { .a { padding: 4 } }"),
+    ]);
+    expect(staticLint(project).map((f) => [f.rule, f.message])).toEqual([
+      [0, "gap: 1 in rule `.a` of `base.css` has no unit; a length needs one (px, rem, %, …)"],
+      [
+        2,
+        "margin: 3 in rule `.a` of `<style>` block 1 of `v1.html` has no unit; a length needs one (px, rem, %, …)",
+      ],
+      [
+        3,
+        "padding: 4 in rule `.a` in `@media print` of `css/site.css` has no unit; a length needs one (px, rem, %, …)",
+      ],
+    ]);
+  });
+
+  test("a read-only sheet's rules are never a finding's subject, yet they count: a class only they name is named, a family only they use is used, and their rules take their numbers", () => {
+    const project = sheeted('<div class="btn"></div>', [
+      sheet(
+        { url: "https://cdn.example/kit.css" },
+        ".btn { width: 100 }\n.kit { font-family: Brand }\n@font-face { font-family: Kit; src: local(Arial) }",
+        true,
+      ),
+      sheet(
+        { file: "v1.css" },
+        "@font-face { font-family: Brand; src: local(Arial) }\n.x { gap: 5 }",
+      ),
+    ]);
+    expect(staticLint(project).map((f) => [f.rule, f.elementId, f.message])).toEqual([
+      [
+        2,
+        undefined,
+        "gap: 5 in rule `.x` of `v1.css` has no unit; a length needs one (px, rem, %, …)",
+      ],
+    ]);
+  });
+
+  test("a remote sheet not fetched yet is an empty text: nothing to read, and no finding", () => {
+    const project = sheeted('<div class="card"></div>', [
+      sheet({ url: "https://cdn.example/kit.css" }, "", true),
+      sheet({ file: "v1.css" }, ".card { color: red }"),
+    ]);
+    expect(staticLint(project)).toEqual([]);
+  });
+
+  test("a sheet several pages link is one text: a unit-less length in it is said once, and its face is used when any of them names it", () => {
+    const shared = sheet(
+      { file: "site.css" },
+      "@font-face { font-family: Brand; src: local(Arial) }\n@font-face { font-family: Unused; src: local(Arial) }\n.a { gap: 1 }",
+    );
+    const at = (id: string, style: string) =>
+      withSheets(
+        createPageItem(
+          { html: markup(`<div class="a" style="${style}"></div>`) },
+          { id, frame: { width: 960 } },
+        ),
+        [shared],
+      );
+    const project = testProject([at("v1", ""), at("v2", "font-family: Brand")]);
+    expect(staticLint(project).map((f) => f.message)).toEqual([
+      "@font-face Unused in `site.css` is named by no font-family in pages `v1.html` and `v2.html` — remove the face or use it",
+      "gap: 1 in rule `.a` of `site.css` has no unit; a length needs one (px, rem, %, …)",
+    ]);
+  });
+
+  test("a stray `;` that drops a rule is judged per sheet, named with its sheet and its line there: never a read-only sheet's, and a shared sheet's once", () => {
+    const shared = sheet({ file: "site.css" }, ".a { color: red }\n; .b { color: blue }");
+    const at = (id: string, own: PageSheet[]) =>
+      withSheets(
+        createPageItem(
+          { html: markup('<div class="a"></div><div class="b"></div>') },
+          { id, frame: { width: 960 } },
+        ),
+        own,
+      );
+    const project = testProject([
+      at("v1", [
+        sheet({ url: "https://cdn.example/kit.css" }, ".a { color: red }; .b { color: red }", true),
+        shared,
+        sheet({ style: 0 }, "@media print {\n  .a { color: red }\n  ; .b { color: red }\n}"),
+      ]),
+      at("v2", [shared]),
+    ]);
+    expect(staticLint(project).map((f) => [f.rule, f.message])).toEqual([
+      [
+        undefined,
+        "the stray `;` before `.b` on line 2 of `site.css` makes the browser drop the rule `.b`; remove it",
+      ],
+      [
+        undefined,
+        "the stray `;` before `.b` in `@media print` on line 3 of `<style>` block 1 of `v1.html` makes the browser drop the rule `.b`; remove it",
+      ],
+    ]);
   });
 });
 
@@ -259,7 +390,7 @@ describe("staticLint: a @font-face nothing names (rule 3)", () => {
         (f) => f.message,
       ),
     ).toEqual([
-      "@font-face Mont in viewport v1 is named by no font-family in the page — remove the face or use it",
+      "@font-face Mont in `v1.css` is named by no font-family in page `v1.html` — remove the face or use it",
     ]);
   });
 
@@ -291,7 +422,7 @@ describe("staticLint: a @font-face nothing names (rule 3)", () => {
         severity: "blocking",
         elementId: "html",
         message:
-          "@font-face Noto Serif in viewport v1 is named by no font-family in the page — remove the face or use it",
+          "@font-face Noto Serif in `v1.css` is named by no font-family in page `v1.html` — remove the face or use it",
       },
     ]);
   });
@@ -312,7 +443,7 @@ describe("staticLint: rule-level findings", () => {
         rule: 0,
         property: "width",
         message:
-          "width: 100 in rule `.card` of viewport v1 has no unit; a length needs one (px, rem, %, …)",
+          "width: 100 in rule `.card` of `v1.css` has no unit; a length needs one (px, rem, %, …)",
       },
     ]);
   });
@@ -334,7 +465,7 @@ describe("staticLint: a class no rule names (rule 4)", () => {
         severity: "blocking",
         elementId: "div.card.featured",
         message:
-          'class "featured" on `div.card.featured` in viewport v1 is named by no rule; drop it, or write the rule that uses it',
+          'class "featured" on `div.card.featured` in page `v1.html` is named by no rule; drop it, or write the rule that uses it',
       },
     ]);
   });

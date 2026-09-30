@@ -40,13 +40,17 @@ that differs, and nothing else.
 
 ## The page
 
-The markup:
+The page is two files of the project: `index.html`, which links its
+stylesheet, and `style.css` beside it.
+
+`index.html`:
 
 ```html
 <!doctype html>
 <html lang="en">
   <head>
     <title>Three-column page</title>
+    <link rel="stylesheet" href="style.css">
   </head>
   <body>
     <nav class="card">
@@ -67,7 +71,7 @@ The markup:
 </html>
 ```
 
-Its css:
+`style.css`:
 
 ```css
 html {
@@ -109,31 +113,34 @@ main {
 }
 ```
 
-As the document an agent lands, the same two texts as the page's strings:
+The project's `daydream.json`, one viewport showing the page:
 
 ```json
 {
-  "version": 7,
+  "version": 8,
   "meta": {
     "title": "Three-column page"
   },
-  "items": [
+  "pages": [
     {
-      "kind": "daydream.viewport",
-      "frame": {
-        "width": 960
-      },
-      "position": {
-        "x": 0,
-        "y": 0
-      },
-      "payload": {
-        "meta": {
-          "title": "Three-column page — fixed sidebars, fluid article"
-        },
-        "html": "<!doctype html>\n<html lang=\"en\">\n  <head>\n    <title>Three-column page</title>\n  </head>\n  <body>\n    <nav class=\"card\">\n      <p>Overview</p>\n      <p>Getting started</p>\n      <p>A much longer entry that wraps</p>\n    </nav>\n    <main>\n      <h1>Why the sidebars never move</h1>\n      <p>The article is the only flexible track. Everything the frame gains or loses shows up here, while the navigation and the aside keep the width they were given.</p>\n      <p>Supercalifragilisticexpialidocious is one word, so the column cannot shrink below it — that floor is the min-content size of this paragraph.</p>\n    </main>\n    <aside class=\"card\">\n      <p>Related</p>\n      <p>Short.</p>\n    </aside>\n  </body>\n</html>\n",
-        "css": "html {\n  font-family: system-ui, sans-serif;\n  line-height: 1.5;\n  color: #222222;\n  background: #f4f2ec;\n}\n\nbody {\n  margin: 0;\n  padding: 2rem;\n  display: grid;\n  grid-template-columns: 12rem 1fr 10rem;\n  gap: 2rem;\n}\n\n@media (width < 640px) {\n  body {\n    grid-template-columns: 1fr;\n  }\n}\n\n.card {\n  padding: 1rem;\n}\n\nnav {\n  background: #dfe6d9;\n}\n\naside {\n  background: #e8dfd0;\n}\n\nmain {\n  padding: 1rem 1.5rem;\n  background: #ffffff;\n}\n"
-      }
+      "path": "index.html"
+    }
+  ],
+  "canvases": [
+    {
+      "id": "first",
+      "name": "First Canvas",
+      "items": [
+        {
+          "id": "three-column-page",
+          "kind": "daydream.viewport",
+          "position": { "x": 0, "y": 0 },
+          "frame": { "width": 960 },
+          "payload": {
+            "page": "index.html"
+          }
+        }
+      ]
     }
   ]
 }

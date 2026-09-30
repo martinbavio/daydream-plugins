@@ -9,24 +9,27 @@
 // JUDGEMENT — which is why it lives in the css-author plugin and not in
 // the kernel.
 //
-// A PAGE (decision #76) is text, so a declaration is removed from the
-// TEXT: the mount is the caller's alone and nothing done to it is stored
-// (`BareMountedViewport.document()`), so the page's `<style>` in the mounted
-// copy has the declaration cut out of it — exactly the characters the
-// author wrote, found by the kernel's scan (`dd.core.cssBlocks`, read by
-// pageCss.ts) — and is put back after
-// the read; an element's own declaration is cut from its `style`
-// attribute the same way. The browser parses what is left, so the answer
+// A PAGE (decision #76, #78) is text, so a declaration is removed from
+// the TEXT: the mount is the caller's alone and nothing done to it is
+// stored (`BareMountedViewport.document()`), so the mounted copy's
+// `<style>` for the sheet the declaration is in — one per live sheet,
+// each paired with the page's sheet it renders (pageSheets.ts) — has the
+// declaration cut out of it, exactly the characters the author wrote,
+// found by the kernel's scan (`dd.core.cssBlocks`, read by pageCss.ts),
+// and is put back after the read; an element's own declaration is cut
+// from its `style` attribute the same way. A read-only sheet's (a remote
+// one's) declarations are cut only to judge another's with them (rule 1
+// below), never judged themselves: the author cannot edit that sheet. The browser parses what is left, so the answer
 // is the page without that line, whatever the line was: a shorthand, a
 // fallback, a declaration the parser drops, a custom property. Web fonts
 // would make that dishonest: re-parsing a sheet that declares a face
 // reloads it, and a face still loading reads as a changed page — every
-// declaration would read live. So the page's `@font-face` rules, at the
-// top or inside a group rule, are moved to a `<style>` of their own
+// declaration would read live. So each sheet's `@font-face` rules, at
+// the top or inside a group rule, are moved to a `<style>` of their own
 // before the baseline, and where a re-parse still reloads a face (a page
 // with an `@layer` reloads every one), the read waits for it
 // (pageMount.ts readWithoutReloading). The page is mounted bare, so the
-// mounted css is the page's and nothing of the measurer's.
+// mounted sheets are the page's and nothing of the measurer's.
 //
 // What that catches is the "just in case" class of failure: explicit
 // initial values, a custom property nothing reads, a declaration the
@@ -79,10 +82,11 @@
 //    nothing at THIS width and everything at another. So a declaration
 //    that reads dead at the viewport's own frame is judged again with the
 //    same window at a sweep of other widths — the fixed SWEEP_WIDTHS plus
-//    every px breakpoint the page's `@media` preludes name, with one px
+//    every px breakpoint the page's live sheets' `@media` preludes name
+//    (a sheet's `media` among them), with one px
 //    either side of each — and is dead only if it changes nothing at
 //    every one of them. The frame is judged first and in full; the probes
-//    re-judge only the survivors, so a clean page (the common landing)
+//    re-judge only the survivors, so a clean page (the common case)
 //    never mounts a probe at all. The finding names every width it was
 //    dead at. This only ever ACQUITS — and a rule whose `@media` or
 //    `@supports` held at none of those widths is not judged at all: the
@@ -96,11 +100,14 @@
 // 3. CROSS-VIEWPORT INTERSECTION. With several viewports, a declaration is
 //    dead only if it is dead in EVERY viewport where it exists (and
 //    applies: a rule not judged in one viewport has no say there). An
-//    element's own declaration corresponds by the element's unique
-//    selector and the property; a rule's by its selector as written, the
-//    rules it is nested in, its at-rules and its occurrence among rules of
-//    that shape — never by its index, which is a position in one page. A
-//    finding names the declaration as it appears in the first viewport.
+//    element's own declaration corresponds by its page, the element's
+//    unique selector and the property; a rule's by the sheet it is in (a
+//    file several pages link is one sheet, so its line is dead only where
+//    it is dead in every page that links it), its selector as written,
+//    the rules it is nested in, its at-rules and its occurrence among
+//    rules of that shape in the sheet — never by its index, which is a
+//    position in one page. A finding names the declaration as it appears
+//    in the first viewport.
 //    So a declaration found live in one viewport is answered: a later
 //    viewport where it reads dead at the frame sweeps nothing for it.
 //
@@ -108,7 +115,8 @@
 // read walks every element and stops at the first difference — so LIVE
 // declarations (the common case) exit early and only dead ones pay a full
 // sweep, and only dead ones are carried into the probe mounts. A rule's
-// removal re-parses the page's css, which is cheap beside the read.
+// removal re-parses the one sheet it is cut from, which is cheap beside
+// the read.
 // Computed style is snapshotted as the FULL getComputedStyle enumeration
 // minus custom properties (see snapshotProperties for why).
 
@@ -117,8 +125,8 @@ import type {
   CoreApi,
   CssBlock,
   CssDeclaration,
+  DeepReadonly,
   DreamDocument,
-  DreamPage,
   Finding,
 } from "@daydream/plugin-api";
 
@@ -127,7 +135,6 @@ import {
   atKeyword,
   fontFaceBlocks,
   mediaPreludes,
-  pageRules,
   ruleName,
   selectorForMatching,
   splitTopLevelCommas,
@@ -136,16 +143,28 @@ import {
 } from "./pageCss";
 import {
   lintElements,
-  mountedStyle,
+  mountedStyles,
   storedNames,
 } from "./pageDom";
 import {
   conditionsHold,
+  mountedSheets,
   readWithoutReloading,
   withMount,
   type MountHost,
+  type SheetRange,
   type TextRange,
 } from "./pageMount";
+import {
+  readSheets,
+  shownPages,
+  type Page,
+  type PageOf,
+  type ReadSheets,
+  type Shown,
+  type Viewport,
+  type WrittenRule,
+} from "./pageSheets";
 import { ruleMatcher } from "./ruleMatch";
 import { hasStatePseudo } from "./statePseudo";
 
@@ -191,24 +210,26 @@ export function isExemptProperty(property: string): boolean {
 /**
  * Every dead declaration of the document, as findings — dead at every
  * swept width (rule 2) in every viewport where it exists (rule 3). Each
- * viewport is mounted once at its frame (one iframe), baselined, then
- * every element's own declarations and every rule's are removed, read
- * against the baseline and restored, in that order; the survivors are then
- * re-judged at each probe width in a fresh mount. Every iframe is
- * disposed, a thrown read included. After the dead declarations, one
- * advisory finding per viewport whose copy could not load an image.
- * Browser only.
+ * viewport's page (`pageOf`, the gate's `ctx.page`) is mounted once at its
+ * frame (one iframe), baselined, then every element's own declarations
+ * and every rule's are removed, read against the baseline and restored,
+ * in that order; the survivors are then re-judged at each probe width in
+ * a fresh mount. Every iframe is disposed, a thrown read included. A
+ * viewport whose page the project does not hold is skipped (the static
+ * lint reports it). After the dead declarations, one advisory finding per
+ * viewport whose copy could not load an image. Browser only.
  */
 export async function necessityLint(
   dd: NecessityHost,
-  doc: DreamDocument,
+  doc: DeepReadonly<DreamDocument>,
+  pageOf: PageOf,
   options: NecessityOptions = {},
 ): Promise<Finding[]> {
   const perViewport: Candidate[][] = [];
   const notes: Finding[] = [];
   const live = new Set<string>();
-  for (const page of selectViewports(dd.core, doc, options.viewportIds)) {
-    const judged = await lintViewport(dd, page, live, options.deadline);
+  for (const shown of selectViewports(dd.core, doc, pageOf, options.viewportIds)) {
+    const judged = await lintViewport(dd, shown, live, options.deadline);
     perViewport.push(judged.candidates);
     notes.push(...judged.notes);
     for (const c of judged.candidates) if (!c.dead) live.add(c.key);
@@ -216,23 +237,24 @@ export async function necessityLint(
   return [...intersect(perViewport), ...notes];
 }
 
-/** The document's viewports, or the named subset in document order. An
- * unknown id is an error, not a silent skip — the same rule as core's
- * measure. */
+/** The document's viewports with their pages, or the named subset in
+ * document order. An unknown id is an error, not a silent skip — the same
+ * rule as core's measure. */
 function selectViewports(
   core: CoreApi,
-  doc: DreamDocument,
+  doc: DeepReadonly<DreamDocument>,
+  pageOf: PageOf,
   viewportIds: string[] | undefined,
-): DreamPage[] {
-  const viewports = core.viewportItems(doc) as DreamPage[];
-  if (viewportIds === undefined) return viewports;
+): Shown[] {
+  const { shown } = shownPages(core, doc, pageOf);
+  if (viewportIds === undefined) return shown;
   const wanted = new Set(viewportIds);
-  const known = new Set(viewports.map((vp) => vp.id));
+  const known = new Set(core.viewportItems(doc).map((vp) => vp.id));
   const unknown = viewportIds.filter((id) => !known.has(id));
   if (unknown.length > 0) {
     throw new Error(`No such viewport: ${unknown.join(", ")}`);
   }
-  return viewports.filter((vp) => wanted.has(vp.id));
+  return shown.filter(({ viewport }) => wanted.has(viewport.id));
 }
 
 /** Where a declaration is: an element's own (`node`, its position among
@@ -266,11 +288,15 @@ interface Candidate {
 /** A mounted page prepared for removals. */
 interface Prepared {
   doc: Document;
-  /** The page's `<style>` in the copy, or null when there is none. Its
-   * text once prepared is what every removal is cut from and every
+  /** The copy's `<style>`s, one per live sheet in cascade order. Their
+   * texts once prepared are what every removal is cut from and every
    * restore puts back (pageMount.ts readWithoutReloading). */
-  style: HTMLStyleElement | null;
+  styles: HTMLStyleElement[];
+  /** Every rule of the prepared texts, in cascade order (`index` its
+   * position here, `sheet` its `<style>`'s in `styles`). */
   rules: PageRule[];
+  /** Each rule, by index, as the page writes it (pageSheets.ts). */
+  written: WrittenRule[];
   nodes: Element[];
   /** Each node's declarations, from its `style` attribute. */
   own: { declarations: CssDeclaration[] }[];
@@ -284,57 +310,56 @@ interface Prepared {
  * copy could not load. */
 async function lintViewport(
   dd: NecessityHost,
-  page: DreamPage,
+  { viewport, page }: Shown,
   answered: ReadonlySet<string>,
   deadline: number | undefined,
 ): Promise<{ candidates: Candidate[]; notes: Finding[] }> {
-  // The page as stored, for naming: the mounted copy's css has the asset
-  // route in its urls, and a finding should quote what the author wrote;
-  // an element is named by its selector in the stored markup.
-  const stored = dd.core.parsePage(page.payload.html);
-  const { css } = page.payload;
-  // Read once: the rules and the breakpoints swept are the same text's.
-  const blocks = dd.core.cssBlocks(css);
-  const authored = pageRules(blocks);
+  // The page as its files hold it, for naming: the mounted copy's sheets
+  // have the routed urls in them, and a finding should quote what the
+  // author wrote; an element is named by its selector in the stored
+  // markup, a rule as its sheet writes it.
+  const stored = dd.core.parsePage(page.html);
+  const authored = readSheets(dd.core, page);
   const started = Date.now();
   let slowest = 0;
-  const { own, naming, candidates, unloaded } = await withMount(dd, page, undefined, async (m) => {
-    const prepared = await prepare(dd.core, m);
-    // What a mount costs, before any judging: what a probe will cost
-    // at least, and so what the time left must hold for one.
-    slowest = Date.now() - started;
-    const nameOf = storedNames(dd.core, stored, prepared.doc);
-    const width = prepared.doc.defaultView?.innerWidth ?? page.frame?.width ?? 0;
-    // The two scans line up rule for rule unless the mounted copy is not
-    // this text (it always is, cleaned as a landing cleans it); if they
-    // do not, the copy's own text names the rules.
-    const aligned =
-      authored.length === prepared.rules.length &&
-      authored.every(
-        (rule, i) =>
-          rule.prelude === prepared.rules[i]!.prelude &&
-          rule.declarations.length === prepared.rules[i]!.declarations.length,
-      );
-    const naming = aligned ? authored : prepared.rules;
-    return {
-      own: width,
-      naming,
-      candidates: await judgeAll(page, prepared, naming, width, nameOf),
-      unloaded: prepared.nodes.filter(isUnloadedImage).map(nameOf),
-    };
-  });
+  const { own, written, widths, candidates, unloaded } = await withMount(
+    dd,
+    viewport,
+    undefined,
+    async (m) => {
+      const prepared = await prepare(dd.core, page, authored, m);
+      // What a mount costs, before any judging: what a probe will cost
+      // at least, and so what the time left must hold for one.
+      slowest = Date.now() - started;
+      const nameOf = storedNames(dd.core, stored, prepared.doc);
+      const width =
+        prepared.doc.defaultView?.innerWidth ?? viewport.frame?.width ?? 0;
+      return {
+        own: width,
+        written: prepared.written,
+        // The breakpoints of every live sheet, as the copy renders it: a
+        // sheet's `media` is an `@media` around it there.
+        widths: probeWidths(
+          dd.core,
+          prepared.styles.flatMap((style) => dd.core.cssBlocks(style.textContent ?? "")),
+          width,
+        ),
+        candidates: await judgeAll(viewport, page, prepared, width, nameOf),
+        unloaded: prepared.nodes.filter(isUnloadedImage).map(nameOf),
+      };
+    },
+  );
   // A declaration live in an earlier viewport is never a finding (rule
   // 3): it has nothing left to sweep.
   let pending = candidates.filter((c) => c.dead && !answered.has(c.key));
   const swept = [own];
-  const widths = probeWidths(dd.core, blocks, own);
   let next = 0;
   for (; next < widths.length && pending.length > 0; next++) {
     if (deadline !== undefined && Date.now() + slowest > deadline) break;
     const width = widths[next]!;
     const began = Date.now();
-    await withMount(dd, page, width, async (m) => {
-      const prepared = await prepare(dd.core, m);
+    await withMount(dd, viewport, width, async (m) => {
+      const prepared = await prepare(dd.core, page, authored, m);
       const probe = baseline(prepared);
       for (const c of pending) {
         c.applies ||= appliesIn(prepared, c.removal[0]!);
@@ -348,13 +373,13 @@ async function lintViewport(
   const unswept = widths.slice(next);
   for (const c of pending) {
     c.unswept = unswept;
-    c.finding = findingFor(page, c, swept, naming);
+    c.finding = findingFor(viewport, c, swept, written);
   }
   // A declaration whose conditions held nowhere it was read is not judged
   // in this viewport: it does not exist here for rule 3 either.
   return {
     candidates: candidates.filter((c) => c.applies || !c.dead),
-    notes: unloaded.length === 0 ? [] : [unloadedNote(page, unloaded)],
+    notes: unloaded.length === 0 ? [] : [unloadedNote(viewport, unloaded)],
   };
 }
 
@@ -389,22 +414,27 @@ function isStartingStyle(rule: Pick<PageRule, "conditions">): boolean {
   );
 }
 
-/** Read the mounted copy once and move its `@font-face` rules — at the
- * top, or inside a group rule, each then under the same group rules — to
- * a `<style>` of their own after the page's (see the header), waiting for
- * the faces to load again. After, so a `@layer` it names is declared
- * where the page first declares it and the layers keep their order. The
- * rest of the css keeps every offset: each moved face's characters become
- * spaces. */
+/** Read the mounted copy once and move each sheet's `@font-face` rules —
+ * at the top, or inside a group rule, each then under the same group
+ * rules — to a `<style>` of their own after that sheet's (see the
+ * header), waiting for the faces to load again. After, so a `@layer` it
+ * names is declared where the sheet first declares it and the layers keep
+ * their order. The rest of each sheet keeps every offset: each moved
+ * face's characters become spaces. The sheets are then read against the
+ * page's (`read`, pageMount.ts mountedSheets). */
 async function prepare(
   core: CoreApi,
+  page: Page,
+  read: ReadSheets,
   mounted: BareMountedViewport,
 ): Promise<Prepared> {
   const doc = mounted.document();
-  const style = mountedStyle(doc);
-  let base = style?.textContent ?? "";
-  const faces = fontFaceBlocks(core.cssBlocks(base));
-  if (style !== null && faces.length > 0) {
+  const styles = mountedStyles(doc);
+  let moved = false;
+  const texts = styles.map((style) => {
+    let base = style.textContent ?? "";
+    const faces = fontFaceBlocks(core.cssBlocks(base));
+    if (faces.length === 0) return base;
     const fonts = doc.createElement("style");
     fonts.setAttribute("data-css-author", "fonts");
     fonts.textContent = faces
@@ -421,6 +451,10 @@ async function prepare(
       base = base.slice(0, start) + " ".repeat(end - start) + base.slice(end);
     }
     style.textContent = base;
+    moved = true;
+    return base;
+  });
+  if (moved) {
     // A face loads when text first uses it: lay the page out, then wait.
     doc.documentElement.getBoundingClientRect();
     await doc.fonts.ready;
@@ -428,9 +462,8 @@ async function prepare(
   const nodes = lintElements(doc);
   return {
     doc,
-    style,
-    // The text with its faces blanked, read again: every offset holds.
-    rules: pageRules(core.cssBlocks(base)),
+    // The texts with their faces blanked, read again: every offset holds.
+    ...mountedSheets(core, page, read, styles, texts),
     nodes,
     own: nodes.map((node) => ({
       declarations: core.cssDeclarations(node.getAttribute("style") ?? ""),
@@ -441,9 +474,10 @@ async function prepare(
 /**
  * The widths rule 2 sweeps for a page rendered at `own`, ascending,
  * without `own` itself: SWEEP_WIDTHS plus one px either side of every px
- * breakpoint its css's `@media` preludes name (`blocks`, the css read) (`(width >= 900px)` flips
- * between 899 and 900, `(width > 900px)` between 900 and 901, so all three
- * are probed). Container conditions name a container's width, not the
+ * breakpoint the `@media` preludes of its sheets name (`blocks`, every
+ * sheet's read, one after another) (`(width >= 900px)` flips between 899
+ * and 900, `(width > 900px)` between 900 and 901, so all three are
+ * probed). Container conditions name a container's width, not the
  * window's, and contribute nothing; em/rem breakpoints convert at the
  * initial font size.
  */
@@ -473,9 +507,9 @@ export function probeWidths(
  * dead. A declaration on an image the copy could not load that a loaded
  * one would answer (`isImageSizing`) is recorded live, unjudged. */
 async function judgeAll(
-  page: DreamPage,
+  viewport: Viewport,
+  page: Page,
   prepared: Prepared,
-  authored: readonly PageRule[],
   own: number,
   nameOf: (node: Element) => string,
 ): Promise<Candidate[]> {
@@ -535,7 +569,7 @@ async function judgeAll(
         }
       });
       record(
-        `${nameAt(node)}\u0000${declaration.property}`,
+        `${page.path}\u0000${nameAt(node)}\u0000${declaration.property}`,
         true,
         declaration,
         removal,
@@ -545,12 +579,16 @@ async function judgeAll(
   });
 
   // The rules' declarations, paired with their conditional branches and
-  // the elements shadowing them in their own style (rule 1).
+  // the elements shadowing them in their own style (rule 1). A rule is
+  // keyed across viewports (rule 3) as its sheet writes it, in that sheet.
   const occurrences = new Map<string, number>();
   rules.forEach((rule, r) => {
-    const shape = `${[...rule.parents, rule.prelude].join(" › ")}\u0000${rule.conditions.join("\u0000")}`;
+    const { written, sheet, editable } = prepared.written[r]!;
+    const shape = `${sheet}\u0000${[...written.parents, written.prelude].join(" › ")}\u0000${written.conditions.join("\u0000")}`;
     const occurrence = occurrences.get(shape) ?? 0;
     occurrences.set(shape, occurrence + 1);
+    // A read-only sheet's line is the author's to keep: never judged.
+    if (!editable) return;
     if (hasStatePseudo(rule.selector) || isStartingStyle(rule)) return;
     // A selector the browser refuses styles nothing: that rule is the
     // static gate's dead rule, and every line of it would only repeat it.
@@ -603,7 +641,7 @@ async function judgeAll(
       unswept: [],
       finding: { tier: "necessity", severity: "blocking", message: "" },
     };
-    candidate.finding = findingFor(page, candidate, [own], authored, nameAt);
+    candidate.finding = findingFor(viewport, candidate, [own], prepared.written, nameAt);
     candidates.push(candidate);
   }
   return candidates;
@@ -662,7 +700,7 @@ const UNLOADED_NAMED = 3;
 
 /** The one advisory for a viewport whose copy could not load images: what
  * the lint left unjudged, and on which images. */
-function unloadedNote(page: DreamPage, names: readonly string[]): Finding {
+function unloadedNote(viewport: Viewport, names: readonly string[]): Finding {
   const one = names.length === 1;
   const rest = names.length - UNLOADED_NAMED;
   const images =
@@ -673,7 +711,7 @@ function unloadedNote(page: DreamPage, names: readonly string[]): Finding {
   return {
     tier: "necessity",
     severity: "advisory",
-    message: `${one ? "An image" : `${names.length} images`} could not be loaded in the necessity lint's copy of viewport ${page.id} (${images}), so ${one ? "its" : "their"} sizing and object-* declarations were not judged`,
+    message: `${one ? "An image" : `${names.length} images`} could not be loaded in the necessity lint's copy of viewport ${viewport.id} (${images}), so ${one ? "its" : "their"} sizing and object-* declarations were not judged`,
   };
 }
 
@@ -714,7 +752,7 @@ function refused(doc: Document, selector: string): boolean {
 }
 
 /** Remove, read, restore (pageMount.ts readWithoutReloading): the
- * declarations cut from the page's css and from their elements' `style`
+ * declarations cut from the copy's sheets and from their elements' `style`
  * in one write, one read once any web font the write made the page load
  * again has loaded, then everything put back as it was. The read is a
  * single sweep that stops at the first element whose observation left
@@ -724,12 +762,15 @@ function isDead(
   probe: Probe,
   removal: readonly At[],
 ): Promise<boolean> {
-  const cssRanges: TextRange[] = [];
+  const cssRanges: SheetRange[] = [];
   const inline = new Map<Element, TextRange[]>();
   for (const where of removal) {
     if ("rule" in where) {
-      const declaration = prepared.rules[where.rule]?.declarations[where.at];
-      if (declaration !== undefined) cssRanges.push(declaration.range);
+      const rule = prepared.rules[where.rule];
+      const declaration = rule?.declarations[where.at];
+      if (declaration !== undefined) {
+        cssRanges.push({ sheet: rule!.sheet, range: declaration.range });
+      }
     } else {
       const declaration = prepared.own[where.node]?.declarations[where.at];
       const node = prepared.nodes[where.node];
@@ -739,7 +780,7 @@ function isDead(
       inline.set(node, ranges);
     }
   }
-  return readWithoutReloading(prepared.doc, prepared.style, cssRanges, inline, () =>
+  return readWithoutReloading(prepared.doc, prepared.styles, cssRanges, inline, () =>
     unchanged(probe),
   );
 }
@@ -779,13 +820,13 @@ function intersect(perViewport: readonly Candidate[][]): Finding[] {
  * "changes nothing" — and, when the sweep ran out of time, the widths it
  * never read, which make it advisory. An element's own declaration is
  * addressed by the element's unique selector; a rule's by the rule's
- * index among the page's rules (`Finding.rule`), and named by its
- * selector as written. */
+ * index among the page's rules (`Finding.rule`, from `written`), and
+ * named by its selector as its sheet writes it, with the sheet. */
 function findingFor(
-  page: DreamPage,
+  viewport: Viewport,
   c: Candidate,
   widths: number[],
-  authored: readonly PageRule[],
+  written: readonly WrittenRule[],
   nameAt?: (node: number) => string,
 ): Finding {
   const first = c.removal[0] as At;
@@ -806,20 +847,18 @@ function findingFor(
       message: `${c.property}: ${c.value} on \`${selector}\` ${read}`,
     };
   }
-  const rule = authored[first.rule];
-  const declaration = rule?.declarations[first.at];
+  const rule = written[first.rule]!;
+  const declaration = rule.written.declarations[first.at];
   const value =
     declaration !== undefined && declaration.property === c.property
       ? shown(declaration)
       : c.value;
-  const name =
-    rule === undefined ? `#${first.rule}` : ruleName(rule);
   return {
     tier: "necessity",
     severity,
-    rule: first.rule,
+    rule: rule.rule,
     property: c.property,
-    message: `${c.property}: ${value} in rule ${name} of viewport ${page.id} ${read}`,
+    message: `${c.property}: ${value} in rule ${ruleName(rule.written)} of ${rule.sheet} in viewport ${viewport.id} ${read}`,
   };
 }
 

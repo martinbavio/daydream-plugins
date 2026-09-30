@@ -2,29 +2,37 @@
 // #71, plan phase 9; docs/agent-css-knowledge-prd.md, "Testing
 // Decisions"): a page goes in, findings come out, and matching is asked
 // of a MOUNTED copy of that page — never the canvas — since a gate's
-// document is not, and may never have been, on the canvas (matchLint.ts's
-// own header; the eval bug this file guards against: a `.card`/`nav`/`li`
-// rule refused as dead on every landing because the old code read canvas
-// match facts for a document that was never rendered there).
-// `dd.mountViewport` is the same live-strategy seam
-// necessity.browser.test.ts uses, so one shared kernel with no document
-// loaded serves every test here — nothing in this file loads a document
-// into the app store. Real Chromium only.
+// viewport need not be rendered there (matchLint.ts's own header; the
+// eval bug this file guards against: a `.card`/`nav`/`li` rule refused as
+// dead because the old code read canvas match facts for a page that was
+// never rendered there). `dd.mountViewport` is the same live-strategy
+// seam necessity.browser.test.ts uses, and mounts a viewport's page from
+// the open project, so each test loads its project into the app store
+// first — and renders no canvas. Real Chromium only.
 import { afterAll, afterEach, describe, expect, test } from "vitest";
 
-import type { DreamDocument, Finding } from "@daydream/plugin-api";
+import type { Finding, PageSheet } from "@daydream/plugin-api";
 import {
   createPageItem,
   createTestKernel,
-  documentFrom,
+  testProject,
+  type TestPage,
+  type TestProject,
 } from "@daydream/plugin-testing";
 
 import { matchLint as lintWith } from "./matchLint";
+import { pagesOf, withSheets } from "./testPages";
 
 const kernel = createTestKernel();
 afterAll(() => kernel.dispose());
 
-const matchLint = (doc: DreamDocument): Promise<Finding[]> => lintWith(kernel.dd, doc);
+/** The lint over a project, opened as the gate's lint runs over the open
+ * one: its pages are what the mount reads and what the gate's context
+ * hands the lint. */
+const matchLint = (project: TestProject): Promise<Finding[]> => {
+  kernel.store.loadProject(project);
+  return lintWith(kernel.dd, project.document, pagesOf(project));
+};
 
 afterEach(() => {
   // matchLint mounts and disposes its own iframe per page; a leftover is
@@ -32,68 +40,38 @@ afterEach(() => {
   expect(document.querySelectorAll("iframe")).toHaveLength(0);
 });
 
-/** One page, id `v1`, 960 wide: the body's markup (a `.card` by default)
- * and the css. */
-function page(
+/** One viewport, id `v1`, 960 wide, and its page `v1.html`: the body's
+ * markup (a `.card` by default) and the css, its one sheet `v1.css`. */
+function shown(
   css: string,
   body = '<div class="card"></div>',
   id = "v1",
-): DreamDocument {
-  return {
-    version: 7,
-    items: [
-      createPageItem(
-        { html: `<!doctype html><html><head></head><body>${body}</body></html>`, css },
-        { id, frame: { width: 960 } },
-      ),
-    ],
-  };
+): TestPage {
+  return createPageItem(
+    { html: `<!doctype html><html><head></head><body>${body}</body></html>`, css },
+    { id, frame: { width: 960 } },
+  );
 }
 
-async function messages(doc: DreamDocument): Promise<string[]> {
+/** A project of that one page. */
+function page(css: string, body?: string, id?: string): TestProject {
+  return testProject([shown(css, body, id)]);
+}
+
+async function messages(doc: TestProject): Promise<string[]> {
   return (await matchLint(doc)).map((f) => f.message);
 }
 
 describe("matchLint", () => {
-  // The exact eval scenario (2026-09-17 raw eval jsonl): a document handed
-  // to a gate straight from `documentFrom` — the same validation
-  // `src/ai/gates.ts`'s caller runs before `runGates`, never a document
-  // loaded into the app store or rendered on the canvas. A `.card` rule
-  // whose element is plainly in the page must not be refused as dead.
-  test("a rule matching an element that was never on the canvas is not dead (the eval bug)", async () => {
-    const result = documentFrom({
-      version: 7,
-      items: [
-        {
-          kind: "daydream.viewport",
-          frame: { width: 960, height: 600 },
-          payload: {
-            html: '<!doctype html><html><body><div class="card"></div></body></html>',
-            css: ".card { color: red; }",
-          },
-        },
-      ],
-    });
-    if (!result.ok) throw new Error(result.error);
-    expect(await matchLint(result.doc)).toEqual([]);
+  // The eval scenario (2026-09-17 raw eval jsonl): a page no canvas has
+  // rendered — here, nothing renders one at all. A `.card` rule whose
+  // element is plainly in the page must not be refused as dead.
+  test("a rule matching an element of a page no canvas rendered is not dead (the eval bug)", async () => {
+    expect(await matchLint(page(".card { color: red; }"))).toEqual([]);
   });
 
-  test("a rule whose element is not in the page is dead, even for a document never rendered on the canvas", async () => {
-    const result = documentFrom({
-      version: 7,
-      items: [
-        {
-          kind: "daydream.viewport",
-          frame: { width: 960, height: 600 },
-          payload: {
-            html: '<!doctype html><html><body><div class="card"></div></body></html>',
-            css: ".ghost { color: red; }",
-          },
-        },
-      ],
-    });
-    if (!result.ok) throw new Error(result.error);
-    expect(await messages(result.doc)).toEqual([
+  test("a rule whose element is not in the page is dead, on a page no canvas rendered", async () => {
+    expect(await messages(page(".ghost { color: red; }"))).toEqual([
       expect.stringContaining("rule `.ghost`"),
     ]);
   });
@@ -124,7 +102,7 @@ describe("matchLint", () => {
     ).toEqual([]);
     expect(
       await messages(page(".card { color: red; & > p { margin: 0 } }")),
-    ).toEqual(["rule `.card › & > p` in viewport v1 matches no element"]);
+    ).toEqual(["rule `.card › & > p` of `v1.css` in viewport v1 matches no element"]);
   });
 
   test("an element's own declaration a matched unconditional rule already sets, verbatim, is redundancy", async () => {
@@ -139,7 +117,7 @@ describe("matchLint", () => {
         property: "color",
         rule: 0,
         message:
-          "color: red on `div.card` restates rule `.card`; remove it from the element's style",
+          "color: red on `div.card` restates rule `.card` of `v1.css`; remove it from the element's style",
       },
     ]);
   });
@@ -217,14 +195,14 @@ describe("matchLint", () => {
         severity: "blocking",
         elementId: "html",
         rule: 0,
-        message: "rule `.nope` in viewport v1 matches no element",
+        message: "rule `.nope` of `v1.css` in viewport v1 matches no element",
       },
     ]);
   });
 
   test("a state-pseudo rule matching nothing even state-stripped is dead", async () => {
     expect(await messages(page(".nope:hover { color: red; }"))).toEqual([
-      "rule `.nope:hover` in viewport v1 matches no element",
+      "rule `.nope:hover` of `v1.css` in viewport v1 matches no element",
     ]);
   });
 
@@ -262,8 +240,8 @@ describe("matchLint", () => {
         ),
       ),
     ).toEqual([
-      "rule `.content p` in `@scope (.card) to (.content)` in viewport v1 matches no element",
-      "rule `.card p` in `@scope (.content)` in viewport v1 matches no element",
+      "rule `.content p` in `@scope (.card) to (.content)` of `v1.css` in viewport v1 matches no element",
+      "rule `.card p` in `@scope (.content)` of `v1.css` in viewport v1 matches no element",
     ]);
   });
 
@@ -274,9 +252,9 @@ describe("matchLint", () => {
 @media (min-height: 2000px) { .nope { color: red; } }
 @starting-style { .nope { opacity: 0; } }`,
     );
-    doc.items[0]!.frame = { width: 960, height: 600 };
+    doc.document.canvases[0]!.items[0]!.frame = { width: 960, height: 600 };
     expect(await messages(doc)).toEqual([
-      "rule `.nope` in `@starting-style` in viewport v1 matches no element",
+      "rule `.nope` in `@starting-style` of `v1.css` in viewport v1 matches no element",
     ]);
   });
 
@@ -310,7 +288,7 @@ describe("matchLint", () => {
       [
         1,
         "color",
-        "color: #333 in rule `.card.featured` of viewport v1 restates rule `.card` for every element it reaches; remove it from `.card.featured`",
+        "color: #333 in rule `.card.featured` of `v1.css` in viewport v1 restates rule `.card` for every element it reaches; remove it from `.card.featured`",
       ],
     ]);
   });
@@ -348,31 +326,6 @@ describe("matchLint", () => {
       ),
     );
     expect(findings.map((f) => [f.rule, f.property])).toEqual([[1, "color"]]);
-  });
-
-  test("a `<style>` the markup keeps in a noscript is never taken for the page's css", async () => {
-    // The kernel keeps a noscript's stylesheet in the markup, and the
-    // measurer's copy (no scripting there) parses it as a `<style>` in the
-    // head, before the page's own.
-    const findings = await matchLint({
-      version: 7,
-      items: [
-        createPageItem(
-          {
-            html: '<!doctype html><html><head><noscript><style>.gone { color: red; }</style></noscript></head><body><div class="card"></div></body></html>',
-            css: ".card { position: static; }",
-          },
-          { id: "v1", frame: { width: 960 } },
-        ),
-      ],
-    });
-    expect(findings.map((f) => [f.rule, f.property, f.message])).toEqual([
-      [
-        0,
-        "position",
-        "position: static in rule `.card` of viewport v1 restates the initial value",
-      ],
-    ]);
   });
 
   test("a layered or scoped rule applies wherever it matches: an element's own declaration it already makes is redundancy", async () => {
@@ -438,7 +391,7 @@ describe("matchLint: a pseudo-element's declarations are measured on the pseudo-
 // (gates.browser.test.ts).
 describe("matchLint: an explicit initial value", () => {
   /** One element, `#box`, with the given own style, and the css. */
-  const box = (style: string, css = "", tag = "div"): DreamDocument =>
+  const box = (style: string, css = "", tag = "div"): TestProject =>
     page(css, `<${tag} id="box" style="${style}"></${tag}>`);
 
   test("an initial value in an element's own style is a finding, and pays for a mount with no css", async () => {
@@ -509,7 +462,7 @@ describe("matchLint: an explicit initial value", () => {
         rule: 0,
         property: "position",
         message:
-          "position: static in rule `.card` of viewport v1 restates the initial value",
+          "position: static in rule `.card` of `v1.css` in viewport v1 restates the initial value",
       },
     ]);
   });
@@ -526,7 +479,7 @@ describe("matchLint: an explicit initial value", () => {
         page(".thumb { overflow: visible; }", '<div class="thumb"></div>'),
       ),
     ).toEqual([
-      "overflow: visible in rule `.thumb` of viewport v1 restates the initial value",
+      "overflow: visible in rule `.thumb` of `v1.css` in viewport v1 restates the initial value",
     ]);
   });
 
@@ -607,7 +560,7 @@ describe("matchLint: a container query with no container", () => {
     body: string,
     css = "",
     prelude = QUERY,
-  ): DreamDocument {
+  ): TestProject {
     return page(`${css}\n${prelude} { .card { display: flex; } }`, body);
   }
 
@@ -622,7 +575,7 @@ describe("matchLint: a container query with no container", () => {
         severity: "blocking",
         rule: 0,
         message:
-          "container query `@container (width > 400px)` in rule `.card` of viewport v1 can never match: no ancestor of an element it matches declares container-type",
+          "container query `@container (width > 400px)` in rule `.card` of `v1.css` in viewport v1 can never match: no ancestor of an element it matches declares container-type",
       },
     ]);
   });
@@ -796,7 +749,7 @@ describe("matchLint: a container query with no container", () => {
     expect(
       await messages(page(".card { color: red; @container (width > 400px) { display: flex } }")),
     ).toEqual([
-      "container query `@container (width > 400px)` in rule `.card` of viewport v1 can never match: no ancestor of an element it matches declares container-type",
+      "container query `@container (width > 400px)` in rule `.card` of `v1.css` in viewport v1 can never match: no ancestor of an element it matches declares container-type",
     ]);
   });
 
@@ -811,14 +764,90 @@ describe("matchLint: a container query with no container", () => {
   });
 
   test("a query in one page cannot borrow a container from another", async () => {
-    const withContainer = queried(wrapped("container-type: inline-size"));
-    const without = page(`${QUERY} { .card { display: flex; } }`, CARD, "v2");
-    const both: DreamDocument = {
-      version: 7,
-      items: [...withContainer.items, ...without.items],
-    };
+    const both = testProject([
+      shown(`${QUERY} { .card { display: flex; } }`, wrapped("container-type: inline-size")),
+      shown(`${QUERY} { .card { display: flex; } }`, CARD, "v2"),
+    ]);
     expect(await messages(both)).toEqual([
-      expect.stringContaining("of viewport v2 can never match"),
+      expect.stringContaining("in viewport v2 can never match"),
+    ]);
+  });
+});
+
+// A page's css is its sheets (decision #78): the copy mounts one
+// `<style>` per live sheet, and each is read as the page's sheet it
+// renders — so a finding numbers a rule across the page's sheets, names
+// the sheet it is written in, and is never about a read-only one.
+describe("matchLint: a page of several sheets", () => {
+  /** `v1.html` in viewport `v1`: the head's sheets (`head`), the body,
+   * and the sheets the host read for it, in document order. */
+  function sheeted(head: string, body: string, sheets: PageSheet[]): TestProject {
+    return testProject([
+      withSheets(
+        createPageItem(
+          {
+            html: `<!doctype html><html><head>${head}</head><body>${body}</body></html>`,
+          },
+          { id: "v1", frame: { width: 960 } },
+        ),
+        sheets,
+      ),
+    ]);
+  }
+  const KIT = "https://cdn.example/kit.css";
+
+  test("a rule is numbered across the page's sheets and named with the sheet it is written in", async () => {
+    const ghost = ".ghost { color: red; }";
+    const findings = await matchLint(
+      sheeted(
+        `<style>${ghost}</style><link rel="stylesheet" href="v1.css">`,
+        '<div class="card"></div>',
+        [
+          { source: { style: 0 }, text: ghost, readOnly: false },
+          {
+            source: { file: "v1.css" },
+            text: ".card { color: red; }\n.nope { color: red; }",
+            readOnly: false,
+          },
+        ],
+      ),
+    );
+    expect(findings.map((f) => [f.rule, f.message])).toEqual([
+      [0, "rule `.ghost` of `<style>` block 1 of `v1.html` in viewport v1 matches no element"],
+      [2, "rule `.nope` of `v1.css` in viewport v1 matches no element"],
+    ]);
+  });
+
+  test("a read-only sheet's rule is never a finding's subject, but it is matched, ranked and named as the rule another restates", async () => {
+    const findings = await matchLint(
+      sheeted(
+        `<link rel="stylesheet" href="${KIT}"><link rel="stylesheet" href="v1.css">`,
+        '<div class="card featured"></div><div class="plain" style="color: red"></div>',
+        [
+          {
+            source: { url: KIT },
+            text: ".nope { color: red; }\n.card { color: #333; position: static; }\n.plain { color: red; }",
+            readOnly: true,
+          },
+          {
+            source: { file: "v1.css" },
+            text: ".card.featured { color: #333; }",
+            readOnly: false,
+          },
+        ],
+      ),
+    );
+    expect(findings.map((f) => [f.elementId, f.rule, f.message])).toEqual([
+      [
+        "div.plain",
+        2,
+        `color: red on \`div.plain\` restates rule \`.plain\` of \`${KIT}\`; remove it from the element's style`,
+      ],
+      [
+        undefined,
+        3,
+        `color: #333 in rule \`.card.featured\` of \`v1.css\` in viewport v1 restates rule \`.card\` of \`${KIT}\` for every element it reaches; remove it from \`.card.featured\``,
+      ],
     ]);
   });
 });

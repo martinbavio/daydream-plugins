@@ -7,22 +7,25 @@
 // seam of the static gate that mounts the page, kept small on purpose.
 //
 // WHY THIS FILE MOUNTS, AND NEVER READS `dd.pageRuleMatches` /
-// `dd.pageStack` / `dd.geometry`: a gate runs over an INCOMING document —
-// ingest, replace_viewport, a draft's finalize — that is not, and may
-// never have been, on the canvas. Those reads answer about the CANVAS's
-// own mounted pages; asked about a page that was never rendered there,
-// every one of them reports empty (the eval bug of 2026-09-17: a
-// plainly-matching `.card` rule refused on landing because the gate read
-// the wrong DOM). So the page it is handed is MOUNTED (`dd.mountViewport`,
-// the live face: the page's own text in an iframe) and every match is
-// asked of that document through native `Element.matches`.
+// `dd.pageStack` / `dd.geometry`: those reads answer about the CANVAS's
+// own mounted pages, and a gate's viewport need not be rendered there —
+// asked about a page that never was, every one of them reports empty (the
+// eval bug of 2026-09-17: a plainly-matching `.card` rule refused because
+// the gate read the wrong DOM). So each viewport's page is MOUNTED
+// (`dd.mountViewport`, the live face: the page's own text in an iframe,
+// each live sheet a `<style>` of its own) and every match is asked of
+// that document through native `Element.matches`.
 //
-// The rules are the page's css as written (pageCss.ts `pageRules`, the
-// same list and the same `rule` indices the static and necessity lints
-// use), a nested rule's selector resolved against its parents the way the
-// browser desugars nesting, and a rule inside an `@scope` matched from its
-// scope's roots, within its limits (ruleMatch.ts) — never by
-// `Element.matches` alone, which reads its `:scope` as the element asked.
+// The rules are the copy's sheets, in cascade order, each paired with the
+// page's sheet it renders (pageSheets.ts `writtenRules`), so a finding
+// carries the same `rule` number the static and necessity lints give it
+// and names the rule as the page writes it, with the sheet it is in; a
+// read-only sheet's rule is matched and ranked like any other, and never
+// a finding's subject. A nested rule's selector is resolved against its
+// parents the way the browser desugars nesting, and a rule inside an
+// `@scope` matched from its scope's roots, within its limits
+// (ruleMatch.ts) — never by `Element.matches` alone, which reads its
+// `:scope` as the element asked.
 // An element's own declarations are its `style` attribute, and it is
 // named by its unique selector in the page's stored markup (pageDom.ts
 // storedNames), not in the mounted copy.
@@ -93,8 +96,8 @@
 import type {
   CoreApi,
   CssDeclaration,
+  DeepReadonly,
   DreamDocument,
-  DreamPage,
   Finding,
 } from "@daydream/plugin-api";
 
@@ -112,7 +115,6 @@ import {
 import {
   atKeyword,
   declarationMap,
-  pageRules,
   ruleName,
   selectorForMatching,
   splitTopLevelCommas,
@@ -122,16 +124,26 @@ import {
 import { restatesInitial, ruleInitialCandidates } from "./initialValues";
 import {
   lintElements,
-  mountedStyle,
+  mountedStyles,
   storedNames,
 } from "./pageDom";
 import {
   conditionsHold,
+  mountedSheets,
   readWithout,
   withMount,
+  type MountedSheets,
   type MountHost,
+  type SheetRange,
   type TextRange,
 } from "./pageMount";
+import {
+  readSheets,
+  shownPages,
+  type PageOf,
+  type Viewport,
+  type WrittenRule,
+} from "./pageSheets";
 import { ruleMatcher, type RuleMatcher } from "./ruleMatch";
 import {
   relatedProperties,
@@ -142,19 +154,24 @@ import { hasStatePseudo, stripStatePseudo } from "./statePseudo";
 
 /** What the match-dependent findings need: the pure helpers and core's
  * live mount. A gate hands in its `dd`; a test hands in a test kernel's —
- * both mount the page handed to `matchLint`, never read a fact about
- * whatever (if anything) is on the canvas. */
+ * both mount each viewport's page, never read a fact about whatever (if
+ * anything) is on the canvas. */
 export type MatchHost = MountHost;
 
-/** One page mounted, read once: its elements in tree order, each one's
- * own declarations and unique selector, and the rules. */
+/** One viewport's page mounted, read once: its elements in tree order,
+ * each one's own declarations and unique selector, and the rules. */
 interface MountedPage {
-  page: DreamPage;
+  viewport: Viewport;
   doc: Document;
-  /** The page's `<style>` in the copy, which a measurement cuts from and
-   * restores (`unchangedWithout`), or null when there is none. */
-  style: HTMLStyleElement | null;
+  /** The copy's `<style>`s, which a measurement cuts from and restores
+   * (`unchangedWithout`). */
+  styles: HTMLStyleElement[];
+  /** Every rule of the copy, in cascade order: `index` its position here,
+   * the one the ranking and ruleRedundancy.ts read. */
   rules: PageRule[];
+  /** Each rule, by index, as the page writes it: what a finding numbers,
+   * names and may be about (pageSheets.ts). */
+  written: WrittenRule[];
   nodes: Element[];
   own: Map<Element, CssDeclaration[]>;
   nameOf(node: Element): string;
@@ -162,40 +179,47 @@ interface MountedPage {
   match: RuleMatcher;
 }
 
-/** Every match-dependent static finding for the document: explicit
- * initial values (the elements' own in tree order, then the rules'),
- * redundancy (an element's, and a rule's against the rule beneath it),
- * dead rules, and a rule's container query with no container. Each page
- * is mounted once — the ranked matches are read once for every node and
- * answer every question here — and disposed before the next. Empty when
- * nothing in the mounted page disagrees with the css. */
+/** Every match-dependent static finding for the document, per viewport
+ * in canvas order: explicit initial values (the elements' own in tree
+ * order, then the rules'), redundancy (an element's, and a rule's against
+ * the rule beneath it), dead rules, and a rule's container query with no
+ * container. Each viewport's page (`pageOf`, the gate's `ctx.page`) is
+ * mounted once — the ranked matches are read once for every node and
+ * answer every question here — and disposed before the next; a viewport
+ * whose page the project does not hold is skipped (the static lint
+ * reports it). Empty when nothing in the mounted pages disagrees with
+ * their css. */
 export async function matchLint(
   dd: MatchHost,
-  doc: DreamDocument,
+  doc: DeepReadonly<DreamDocument>,
+  pageOf: PageOf,
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
-  for (const page of dd.core.viewportItems(doc) as DreamPage[]) {
+  for (const { viewport, page } of shownPages(dd.core, doc, pageOf).shown) {
     // Every question here is about a rule or a restated initial, so a
     // page with neither has nothing to ask and pays for no mount.
-    const stored = dd.core.parsePage(page.payload.html);
-    const authored = pageRules(dd.core.cssBlocks(page.payload.css));
+    const stored = dd.core.parsePage(page.html);
+    const authored = readSheets(dd.core, page);
     const restated = lintElements(stored).some((el) =>
       dd.core.cssDeclarations(el.getAttribute("style") ?? "").some(restatesInitial),
     );
-    if (authored.length === 0 && !restated) continue;
-    await withMount(dd, page, undefined, async (mounted) => {
+    if (authored.rules.length === 0 && !restated) continue;
+    await withMount(dd, viewport, undefined, async (mounted) => {
       const mdoc = mounted.document();
       const nodes = lintElements(mdoc);
-      // The copy's own css, so a rule's values and an element's `style`
-      // are compared as the copy holds both (pageDom.ts mountedStyle);
-      // its rules are the stored text's, index for index.
-      const style = mountedStyle(mdoc);
-      const copied = style?.textContent;
-      const read: MountedPage = {
+      // The copy's own sheets, so a rule's values and an element's
+      // `style` are compared as the copy holds both (pageDom.ts
+      // mountedStyles), each paired with the page's sheet it renders.
+      const sheets: MountedSheets = mountedSheets(
+        dd.core,
         page,
+        authored,
+        mountedStyles(mdoc),
+      );
+      const read: MountedPage = {
+        viewport,
         doc: mdoc,
-        style,
-        rules: copied == null ? authored : pageRules(dd.core.cssBlocks(copied)),
+        ...sheets,
         nodes,
         own: new Map(
           nodes.map((node) => [
@@ -215,6 +239,31 @@ export async function matchLint(
     });
   }
   return findings;
+}
+
+// ---------------------------------------------------------------------------
+// How a finding names a rule: as the page writes it, in the sheet it is
+// written in, and the viewport whose copy was read.
+
+/** `\`.card\` of \`site.css\``: the rule at `index` as the page writes it,
+ * and its sheet. */
+function ruleOf(read: MountedPage, index: number): string {
+  const written = read.written[index]!;
+  return `${ruleName(written.written)} of ${written.sheet}`;
+}
+
+/** Whether a finding may be about the rule at `index`: never a read-only
+ * sheet's (pageSheets.ts). */
+function judgeable(read: MountedPage, index: number): boolean {
+  return read.written[index]?.editable === true;
+}
+
+/** Each declaration's place in the copy's sheets, for a cut. */
+function inSheet(
+  rule: PageRule,
+  declarations: readonly CssDeclaration[],
+): SheetRange[] {
+  return declarations.map((d) => ({ sheet: rule.sheet, range: d.range }));
 }
 
 // ---------------------------------------------------------------------------
@@ -432,6 +481,7 @@ function lintRestatedInitials(
     }
   }
   for (const { rule, declaration } of ruleInitialCandidates(read.rules)) {
+    if (!judgeable(read, rule.index)) continue;
     // What the rule styles, its pseudo-elements included: a reset there
     // is read on the pseudo-element, never on the element beside it.
     const reached = targetsOf(read, ranked, rule.index);
@@ -443,15 +493,15 @@ function lintRestatedInitials(
     ) {
       continue;
     }
-    if (!unchangedWithout(read, [declaration.range], new Map(), reached)) {
+    if (!unchangedWithout(read, inSheet(rule, [declaration]), new Map(), reached)) {
       continue;
     }
     findings.push({
       tier: "static",
       severity: "blocking",
-      rule: rule.index,
+      rule: read.written[rule.index]!.rule,
       property: declaration.property,
-      message: `${declaration.property}: ${declaration.value} in rule ${ruleName(rule)} of viewport ${read.page.id} restates the initial value`,
+      message: `${declaration.property}: ${declaration.value} in rule ${ruleOf(read, rule.index)} in viewport ${read.viewport.id} restates the initial value`,
     });
   }
 }
@@ -493,8 +543,8 @@ function lintRedundancy(
           severity: "blocking",
           elementId: selector,
           property,
-          rule: rule.index,
-          message: `${property}: ${value} on \`${selector}\` restates rule ${ruleName(rule)}; remove it from the element's style`,
+          rule: read.written[rule.index]!.rule,
+          message: `${property}: ${value} on \`${selector}\` restates rule ${ruleOf(read, rule.index)}; remove it from the element's style`,
         });
         break;
       }
@@ -518,24 +568,30 @@ function lintRuleRestatements(
   }));
   for (const hit of ruleRestatements(sheet, ranked)) {
     const rule = read.rules[hit.rule];
-    if (rule === undefined) continue;
+    if (rule === undefined || !judgeable(read, hit.rule)) continue;
     // Measured: the rule's line cut from the copy, everything it styles
     // read against the page with it.
     const reached = targetsOf(read, ranked, hit.rule);
     if (reached === null) continue;
-    const lines = allOf(rule.declarations, hit.property).map((d) => d.range);
+    const lines = inSheet(rule, allOf(rule.declarations, hit.property));
     if (!unchangedWithout(read, lines, new Map(), reached)) continue;
+    const written = read.written[hit.rule]!;
+    // A rule beneath is named with its sheet where that is another.
     const beneath = hit.restates
-      .map((index) => read.rules[index])
-      .filter((r): r is PageRule => r !== undefined)
-      .map(ruleName)
+      .map((index) => read.written[index])
+      .filter((r): r is WrittenRule => r !== undefined)
+      .map((r) =>
+        r.sheet === written.sheet
+          ? ruleName(r.written)
+          : `${ruleName(r.written)} of ${r.sheet}`,
+      )
       .join(" and ");
     findings.push({
       tier: "static",
       severity: "blocking",
-      rule: hit.rule,
+      rule: written.rule,
       property: hit.property,
-      message: `${hit.property}: ${hit.value} in rule ${ruleName(rule)} of viewport ${read.page.id} restates ${hit.restates.length === 1 ? "rule" : "rules"} ${beneath} for every element it reaches; remove it from ${ruleName(rule)}`,
+      message: `${hit.property}: ${hit.value} in rule ${ruleOf(read, hit.rule)} in viewport ${read.viewport.id} restates ${hit.restates.length === 1 ? "rule" : "rules"} ${beneath} for every element it reaches; remove it from ${ruleName(written.written)}`,
     });
   }
 }
@@ -551,22 +607,21 @@ function allOf(
  * Remove, read, restore — the necessity lint's measurement, through the
  * same helper (pageMount.ts readWithout), asked of what a redundancy is
  * about: whether every one of `targets` — an element's box or one of its
- * pseudo-elements — computes exactly what it did with the `css` and
- * `inline` ranges cut. The computed style decides a box and everything
- * that inherits from it, so a box computing the same is a page unchanged
- * by the cut. Nothing to read proves nothing: with no target, or no
- * `<style>` to cut a css range from, the answer is a change.
+ * pseudo-elements — computes exactly what it did with the `css` ranges
+ * (each in the copy's sheet it names) and the `inline` ranges cut. The
+ * computed style decides a box and everything that inherits from it, so
+ * a box computing the same is a page unchanged by the cut. Nothing to
+ * read proves nothing: with no target, the answer is a change.
  */
 function unchangedWithout(
   read: MountedPage,
-  css: readonly TextRange[],
+  css: readonly SheetRange[],
   inline: ReadonlyMap<Element, readonly TextRange[]>,
   targets: readonly Target[],
 ): boolean {
   if (targets.length === 0) return false;
-  if (css.length > 0 && read.style === null) return false;
   const before = targets.map(computedOf);
-  return readWithout(read.style, css, inline, () =>
+  return readWithout(read.styles, css, inline, () =>
     targets.every((target, i) => computedOf(target) === before[i]),
   );
 }
@@ -589,6 +644,7 @@ function computedOf({ node, pseudo }: Target): string {
 
 function lintDeadRules(read: MountedPage, findings: Finding[]): void {
   for (const rule of read.rules) {
+    if (!judgeable(read, rule.index)) continue;
     if (!conditionsHold(read.doc, rule.conditions)) continue;
     let dead = !matchesAny(read, rule, selectorForMatching(rule.selector));
     if (dead && hasStatePseudo(rule.selector)) {
@@ -605,8 +661,8 @@ function lintDeadRules(read: MountedPage, findings: Finding[]): void {
       tier: "static",
       severity: "blocking",
       elementId: "html",
-      rule: rule.index,
-      message: `rule ${ruleName(rule)} in viewport ${read.page.id} matches no element`,
+      rule: read.written[rule.index]!.rule,
+      message: `rule ${ruleOf(read, rule.index)} in viewport ${read.viewport.id} matches no element`,
     });
   }
 }
@@ -663,6 +719,8 @@ function lintContainerQueries(read: MountedPage, findings: Finding[]): void {
     satisfies(declarationOf(node), needs, name);
 
   for (const rule of read.rules) {
+    if (!judgeable(read, rule.index)) continue;
+    const written = read.written[rule.index]!;
     for (const condition of rule.conditions) {
       if (atKeyword(condition) !== "container") continue;
       const { name, condition: inner } = splitContainerPrelude(condition);
@@ -694,8 +752,8 @@ function lintContainerQueries(read: MountedPage, findings: Finding[]): void {
       findings.push({
         tier: "static",
         severity: "blocking",
-        rule: rule.index,
-        message: `container query \`${condition}\` in rule ${ruleName({ ...rule, conditions: [] })} of viewport ${read.page.id} can never match: no ancestor of an element it matches ${reason}`,
+        rule: written.rule,
+        message: `container query \`${condition}\` in rule ${ruleName({ ...written.written, conditions: [] })} of ${written.sheet} in viewport ${read.viewport.id} can never match: no ancestor of an element it matches ${reason}`,
       });
     }
   }
