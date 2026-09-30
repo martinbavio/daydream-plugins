@@ -8,7 +8,8 @@ import { createTargetBox } from "./target";
 
 /** The one line the canvas says about a pick: `bolder · waiting for an
  * agent`, then `bolder · building` once an agent took it (`reviewing` for
- * a report verb), then nothing, once the agent says the round is done.
+ * a report verb) — `bolder · 1 of 3` as a variants round's variants land
+ * — then nothing, once the round is complete.
  * Drawn in the screen slot from the target's rect — above an element,
  * found again by its selector once its page has been remounted or
  * reloaded since the pick (target.ts), and inside the top-left corner of
@@ -45,7 +46,9 @@ export default function createCaption(
     const phase = session.phase();
     if (phase.kind === "idle") return "";
     if (phase.kind === "waiting") return `${phase.pick.verb} · waiting for an agent`;
-    return `${phase.pick.verb} · ${working(phase.pick.verb)}`;
+    return phase.of === null
+      ? `${phase.pick.verb} · ${working(phase.pick.verb)}`
+      : `${phase.pick.verb} · ${phase.landed} of ${phase.of}`;
   };
 
   return (

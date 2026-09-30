@@ -8,11 +8,15 @@
 // viewport — are the host part's (bridge.ts): impeccable_verb and one
 // prompt each.
 //
-// A variant round's copies stay drafts on the canvas and a rework is
-// written to the page's files (decision #78): nothing lands in the
-// document, so the canvas counts nothing and adopts nothing, and the round
-// ends when the agent says so. Phase 9 of the project model moves the
-// variants to `.daydream/variants/`, where the canvas can know them again.
+// A variants round's copies are finalized into `.daydream/variants/`
+// (kernel Phase 9, decision #80), each landing as a viewport of the
+// source's page that names its variant: the caption counts them as they
+// land, and the round ends with the last. The user accepts a variant into
+// its page or discards it with the kernel's own Accept and Discard in its
+// title bar — the plugin adds no word beside them — or names it to the
+// agent, who ends it with the kernel's resolve_variant. A rework is written
+// to the page's files (decision #78), which tells no end: that round ends
+// when the agent says so.
 //
 // How a pick reaches an agent: through dd.storage. Every change here is
 // written to `.daydream/plugin-data/mrbavio.impeccable.json` at once, and an
@@ -23,7 +27,7 @@ import { createSignal, untrack } from "solid-js";
 
 import type { DaydreamApi } from "@daydream/plugin-api";
 
-import { VERBS as VERB_SPECS } from "./bridge/verbs";
+import { DEFAULT_VARIANTS, VERBS as VERB_SPECS } from "./bridge/verbs";
 import createCaption from "./Caption";
 import { exportPage } from "./pageExport";
 import createPicker, { type PickerEntry } from "./Picker";
@@ -35,6 +39,7 @@ const ID = "mrbavio.impeccable";
 /** The verbs, in the picker's order — the host part's list, shared. */
 const VERBS = VERB_SPECS.map((v) => v.verb);
 const modeOf = (verb: string) => VERB_SPECS.find((v) => v.verb === verb)?.mode;
+const isVariantsVerb = (verb: string): boolean => modeOf(verb) === "variants";
 /** The picker's last entry: the session's exit, beside the verbs. */
 const END_SESSION = "end session";
 
@@ -160,21 +165,55 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     },
   });
 
+  // What the canvas can see of a VARIANTS round's progress: the variants
+  // of the source's page it gains while the round builds — each a copy the
+  // agent finalized, landing as a viewport whose `payload.variant` the
+  // kernel wrote — counted against the copies a pick's round opens (the
+  // verb's default: the session hands impeccable_verb no count). A variant
+  // of the page already there before the round is not one of its own, and
+  // neither is anything else the canvas gains. Nothing is stored: a
+  // variant carries nothing of the plugin's, and the round is this tab's.
+  let round: { page: string; landed: Set<string> } | null = null;
+  const pageOf = (viewportId: string): string | null =>
+    dd.core.viewportItems(dd.document()).find((v) => v.id === viewportId)?.payload.page ?? null;
+  const countVariants = (added: readonly string[]): void => {
+    const current = untrack(session.phase);
+    if (current.kind !== "building" || round === null) return;
+    const viewports = dd.core.viewportItems(dd.document());
+    for (const id of added) {
+      const viewport = viewports.find((v) => v.id === id);
+      if (viewport?.payload.variant !== undefined && viewport.payload.page === round.page) {
+        round.landed.add(id);
+      }
+    }
+    if (round.landed.size > 0) session.progress(round.landed.size, DEFAULT_VARIANTS);
+  };
+
   dd.registerTool({
     name: PICK_TOOL,
     title: "Impeccable pick",
     description:
-      "Take the verb the user picked on the canvas: answers {pick: {verb, viewportId, element, brief?, at} | null, exit} — element a CSS selector naming the target in the viewport's page, null for the whole page — and clears it (the canvas shows the pick as building until impeccable_done). Call it first on any Impeccable request and on every wake-up of a session's watch; then impeccable_verb with the pick's verb, viewport, element and, when present, brief, the user's own words about this round, which outrank the playbook's defaults. exit true means the user ended the session.",
+      "Take the verb the user picked on the canvas: answers {pick: {verb, viewportId, element, brief?, at} | null, exit} — element a CSS selector naming the target in the viewport's page, null for the whole page — and clears it (the canvas shows the pick as building — a variants round counting its variants as they land — until the round ends). Call it first on any Impeccable request and on every wake-up of a session's watch; then impeccable_verb with the pick's verb, viewport, element and, when present, brief, the user's own words about this round, which outrank the playbook's defaults. exit true means the user ended the session.",
     inputSchema: { type: "object", properties: {}, required: [] },
     annotations: { idempotentHint: false, destructiveHint: false },
-    run: () => session.take(),
+    run: () => {
+      const taken = session.take();
+      const { pick } = taken;
+      // The round's page, taken with its pick and only then: a call with
+      // nothing waiting leaves the round being built as it is.
+      if (pick !== null) {
+        const page = isVariantsVerb(pick.verb) ? untrack(() => pageOf(pick.viewportId)) : null;
+        round = page === null ? null : { page, landed: new Set() };
+      }
+      return taken;
+    },
   });
 
   dd.registerTool({
     name: DONE_TOOL,
     title: "Impeccable done",
     description:
-      "Tell the canvas the round is complete — every variant open as a draft, the rework written to the page's files, the report given, or you stopped — so its caption stops saying building. The canvas cannot see a round end on its own: call it at the end of every round.",
+      "Tell the canvas the round is complete — every copy finalized as a variant, the rework written to the page's files, the report given, or you stopped — so its caption stops saying building. The canvas counts a round's variants as they land but cannot see any other end: call it at the end of every round.",
     inputSchema: { type: "object", properties: {}, required: [] },
     annotations: { idempotentHint: true, destructiveHint: false },
     run: () => {
@@ -185,6 +224,11 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
 
   dd.on("document", () => {
     untrack(session.check);
+  });
+  // A hook handler runs in an effect's apply phase: the document is read
+  // there as a snapshot, never tracked.
+  dd.on("items", ({ added }) => {
+    if (added.length > 0) untrack(() => countVariants(added));
   });
   // A new text of the page remounts it, and until it has, the selector
   // may name nothing the check can place.

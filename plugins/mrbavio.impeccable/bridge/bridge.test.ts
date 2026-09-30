@@ -137,23 +137,33 @@ describe("impeccable host part", () => {
     // Variants land beside the source, one frame plus a gap apart.
     expect(text).toContain("3 VARIANTS");
     expect(text).toContain("1 at {x: 1108, y: 40}, 2 at {x: 2116, y: 40}, 3 at {x: 3124, y: 40}");
-    // Each copy is titled for the user to tell apart, from its page's path
-    // (a viewport has no title of its own, decision #78); the notes carry
-    // its direction and no marker, since nothing reads one back.
-    expect(text).toContain('meta: {title: "pricing.html · bolder n/3", notes: <the direction>}');
+    // Each copy is titled for the user to tell apart while it builds, from
+    // its page's path (a viewport has no title of its own, decision #78);
+    // no marker, since nothing reads one back: a finalized variant's
+    // title bar names its file, which the report names each direction by.
+    expect(text).toContain('meta: {title: "pricing.html · bolder n/3"}}');
+    expect(text).toContain("The title names the copy while it builds");
     expect(text).not.toContain("Impeccable bolder · variant");
     expect(text).not.toContain("· round ");
     expect(text).not.toContain("draft_open {from:");
-    // A copy is not finalized yet (the kernel refuses it until Phase 9):
-    // the copies stay drafts, the agent is told never to finalize one and
-    // to say so, and nothing promises an adopt.
-    expect(text).toContain("THEY STAY DRAFTS");
-    expect(text).toContain("never call draft_finalize on a copy");
-    expect(text).not.toMatch(/draft_finalize (IMMEDIATELY|lands)/);
-    expect(text).not.toContain("adopt (");
-    expect(text).toContain("tell the user the copies stay on the canvas as drafts to compare");
-    expect(text).toContain("you write its direction into `pricing.html` with your file tools");
-    expect(text).toContain('then draft_discard every copy of the round and lint {viewportIds: ["vp_pricing"]} — the canvas follows the files');
+    // Kernel Phase 9: every copy is finalized into .daydream/variants/,
+    // never the site, and the user ends each on its title bar or names it
+    // to the agent, who ends it as the kernel's guide says — pointed at,
+    // never restated (no resolve_variant call spelled out here).
+    expect(text).toContain("4. FINALIZE EACH, once written: draft_finalize {draft, token}");
+    expect(text).toContain("it lands as a variant where the draft stood, answered with its file (`<page-stem>.<n>.html`)");
+    expect(text).toContain("Every copy of the round is finalized: none is left a draft.");
+    expect(text).toContain("A copy's finalize writes it into the project's `.daydream/variants/`, never the site: `pricing.html` stays as it is until the user accepts one.");
+    expect(text).not.toContain("THEY STAY DRAFTS");
+    expect(text).not.toContain("never call draft_finalize");
+    expect(text).not.toContain("no finalize");
+    expect(text).not.toContain("adopt");
+    expect(text).toContain("When all 3 are finalized, report each direction in one line, by its variant's file");
+    expect(text).toContain("each variant's title bar accepts it into `pricing.html` or discards it — or they can name the one to keep to you, and you end the ones they name as the server's instructions say (Core tools, DRAFTS)");
+    expect(text).not.toContain("resolve_variant");
+    expect(text).not.toContain("draft_discard");
+    expect(text).not.toContain("with your file tools");
+    expect(text).toContain("End no variant on your own.");
     // The canvas follows the files (kernel Phase 5): nothing to reload.
     expect(text).not.toContain("reload");
     // A variant is a copy of the source's page, then its target's markup
@@ -172,7 +182,8 @@ describe("impeccable host part", () => {
     expect(text).toContain("draft_append {draft, token, css}");
     expect(text).toContain("draft_edit {draft, token, html: {old, new}}");
     expect(text).not.toContain("css: {old, new}");
-    expect(text).toContain("and stop there: no finalize");
+    expect(text).toContain("then draft_finalize {draft, token: <the last next>} — a blocking finding: fix what it names and finalize again — and stop there, answering the variant's file.");
+    expect(text).toContain("Without sub-agents, steps 3 and 4 for each variant in turn");
     expect(text).toContain("THE TARGET'S MARKUP AND THE CSS RULES THAT STYLE IT");
     expect(text).toContain("a fast model handles well");
     // The page is HTML and CSS whole: nothing the tree lacked is ruled out.
@@ -222,15 +233,16 @@ describe("impeccable host part", () => {
     const verb = tools.find((t) => t.name === VERB_TOOL)!;
     expect(Object.keys(verb.inputSchema)).toEqual(["verb", "viewport", "element", "brief", "variants"]);
     expect(verb.description).toContain("After a canvas pick, pass the pick's viewport and element.");
-    expect(verb.description).toContain("which stay drafts for the user to compare");
+    expect(verb.description).toContain("make variants of the source beside it — draft copies finalized into the project's .daydream/variants/ — for the user to accept into the page or discard");
     expect(verb.description).toContain("written into the page's files");
     expect(verb.description).not.toMatch(/\bland/);
     const session = tools.find((t) => t.name === SESSION_TOOL)!;
     const { text } = await (session.run as () => Promise<{ text: string }>)();
     expect(text).toContain("impeccable_verb {verb, viewport, element, brief}");
     expect(text).not.toContain("round}");
-    expect(text).toContain("nothing adopts one yet");
-    expect(text).not.toMatch(/\badopts? a variant from the canvas/);
+    expect(text).toContain("every copy written and finalized as a variant");
+    expect(text).toContain("until the user accepts it into its page or discards it on its title bar; when they name one to you between rounds, end it as the server's instructions say (Core tools, DRAFTS)");
+    expect(text).not.toContain("adopt");
   });
 
   test("a selected viewport item is the whole page; an in-place verb reworks it as an edit draft", async () => {
@@ -267,6 +279,43 @@ describe("impeccable host part", () => {
     expect(text).not.toContain("root's styles");
     expect(text).not.toContain("VARIANTS");
     expect(text).toContain("THE USER'S BRIEF (it wins over the playbook's defaults): the footer feels crowded");
+  });
+
+  test("a variant's viewport as the target: a rework writes the variant's files, never the page, and a variants verb copies the variant", async () => {
+    // A viewport of a VARIANT of pricing.html (kernel Phase 9), selected
+    // whole — its elements are not selected on the canvas.
+    const variant = {
+      id: "vp_variant",
+      page: "pricing.html",
+      variant: ".daydream/variants/pricing.1.html",
+      frame: { width: 960 },
+      position: { x: 1108, y: 40 },
+    };
+    const { host, prompts } = fakeHost(
+      state({ elementId: "vp_variant", viewportId: "vp_variant", itemIds: ["vp_variant"] }, [pricing, variant]),
+    );
+    await activate(host);
+    const polish = await (prompts.find((p) => p.name === "impeccable-polish")!.build as Build)({});
+    expect(polish).toContain(
+      "TARGET: the whole page of viewport `vp_variant` (the variant `.daydream/variants/pricing.1.html` of the page `pricing.html`, 960 wide, at 1108, 40)",
+    );
+    expect(polish).toContain("IN PLACE, in the VARIANT this viewport shows");
+    expect(polish).toContain('draft_open {from: "vp_variant"} seeds a draft with the variant');
+    // Its css is the variant's own sheet, edited in place; the page's
+    // sheets are the site's, overridden and never edited in their files.
+    expect(polish).toContain("draft_edit {draft, token, css: {old, new}}");
+    expect(polish).toContain("never in their files");
+    expect(polish).toContain("it writes the variant's files (`.daydream/variants/pricing.1.html` and its sheet), nothing of the site");
+    expect(polish).not.toContain("4. Each rule of a linked sheet");
+    expect(polish).not.toContain("lint {viewportIds");
+    expect(polish).not.toContain("holds only the rules to ADD");
+    expect(polish).toContain("It stays a variant: each variant's title bar accepts it into `pricing.html` or discards it");
+    const bolder = await (prompts.find((p) => p.name === "impeccable-bolder")!.build as Build)({});
+    expect(bolder).toContain('draft_open {copyOf: "vp_variant"');
+    expect(bolder).toContain("each a copy of the variant the source shows — a new variant of `pricing.html` beside it");
+    expect(bolder).toContain("The draft starts from the VARIANT");
+    expect(bolder).not.toContain("The draft's css starts empty");
+    expect(bolder).toContain("4. FINALIZE EACH");
   });
 
   test("an element selected while its page remounts has no selector: the prompt asks rather than widening to the page", async () => {

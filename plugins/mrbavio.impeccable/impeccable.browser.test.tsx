@@ -147,7 +147,8 @@ describe("mrbavio.impeccable in the shell", () => {
     expect(manifest.contributes?.overlays).toEqual(["caption", "picker"]);
     expect(manifest.contributes?.commands).toEqual(["mrbavio.impeccable.pick", "mrbavio.impeccable.cancel", "mrbavio.impeccable.end-session"]);
     expect(manifest.contributes?.shortcuts).toEqual({ "Mod+P": "mrbavio.impeccable.pick", Escape: "mrbavio.impeccable.cancel" });
-    // No `adopt`: no variant lands, so none is adopted (decision #78).
+    // No `adopt`: a variant is accepted or discarded by the kernel's own
+    // words in its title bar (Phase 9), and the plugin adds none beside them.
     expect(manifest.contributes?.itemActions).toBeUndefined();
     expect(manifest.contributes?.tools).toContain(PICK_TOOL);
     expect(manifest.unstable).toBeUndefined();
@@ -211,7 +212,8 @@ describe("mrbavio.impeccable in the shell", () => {
       pick: { verb: "bolder", viewportId: source.id, element: "div.grid", brief: "keep the photo, louder CTA" },
     });
     expect(JSON.stringify(waiting)).not.toContain(grid);
-    // No round: nothing on the canvas counts one (decision #78).
+    // No round id: a finalized variant carries nothing of the plugin's to
+    // read one back from (the caption counts the round's variants instead).
     expect(waiting["pick"]).not.toHaveProperty("round");
     await settle();
     expect(caption()!.textContent).toBe("bolder · waiting for an agent");
@@ -227,16 +229,16 @@ describe("mrbavio.impeccable in the shell", () => {
     expect(caption()!.textContent).toBe("bolder · building");
     expect((await pickTool().run({})) as unknown).toMatchObject({ pick: null, exit: false });
 
-    // A variants round's copies stay drafts, which the document never
-    // holds: whatever lands on the canvas meanwhile is not the round's,
-    // and the round ends at the agent's word alone.
+    // A page of the project landing meanwhile is no variant of the
+    // source's page, so it is not the round's (variants.browser.test.tsx
+    // counts those); the round stopped short ends at the agent's word.
     mounted.store.landItems([createPageItem({ html: "<!doctype html><html><body></body></html>" }, { position: { x: 1200, y: 0 } }).item]);
     await settle();
     expect(caption()!.textContent).toBe("bolder · building");
     expect(await tool(DONE_TOOL).run({})).toEqual({ done: true });
     await settle();
     expect(caption()).toBeNull();
-    // Nor is there anything to adopt, on any title bar.
+    // And the plugin puts no word of its own on any title bar.
     expect(mounted.host.querySelectorAll('[data-item-action^="mrbavio.impeccable"]').length).toBe(0);
   });
 

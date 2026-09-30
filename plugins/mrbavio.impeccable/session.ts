@@ -35,10 +35,17 @@ export type Phase =
   /** Picked on the canvas, no agent has taken it. */
   | { kind: "waiting"; pick: VerbPick; anchor: ElementId | null }
   /** An agent took it and is working, until it says the round is done
-   * (impeccable_done). Nothing on the canvas tells the end of a round:
-   * a variant stays a draft and a rework is written to the page's files
-   * (decision #78), neither of which the page's document holds. */
-  | { kind: "building"; pick: VerbPick; anchor: ElementId | null };
+   * (impeccable_done) or, for a variants round, its last variant lands:
+   * `landed` of `of` are on the canvas (`of` null until the first). A
+   * rework is written to the page's files (decision #78), which tells no
+   * end: the agent's word does. */
+  | {
+      kind: "building";
+      pick: VerbPick;
+      anchor: ElementId | null;
+      landed: number;
+      of: number | null;
+    };
 
 /** What the session knows of a waiting pick's element, beside its
  * selector — never stored. `check` moves it along one edge at a time, or
@@ -78,6 +85,9 @@ export interface Session {
   end(): void;
   /** The round is complete: whatever was building is done. */
   done(): void;
+  /** A variants round's progress: `landed` of `of` variants are on the
+   * canvas. Reaching `of` completes the round. */
+  progress(landed: number, of: number): void;
   /** What the last session left in storage — restored at activation so a
    * reload keeps a waiting pick; `exit` is never restored. */
   restore(saved: unknown, viewportExists: (id: string) => boolean): void;
@@ -226,7 +236,7 @@ export function createSession(
       if (taken.pick !== null) {
         const current = untrack(phase);
         const anchor = current.kind === "idle" ? null : current.anchor;
-        setPhase({ kind: "building", pick: taken.pick, anchor });
+        setPhase({ kind: "building", pick: taken.pick, anchor, landed: 0, of: null });
       }
       write({ pick: null, exit: false });
       return taken;
@@ -244,6 +254,12 @@ export function createSession(
     done() {
       // Called from a hook handler (an effect's apply phase): read, don't track.
       if (untrack(phase).kind === "building") setPhase({ kind: "idle" });
+    },
+    progress(landed, of) {
+      const current = untrack(phase);
+      if (current.kind !== "building") return;
+      if (landed >= of) setPhase({ kind: "idle" });
+      else setPhase({ ...current, landed, of });
     },
     restore(saved, viewportExists) {
       const s = sessionState(saved);

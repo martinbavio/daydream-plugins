@@ -6,10 +6,12 @@
 //
 // A pick carried a round id once, for the marker a landed variant wrote
 // on its notes, which the caption counted and `adopt` cleared by. A
-// viewport has no notes since decision #78 and no draft lands, so nothing
-// reads a round now: a stored one is read past. Phase 9 of the project
-// model moves Impeccable's variants to `.daydream/variants/`, and a
-// round's name with them.
+// viewport has no notes since decision #78, and a variant finalized into
+// `.daydream/variants/` (kernel Phase 9) carries nothing of the plugin's
+// — its viewport's `variant` is the kernel's, its file named by the
+// kernel — so no round id could be read back from one. The caption counts
+// a round's variants as they land instead (index.tsx), and a stored round
+// id is read past.
 
 /** What the browser part keeps under the `session` storage key. `seq`
  * changes on every write so a watcher comparing file contents wakes even

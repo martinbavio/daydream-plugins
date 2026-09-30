@@ -16,15 +16,18 @@
 // A page is a file of the project (decision #78). A rework is an edit
 // draft the user watches, which `draft_finalize` writes into the page's
 // files after the gates run over it — only what changed, the canvas
-// following the files. A variant is a draft copy beside its source, and
-// stays one: the kernel refuses a copy's finalize until Phase 9 of the
-// project model moves the variants to `.daydream/variants/`, and the
-// deliverable with them.
+// following the files. A variant is a draft copy beside its source, which
+// `draft_finalize` writes into the project's `.daydream/variants/`, never
+// the site (kernel Phase 9, decision #80): the user accepts it into its
+// page or discards it on its title bar, or names it to the agent, who ends
+// it as the kernel's own guide says. The deliverable points at that guide
+// rather than restating it.
 
 /** What a verb makes: `variants` opens N draft copies beside the source,
- * each a different direction; `in-place` reworks the source's page in an
- * edit draft, finalized into its files; `report` changes nothing — the
- * review is the answer. */
+ * each a different direction, finalized as variants for the user to
+ * accept or discard; `in-place` reworks the source's page in an edit
+ * draft, finalized into its files; `report` changes nothing — the review
+ * is the answer. */
 export type VerbMode = "variants" | "in-place" | "report";
 
 export interface VerbSpec {
@@ -46,42 +49,42 @@ export const VERBS: readonly VerbSpec[] = [
     verb: "bolder",
     title: "Impeccable: bolder",
     description:
-      "Amplify a safe or bland element: three draft variants beside the source, in the page's own vocabulary.",
+      "Amplify a safe or bland element: three variants beside the source, in the page's own vocabulary.",
     mode: "variants",
   },
   {
     verb: "quieter",
     title: "Impeccable: quieter",
     description:
-      "Tone down an aggressive or overstimulating element: three draft variants beside the source.",
+      "Tone down an aggressive or overstimulating element: three variants beside the source.",
     mode: "variants",
   },
   {
     verb: "typeset",
     title: "Impeccable: typeset",
     description:
-      "Improve typography — hierarchy, measure, scale, fonts: three draft variants beside the source.",
+      "Improve typography — hierarchy, measure, scale, fonts: three variants beside the source.",
     mode: "variants",
   },
   {
     verb: "layout",
     title: "Impeccable: layout",
     description:
-      "Fix spacing, rhythm and visual hierarchy: three draft variants beside the source.",
+      "Fix spacing, rhythm and visual hierarchy: three variants beside the source.",
     mode: "variants",
   },
   {
     verb: "colorize",
     title: "Impeccable: colorize",
     description:
-      "Add strategic colour to a monochrome or dull element: three draft variants beside the source.",
+      "Add strategic colour to a monochrome or dull element: three variants beside the source.",
     mode: "variants",
   },
   {
     verb: "delight",
     title: "Impeccable: delight",
     description:
-      "Add personality and a memorable touch: three draft variants beside the source.",
+      "Add personality and a memorable touch: three variants beside the source.",
     mode: "variants",
   },
   {
@@ -147,6 +150,10 @@ export interface StateSlice {
     /** The page it shows: its path in the project (decision #78), the
      * file an in-place rework is written to. */
     page: string;
+    /** A viewport of a VARIANT of that page (kernel Phase 9): the
+     * variant's markup in `.daydream/variants/`, which a rework of it is
+     * written to instead. Absent for the page's own. */
+    variant?: string;
     frame: { width: number; height?: number } | null;
     position: { x: number; y: number };
   }>;
@@ -246,7 +253,9 @@ function describeViewport(v: StateSlice["viewports"][number]): string {
       : v.frame.height === undefined
         ? `${v.frame.width} wide`
         : `${v.frame.width}×${v.frame.height}`;
-  return `viewport \`${v.id}\` (the page \`${v.page}\`, ${size}, at ${v.position.x}, ${v.position.y})`;
+  const shows =
+    v.variant === undefined ? `the page \`${v.page}\`` : `the variant \`${v.variant}\` of the page \`${v.page}\``;
+  return `viewport \`${v.id}\` (${shows}, ${size}, at ${v.position.x}, ${v.position.y})`;
 }
 
 function targetSection(input: PromptInput): string {
@@ -277,15 +286,31 @@ function targetSection(input: PromptInput): string {
  * open one. */
 const DRAFT_CSS = `The draft's css starts empty and applies after the page's own sheets: restyle with draft_append {draft, token, css}, the rules that change — at equal specificity they win over the page's — and change a rule in one of the markup's \`<style>\` blocks in place with draft_edit {draft, token, html: {old, new}} (old: the exact stored text, found once).`;
 
+/** How a draft seeded from a VARIANT's viewport styles (kernel Phase 9,
+ * decision #80): its markup is the variant's and its css the variant's
+ * own sheet, which applies after the page's; what it finalizes is
+ * written into `.daydream/variants/`, never the site — so a rule of the
+ * page's sheets is overridden, never edited in its file. */
+const VARIANT_CSS = `The draft starts from the VARIANT: its markup, and the variant's own sheet as its css, applied after the page's sheets. Change a rule of it in place with draft_edit {draft, token, css: {old, new}} (old: the exact stored text, found once), add rules with draft_append {draft, token, css}, and change a rule in one of the markup's \`<style>\` blocks with draft_edit {draft, token, html: {old, new}}. The page's own sheets are the site's: override a rule of theirs in the draft's css, never in their files.`;
+
 /** What a rework's css is (the kernel's draft guide): the rules to ADD,
  * which its finalize appends where the format rules say; a rule already
  * in a sheet file is changed in that file. */
 const REWORK_CSS = `The draft's css starts empty and holds only the rules to ADD — for what the rework adds, each under a class of its own — which the finalize appends where the page keeps its rules; change a rule in one of the markup's \`<style>\` blocks in place with draft_edit {draft, token, html: {old, new}} (old: the exact stored text, found once). A rule already in a sheet file the page links is not the draft's: change it in that file, after the finalize (step 4).`;
 
+/** How the user ends a variant, and the agent after them: the kernel's
+ * title bar, or the agent on the user's word as the kernel's own guide
+ * says — pointed at, never restated (decision #80: said once, there). */
+function variantEnd(page: string): string {
+  return `each variant's title bar accepts it into ${page} or discards it — or they can name the one to keep to you, and you end the ones they name as the server's instructions say (Core tools, DRAFTS)`;
+}
+
 function deliverableSection(input: PromptInput): string {
   const { spec, target, variants } = input;
   const id = target?.viewport.id ?? "<viewport id>";
   const page = target === null ? "the page's file" : `\`${target.viewport.page}\``;
+  /** The variant the target viewport shows, if it shows one. */
+  const shown = target?.viewport.variant;
   if (spec.mode === "report") {
     const el = target?.selector ?? null;
     const call = el === null ? `impeccable_detect {viewport: "${id}"}` : `impeccable_detect {viewport: "${id}", element: ${JSON.stringify(el)}}`;
@@ -295,6 +320,15 @@ function deliverableSection(input: PromptInput): string {
         : ` The target is scanned in its page, never cut out of it: the whole page is scanned as it renders, then again with the target taken out, and only the findings the target adds are answered — so every finding is the target's (the detector names text and colours, never elements), and a page-wide one the rest of the page raises too is left out. Judge the target as part of its page — the answer's \`file\` is the whole page, the target marked data-impeccable-target, open it when you need to see — but report on the target.`;
     return [
       `DELIVERABLE: THE REPORT, in chat — nothing changes, on the canvas or in the project. The playbook's evidence step is Impeccable's detector over the RENDERED PAGE, and it is ONE CALL: ${call} — the host exports the page as the canvas renders it, writes it to a file, runs the installed skill's own detector over it and answers the findings (antipattern, severity, snippet) with the file's path. Do not export, write or run anything yourself; do not use npx or a global \`impeccable\`.${scope} Where the playbook says a browser, a screenshot or a URL, that file IS the page; where it names a sub-command to run, name it for the user instead (an Impeccable verb of the same name, picked on the canvas). Where it wants a snapshot persisted, skip it. THE PLAYBOOK'S ISOLATION RULE STANDS HERE, unlike the translation's line on sub-agents below: where it says an assessment must run isolated (critique's Assessment A, the design review, before any detector evidence reaches the judging context), run it as a sub-agent when the user allows them — hand it the target from get_viewport and the playbook, never the findings — and call impeccable_detect only after it answers; without sub-agents, do the design review first, call impeccable_detect after, and open the report with the playbook's DEGRADED banner, exactly as it asks. Write the report the playbook describes, scoped to the target and ordered by what to fix first. Then impeccable_done. Never open a draft or change the page: this verb only judges it.`,
+    ].join("\n");
+  }
+  if (spec.mode === "in-place" && shown !== undefined) {
+    return [
+      `DELIVERABLE: the target reworked IN PLACE, in the VARIANT this viewport shows — as one edit draft the user watches, then written into the variant's own files by its finalize, never into ${page}.
+1. draft_open {from: "${id}"} seeds a draft with the variant and locks its viewport — every selector you read off the viewport names the same element in the draft.
+2. Rework the target in the draft: draft_replace {draft, token, target: <its selector>, html: <its reworked markup>} for the markup. ${VARIANT_CSS} Each write answers \`next\`, the token for the one after. When the page itself is the target, the same tools over the sections and rules that change — never the whole page resent to change a few of them.
+3. draft_finalize {draft, token}: every gate runs over what it is about to write, and it writes the variant's files (\`${shown}\` and its sheet), nothing of the site; a blocking finding refuses it — fix in the draft what it names and finalize again. Its answer carries the measure report and the advisory findings: read them, do not measure again.
+It stays a variant: ${variantEnd(page)}. One draft, one rework. Do not open a second viewport. Then impeccable_done.`,
     ].join("\n");
   }
   if (spec.mode === "in-place") {
@@ -315,18 +349,23 @@ One draft, one rework. Do not open a second viewport. Then impeccable_done.`,
     return `${i + 1} at {x: ${x}, y: ${y}}`;
   }).join(", ");
   const title = target?.viewport.page ?? "Untitled";
+  const source =
+    shown === undefined
+      ? "a copy of the source's page"
+      : `a copy of the variant the source shows — a new variant of ${page}`;
   return [
-    `DELIVERABLE: ${variants} VARIANTS of the source, each a DRAFT COPY beside it, each a genuinely different direction the playbook allows — not ${variants} intensities of one idea. THEY STAY DRAFTS: a copy is not finalized yet (the kernel refuses it until variants have a home in the project) and nothing adopts one, so never call draft_finalize on a copy — the user compares the copies on the canvas, and each lives until it is discarded. The order of work, for speed on the canvas:
+    `DELIVERABLE: ${variants} VARIANTS of the source, each a DRAFT COPY beside it that you finalize into a VARIANT, each a genuinely different direction the playbook allows — not ${variants} intensities of one idea. A copy's finalize writes it into the project's \`.daydream/variants/\`, never the site: ${page} stays as it is until the user accepts one. The order of work, for speed on the canvas:
 1. Read THE TARGET, not the page: get_viewport {id: "${id}", element: <the target's selector>} answers its markup and the selector of each ancestor; the rules that style it are in the page's sheets (get_viewport {id: "${id}"} answers them) — enough to decide the ${variants} directions, a sentence each. Read the whole page only when the page itself is the target.
-2. OPEN ALL ${variants} COPIES FIRST, back to back: draft_open {copyOf: "${id}", position: <its position below>, meta: {title: "${title} · ${spec.verb} n/${variants}", notes: <the direction>}} — each a copy of the source's page beside it, the source untouched, answered without its page (you hold it) but with the draft id and \`next\`, the token for its first write. The title is how the user tells the copies apart. The frames are on the canvas within seconds, building, while the writing happens.
-3. WRITE EACH VARIANT: draft_replace {draft, token, target: <the target's selector AS YOU READ IT FROM THE SOURCE — the copy is the source's text, so it names the same element>, html: <the target's markup rewritten for that direction>}. ${DRAFT_CSS} Give an element you add a class of its own so its rules reach it and nothing else; each write answers \`next\`, the token for the one after. Never send the whole page, and never resend a whole sheet to change a few rules.
+2. OPEN ALL ${variants} COPIES FIRST, back to back: draft_open {copyOf: "${id}", position: <its position below>, meta: {title: "${title} · ${spec.verb} n/${variants}"}} — each ${source} beside it, the source untouched, answered without its page (you hold it) but with the draft id and \`next\`, the token for its first write. The title names the copy while it builds. The frames are on the canvas within seconds, building, while the writing happens.
+3. WRITE EACH VARIANT: draft_replace {draft, token, target: <the target's selector AS YOU READ IT FROM THE SOURCE — the copy is the source's text, so it names the same element>, html: <the target's markup rewritten for that direction>}. ${shown === undefined ? DRAFT_CSS : VARIANT_CSS} Give an element you add a class of its own so its rules reach it and nothing else; each write answers \`next\`, the token for the one after. Never send the whole page, and never resend a whole sheet to change a few rules.
+4. FINALIZE EACH, once written: draft_finalize {draft, token} — the gates run over the copy, and it lands as a variant where the draft stood, answered with its file (\`<page-stem>.<n>.html\`), which its title bar names from then on; a blocking finding refuses it — fix in the draft what it names and finalize again. Every copy of the round is finalized: none is left a draft.
 IN PARALLEL when the user allows sub-agents (a harness spawns them only when the user, a CLAUDE.md or a skill asks — ask once if unsure): after step 2, one sub-agent per variant, spawned back to back, the parent writing nothing and waiting for all. Give each sub-agent THIS SCRIPT, in this order, with the values filled in — it sees nothing else you know:
   (a) draft_set {draft: <its draft id>, token: <its token from the open>, outline: [<its direction, a few words>]} — THE VERY FIRST CALL, before reading anything: the copy was opened before the sub-agent existed, and a draft silent for two minutes shows as stalled on the canvas.
   (b) impeccable_verb {verb: "${spec.verb}", viewport: "${id}", element: <the target's selector>, brief: <its direction>} — the playbook.
   (c) Write the target rewritten for its direction, from THE TARGET'S MARKUP AND THE CSS RULES THAT STYLE IT, exactly as stored, which you paste into its instructions (so it reads nothing again).
-  (d) draft_replace {draft, token: <the token draft_set answered>, target: <the target's selector>, html: <the rewrite>}, then draft_append for its css (or draft_edit for a \`<style>\` block) with the \`next\` each answer carries — and stop there: no finalize.
-The slow part is the writing, so let it happen in three places at once; a variant is a bounded rewrite of one section, which a fast model handles well when your harness lets you pick one for a sub-agent. Without sub-agents, step 3 for each variant in turn — and if a copy has waited two minutes for its turn, touch it first the same way.
-Positions: ${positions}. When all ${variants} are written, report each direction in one line, and tell the user the copies stay on the canvas as drafts to compare — nothing adopts one yet: when they name the one to keep, you write its direction into ${page} with your file tools, each rule changed where the page's sheets write it, then draft_discard every copy of the round and lint {viewportIds: ["${id}"]} — the canvas follows the files. Then impeccable_done. Discard or remove nothing on your own.`,
+  (d) draft_replace {draft, token: <the token draft_set answered>, target: <the target's selector>, html: <the rewrite>}, then draft_append for its css (or draft_edit for a rule already in the draft's text) with the \`next\` each answer carries; then draft_finalize {draft, token: <the last next>} — a blocking finding: fix what it names and finalize again — and stop there, answering the variant's file.
+The slow part is the writing, so let it happen in three places at once; a variant is a bounded rewrite of one section, which a fast model handles well when your harness lets you pick one for a sub-agent. Without sub-agents, steps 3 and 4 for each variant in turn — and if a copy has waited two minutes for its turn, touch it first the same way.
+Positions: ${positions}. When all ${variants} are finalized, report each direction in one line, by its variant's file, and tell the user ${variantEnd(page)}. Then impeccable_done. End no variant on your own.`,
   ].join("\n");
 }
 
