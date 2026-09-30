@@ -166,7 +166,9 @@ import {
   type TextRange,
 } from "./pageMount";
 import {
+  judgedPaths,
   listText,
+  noteWith,
   readSheets,
   shownPages,
   UNJUDGED_NAMED,
@@ -183,6 +185,12 @@ import {
 } from "./pageSheets";
 import { ruleMatcher } from "./ruleMatch";
 import { hasStatePseudo } from "./statePseudo";
+import {
+  inRound,
+  markupClause,
+  siteClause,
+  type VariantRound,
+} from "./variantRound";
 
 export interface NecessityOptions {
   /** Restrict to these viewports (unknown id → error). Default: all. */
@@ -195,6 +203,10 @@ export interface NecessityOptions {
    * the document's own: a dead line of a sheet one of them links, and no
    * judged viewport shows, is not refused (rule 3). Default: none. */
   project?: ProjectPaths;
+  /** A variant's finalize (variantRound.ts): a dead line of the site's
+   * sheets, or an element's own line the page already has, is not
+   * refused. Default: none. */
+  round?: VariantRound | null;
 }
 
 /** How long the necessity gate gives itself: the runner stops a gate
@@ -246,8 +258,17 @@ export async function necessityLint(
   const notes: Finding[] = [];
   const live = new Set<string>();
   const selected = selectViewports(core, doc, ctx.page, options.viewportIds);
+  const round = options.round ?? null;
   for (const shown of selected) {
     const judged = await lintViewport(core, ctx, shown, live, options.deadline);
+    if (inRound(round, shown.viewport)) {
+      for (const c of judged.candidates) {
+        const selector = c.finding.elementId;
+        if (c.element && selector !== undefined) {
+          c.had = round.hadStyle(selector, c.property);
+        }
+      }
+    }
     perViewport.push(judged.candidates);
     notes.push(...judged.notes);
     for (const c of judged.candidates) if (!c.dead) live.add(c.key);
@@ -256,13 +277,14 @@ export async function necessityLint(
     doc,
     ctx.page,
     options.project ?? [],
-    new Set(selected.map(({ page }) => page.path)),
+    judgedPaths(selected),
   );
   return [
     ...intersect(
       perViewport,
       outside,
       selected.map(({ viewport }) => viewport.id),
+      round,
     ),
     ...notes,
   ];
@@ -321,6 +343,9 @@ interface Candidate {
    * name, and the line as a note about pages not judged names it (rule
    * 3). */
   sheet?: { key: string; name: string; line: string };
+  /** An element's own line its page already has there, at a variant's
+   * finalize (`VariantRound.hadStyle`): no refusal of the variant's. */
+  had?: boolean;
 }
 
 /** A mounted page prepared for removals. */
@@ -850,11 +875,15 @@ function isDead(
  * (`outside`, pageSheets.ts `unjudgedLinks`) was never read where that
  * page renders it, so it is no finding of its own: the lines of each
  * such sheet are one advisory, after the rest, naming the pages and the
- * viewports judged (`viewports`). */
+ * viewports judged (`viewports`). At a variant's finalize (`round`) the
+ * site's sheets are folded the same way, saying why (variantRound.ts
+ * `siteClause`), and an element's own line the page already has is
+ * advisory. */
 function intersect(
   perViewport: readonly Candidate[][],
   outside: ReadonlyMap<string, string[]>,
   viewports: readonly string[],
+  round: VariantRound | null = null,
 ): Finding[] {
   const merged = new Map<
     string,
@@ -864,6 +893,7 @@ function intersect(
       element: boolean;
       finding: Finding;
       sheet: Candidate["sheet"];
+      had: boolean;
     }
   >();
   for (const candidates of perViewport) {
@@ -877,6 +907,7 @@ function intersect(
           element: c.element,
           finding: c.finding,
           sheet: c.sheet,
+          had: c.had === true,
         });
       } else {
         seen.dead = seen.dead && c.dead;
@@ -892,25 +923,33 @@ function intersect(
     ...entries.filter((entry) => !entry.element),
   ]) {
     const { sheet } = entry;
-    if (sheet !== undefined && outside.has(sheet.key)) {
+    if (
+      sheet !== undefined &&
+      (outside.has(sheet.key) || round?.site.has(sheet.key) === true)
+    ) {
       const fold = unjudged.get(sheet.key) ?? { name: sheet.name, lines: [] };
       fold.lines.push(sheet.line);
       unjudged.set(sheet.key, fold);
+      continue;
+    }
+    if (entry.had && round !== null) {
+      out.push({
+        ...entry.finding,
+        severity: "advisory",
+        message: `${entry.finding.message}${markupClause(round)}`,
+      });
       continue;
     }
     out.push(entry.cut ? { ...entry.finding, severity: "advisory" } : entry.finding);
   }
   for (const [key, { name, lines }] of unjudged) {
     const one = lines.length === 1;
+    const subject = `${one ? "declaration" : "declarations"} ${listText(lines, UNJUDGED_NAMED)}`;
+    const found = `${one ? "changes" : "change"} nothing in ${viewportsText(viewports)}`;
     out.push(
-      unjudgedNote(
-        "necessity",
-        name,
-        `${one ? "declaration" : "declarations"} ${listText(lines, UNJUDGED_NAMED)}`,
-        `${one ? "changes" : "change"} nothing in ${viewportsText(viewports)}`,
-        outside.get(key)!,
-        lines.length,
-      ),
+      round?.site.has(key) === true
+        ? noteWith("necessity", name, subject, found, siteClause(round, name, lines.length))
+        : unjudgedNote("necessity", name, subject, found, outside.get(key)!, lines.length),
     );
   }
   return out;

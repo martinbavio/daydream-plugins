@@ -152,7 +152,9 @@ import {
   type TextRange,
 } from "./pageMount";
 import {
+  judgedPaths,
   listText,
+  noteWith,
   readSheets,
   shownPages,
   unjudgedClause,
@@ -171,6 +173,12 @@ import {
   type RedundancyRule,
 } from "./ruleRedundancy";
 import { hasStatePseudo, stripStatePseudo } from "./statePseudo";
+import {
+  inRound,
+  markupClause,
+  siteClause,
+  type VariantRound,
+} from "./variantRound";
 
 /** One viewport's page mounted, read once: its elements in tree order,
  * each one's own declarations and unique selector, and the rules. */
@@ -194,6 +202,9 @@ interface MountedPage {
   /** Each finding whose subject is a rule (`ruleFinding`): what it says
    * of which rule of which sheet, the same wherever the sheet is linked. */
   about: Map<Finding, RuleSubject>;
+  /** The variant round this viewport is judged in (variantRound.ts), or
+   * null: an element's own line the page already has is advisory there. */
+  round: VariantRound | null;
 }
 
 /** What a rule finding says of which rule: the rule across pages (its
@@ -207,6 +218,10 @@ interface RuleSubject {
   key: string;
   sheet: string;
   name: string;
+  /** What the finding's sentence ends with to say what to do (`; remove
+   * it from …`), or "": left out where the sheet is the site's at a
+   * variant's finalize, which the round never writes. */
+  fix: string;
 }
 
 /** Which viewports have a say in a rule finding: `applies`, every one
@@ -233,18 +248,21 @@ function ruleFinding(
   say: Say,
   finding: Finding,
   findings: Finding[],
+  fix = "",
 ): void {
   const written = read.written[index]!;
   const rule = ruleKey(written);
-  read.about.set(finding, {
+  const said = { ...finding, message: `${finding.message}${fix}` };
+  read.about.set(said, {
     rule,
     id: `${rule}\u0000${what}`,
     say,
     key: written.key,
     sheet: written.sheet,
     name: ruleName(written.written),
+    fix,
   });
-  findings.push(finding);
+  findings.push(said);
 }
 
 /** Every match-dependent static finding for the document, per viewport
@@ -272,6 +290,7 @@ export async function matchLint(
   doc: DeepReadonly<DreamDocument>,
   ctx: MountContext,
   project: ProjectPaths = [],
+  round: VariantRound | null = null,
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
   /** Each rule finding's identity → the viewports that found it; each
@@ -316,6 +335,7 @@ export async function matchLint(
         nameOf: storedNames(core, stored, mdoc),
         match: ruleMatcher(mdoc),
         about: new Map(),
+        round: inRound(round, viewport) ? round : null,
       };
       const ranked = rankedMatches(core, read);
       const local: Finding[] = [];
@@ -366,8 +386,9 @@ export async function matchLint(
   return unjudged(
     held,
     kept,
-    unjudgedLinks(doc, ctx.page, project, new Set(shown.map(({ page }) => page.path))),
+    unjudgedLinks(doc, ctx.page, project, judgedPaths(shown)),
     shown.map(({ viewport }) => viewport.id),
+    round,
   );
 }
 
@@ -376,19 +397,24 @@ export async function matchLint(
  * pages; the dead rules among them — what the judged pages do not use
  * says nothing of a page that was not mounted — folded to one advisory
  * per sheet, after the rest (`unjudgedNote`), naming the viewports that
- * were judged (`viewports`). */
+ * were judged (`viewports`). At a variant's finalize (`round`) a rule of
+ * the site's sheets is advisory the same way, saying so instead and
+ * naming no fix (variantRound.ts `siteClause`): the round never writes
+ * them. */
 function unjudged(
   held: readonly Finding[],
   kept: ReadonlyMap<Finding, RuleSubject>,
   outside: ReadonlyMap<string, string[]>,
   viewports: readonly string[],
+  round: VariantRound | null,
 ): Finding[] {
   const out: Finding[] = [];
   const dead = new Map<string, { sheet: string; names: string[] }>();
   for (const finding of held) {
     const about = kept.get(finding);
+    const site = about !== undefined && round?.site.has(about.key) === true;
     const pages = about === undefined ? undefined : outside.get(about.key);
-    if (about === undefined || pages === undefined) {
+    if (about === undefined || (!site && pages === undefined)) {
       out.push(finding);
       continue;
     }
@@ -398,23 +424,23 @@ function unjudged(
       dead.set(about.key, fold);
       continue;
     }
+    const fact = finding.message.slice(0, finding.message.length - about.fix.length);
     out.push({
       ...finding,
       severity: "advisory",
-      message: `${finding.message}${unjudgedClause(about.sheet, pages)}`,
+      message: site
+        ? `${fact}${siteClause(round!, about.sheet)}`
+        : `${finding.message}${unjudgedClause(about.sheet, pages!)}`,
     });
   }
   for (const [key, { sheet, names }] of dead) {
     const one = names.length === 1;
+    const subject = `${one ? "rule" : "rules"} ${listText(names, UNJUDGED_NAMED)}`;
+    const found = `${one ? "matches" : "match"} no element in ${viewportsText(viewports)}`;
     out.push(
-      unjudgedNote(
-        "static",
-        sheet,
-        `${one ? "rule" : "rules"} ${listText(names, UNJUDGED_NAMED)}`,
-        `${one ? "matches" : "match"} no element in ${viewportsText(viewports)}`,
-        outside.get(key)!,
-        names.length,
-      ),
+      round?.site.has(key) === true
+        ? noteWith("static", sheet, subject, found, siteClause(round, sheet, names.length))
+        : unjudgedNote("static", sheet, subject, found, outside.get(key)!, names.length),
     );
   }
   return out;
@@ -650,12 +676,14 @@ function lintRestatedInitials(
       const cut = new Map([[node, [declaration.range]]]);
       if (!unchangedWithout(read, [], cut, [box])) continue;
       const selector = read.nameOf(node);
+      const had = read.round?.hadStyle(selector, declaration.property) === true;
+      const fact = `${declaration.property}: ${declaration.value} on \`${selector}\` restates the initial value`;
       findings.push({
         tier: "static",
-        severity: "blocking",
+        severity: had ? "advisory" : "blocking",
         elementId: selector,
         property: declaration.property,
-        message: `${declaration.property}: ${declaration.value} on \`${selector}\` restates the initial value`,
+        message: had ? `${fact}${markupClause(read.round!)}` : fact,
       });
     }
   }
@@ -724,13 +752,17 @@ function lintRedundancy(
           break;
         }
         const selector = read.nameOf(node);
+        const had = read.round?.hadStyle(selector, property) === true;
+        const fact = `${property}: ${value} on \`${selector}\` restates rule ${ruleOf(read, rule.index)}`;
         findings.push({
           tier: "static",
-          severity: "blocking",
+          severity: had ? "advisory" : "blocking",
           elementId: selector,
           property,
           rule: read.written[rule.index]!.rule,
-          message: `${property}: ${value} on \`${selector}\` restates rule ${ruleOf(read, rule.index)}; remove it from the element's style`,
+          message: had
+            ? `${fact}${markupClause(read.round!)}`
+            : `${fact}; remove it from the element's style`,
         });
         break;
       }
@@ -782,9 +814,10 @@ function lintRuleRestatements(
         severity: "blocking",
         rule: written.rule,
         property: hit.property,
-        message: `${hit.property}: ${hit.value} in rule ${ruleOf(read, hit.rule)} in viewport ${read.viewport.id} restates ${hit.restates.length === 1 ? "rule" : "rules"} ${beneath} for every element it reaches; remove it from ${ruleName(written.written)}`,
+        message: `${hit.property}: ${hit.value} in rule ${ruleOf(read, hit.rule)} in viewport ${read.viewport.id} restates ${hit.restates.length === 1 ? "rule" : "rules"} ${beneath} for every element it reaches`,
       },
       findings,
+      `; remove it from ${ruleName(written.written)}`,
     );
   }
 }

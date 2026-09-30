@@ -3,8 +3,8 @@
 // it and finalizes each copy it opened — driven here through the tab's
 // real draft handlers, the host's part (naming the variant's file and its
 // base) played by the test — and each lands as a viewport of the source's
-// page naming its variant. The caption counts them, the last ending the
-// round. The user ends a variant with the kernel's own Accept and Discard
+// page naming its variant. The caption counts them, however many there
+// are, and the agent's impeccable_done ends the round. The user ends a variant with the kernel's own Accept and Discard
 // in its title bar, which write through the host's variant routes (faked
 // at the host's capability); the plugin adds no word beside them.
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -178,7 +178,7 @@ function sourceProject(): { project: TestProject; source: DreamViewport } {
 }
 
 describe("mrbavio.impeccable on the kernel's variants", () => {
-  test("a design session's variants round: each copy the agent finalizes lands as a variant beside the source, counted by the caption, the last ending the round; accepting one goes through the kernel's title bar, and discarding another", async () => {
+  test("a design session's variants round: each copy the agent finalizes lands as a variant beside the source, counted by the caption, impeccable_done ending the round; accepting one goes through the kernel's title bar, and discarding another", async () => {
     const { project, source } = sourceProject();
     const page = source.payload.page;
     const { host, accepted, discarded } = variantHost();
@@ -195,11 +195,15 @@ describe("mrbavio.impeccable on the kernel's variants", () => {
     // Each finalized copy is a variant of the source's page, nothing of
     // the site written, and the caption counts it.
     const first = await finalizeCopy(handlers, source.id, page, 1);
-    expect(caption()!.textContent).toBe("bolder · 1 of 3");
+    expect(caption()!.textContent).toBe("bolder · 1 variant");
     const second = await finalizeCopy(handlers, source.id, page, 2);
-    expect(caption()!.textContent).toBe("bolder · 2 of 3");
+    expect(caption()!.textContent).toBe("bolder · 2 variants");
     const third = await finalizeCopy(handlers, source.id, page, 3);
-    // The last ends the round: no impeccable_done needed for the caption.
+    expect(caption()!.textContent).toBe("bolder · 3 variants");
+    // The canvas cannot know the third is the last: the agent's word ends
+    // the round.
+    expect(await tool(DONE_TOOL).run({})).toEqual({ done: true });
+    await settle();
     expect(caption()).toBeNull();
     expect(variantViewports().map((v) => [v.id, v.payload])).toEqual([
       [first, { page, variant: { file: variantFile(page, 1), base: BASE } }],
@@ -209,7 +213,7 @@ describe("mrbavio.impeccable on the kernel's variants", () => {
     // Nothing of the site was written: the page is its file as it was.
     const before = mounted.store.page(page)!.html;
     expect(before).toBe(project.pages.find((each) => each.path === page)!.html);
-    // The agent's impeccable_done after is harmless.
+    // A second impeccable_done is harmless.
     expect(await tool(DONE_TOOL).run({})).toEqual({ done: true });
 
     // The plugin puts no word of its own on any title bar: the kernel's
@@ -248,6 +252,29 @@ describe("mrbavio.impeccable on the kernel's variants", () => {
     expect(caption()).toBeNull();
   });
 
+  test("a round of more than the default three keeps counting: the fourth and fifth are counted, and only impeccable_done ends it", async () => {
+    const { project, source } = sourceProject();
+    const page = source.payload.page;
+    const { host } = variantHost();
+    mounted = await mountPlugin({ entry: activate, manifest, project, host });
+    const handlers = await createTestRequestHandlers(mounted);
+    await vi.waitFor(() => expect(pageElementId(source.id, ".grid")).not.toBeNull());
+
+    // The user asked for five: the agent passed impeccable_verb a count
+    // the canvas never sees.
+    await pickVerb(pageElementId(source.id, ".grid")!, "bolder");
+    await tool(PICK_TOOL).run({});
+    await settle();
+    for (const n of [1, 2, 3, 4, 5]) {
+      await finalizeCopy(handlers, source.id, page, n);
+      expect(caption()!.textContent).toBe(`bolder · ${n} variant${n === 1 ? "" : "s"}`);
+    }
+    expect(variantViewports()).toHaveLength(5);
+    await tool(DONE_TOOL).run({});
+    await settle();
+    expect(caption()).toBeNull();
+  });
+
   test("a round counts its own variants alone: one of another page, or one landed before the round, is not counted; a round stopped short ends at impeccable_done", async () => {
     const home = createPageItem(
       { html: '<!doctype html><html><head></head><body><main class="grid"><p>home</p></main></body></html>', css: ".grid { gap: 0 }" },
@@ -274,7 +301,7 @@ describe("mrbavio.impeccable on the kernel's variants", () => {
     await finalizeCopy(handlers, "about", "about.html", 1);
     expect(caption()!.textContent).toBe("quieter · building");
     await finalizeCopy(handlers, "home", "home.html", 2);
-    expect(caption()!.textContent).toBe("quieter · 1 of 3");
+    expect(caption()!.textContent).toBe("quieter · 1 variant");
     // The agent stopped short: its word ends the round.
     expect(await tool(DONE_TOOL).run({})).toEqual({ done: true });
     await settle();

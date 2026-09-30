@@ -135,20 +135,45 @@ export function targetOf(dd: DaydreamApi, id: string | null): Target | null {
   return element === null ? null : { viewportId: element.viewportId, elementId: id };
 }
 
+/** The sentence the pane shows for a variant's viewport, in place of an
+ * editor: what it renders is not its page's file, and no text of it is
+ * the plugin's to read or write. */
+export const VARIANT_VIEWPORT =
+  "This viewport shows a variant. A variant changes through its draft, or through Accept in its title bar.";
+
+const viewportItem = (
+  dd: Pick<DaydreamApi, "core" | "document">,
+  viewportId: string,
+) =>
+  dd.core.viewportItems(dd.document()).find((item) => item.id === viewportId);
+
+/** Whether viewport `viewportId` shows a variant (its `payload.variant`):
+ * a copy of its page an agent made, rendered instead of the page's file. */
+export function isVariantViewport(
+  dd: Pick<DaydreamApi, "core" | "document">,
+  viewportId: string,
+): boolean {
+  return viewportItem(dd, viewportId)?.payload.variant !== undefined;
+}
+
 /** The path of the page viewport `viewportId` shows (its `payload.page`,
- * decision #78), or null when the viewport is not on the canvas. */
+ * decision #78), or null when the viewport is not on the canvas — or
+ * shows a variant: `dd.page` of its path is the page's own file, never
+ * the text it renders, so the pane neither shows it there nor writes it,
+ * and a write keyed to such a viewport finds no page. */
 export function pagePath(
   dd: Pick<DaydreamApi, "core" | "document">,
   viewportId: string,
 ): string | null {
-  const viewport = dd.core
-    .viewportItems(dd.document())
-    .find((item) => item.id === viewportId);
-  return viewport === undefined ? null : viewport.payload.page;
+  const viewport = viewportItem(dd, viewportId);
+  return viewport === undefined || viewport.payload.variant !== undefined
+    ? null
+    : viewport.payload.page;
 }
 
 /** The stored markup of the page viewport `viewportId` shows, or null when
- * the viewport is not on the canvas or the project holds no such page. */
+ * the viewport is not on the canvas, shows a variant (`pagePath`), or the
+ * project holds no such page. */
 export function pageHtml(
   dd: Pick<DaydreamApi, "core" | "document" | "page">,
   viewportId: string,
@@ -230,6 +255,13 @@ interface Resolution {
  * blur, and whenever the page's html changes while nothing typed is
  * pending or held — a minimal span change, so the caret maps through.
  *
+ * A VARIANT's viewport — or an element in one — shows no editor, only
+ * `VARIANT_VIEWPORT`: what it renders is the variant, not its page's
+ * file, the API reads no variant's text, and a variant changes through
+ * its draft or its Accept. Nothing is ever written through it:
+ * `pagePath` answers no page for it, so even a save keyed to it finds
+ * none (`write`).
+ *
  * A factory, not a `<Component>`: the panel's `render` (index.tsx) calls
  * it under the panel's owner, and `state` is a plain object shared with
  * the entry — never a reactive props proxy.
@@ -276,6 +308,12 @@ export default function createHtmlPanel(state: PanelState) {
   // The page the editor is open on: the selection's, while it is on the
   // canvas.
   const openPage = createMemo(() => (html() === null ? null : viewportId()));
+  // The selection is a variant's viewport, or in one: no editor, the
+  // sentence instead.
+  const onVariant = createMemo(() => {
+    const id = viewportId();
+    return id !== null && isVariantViewport(dd, id);
+  });
 
   // A draft's sentence, shown under the editor until the next save or
   // page.
@@ -740,7 +778,9 @@ export default function createHtmlPanel(state: PanelState) {
         when={html() !== null}
         fallback={
           <p class={`${p}-empty`}>
-            Select a page, or an element in one, to edit its HTML.
+            {onVariant()
+              ? VARIANT_VIEWPORT
+              : "Select a page, or an element in one, to edit its HTML."}
           </p>
         }
       >

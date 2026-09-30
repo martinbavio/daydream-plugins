@@ -11,7 +11,7 @@
 // A variants round's copies are finalized into `.daydream/variants/`
 // (kernel Phase 9, decision #80), each landing as a viewport of the
 // source's page that names its variant: the caption counts them as they
-// land, and the round ends with the last. The user accepts a variant into
+// land, and the round ends at impeccable_done. The user accepts a variant into
 // its page or discards it with the kernel's own Accept and Discard in its
 // title bar — the plugin adds no word beside them — or names it to the
 // agent, who ends it with the kernel's resolve_variant. A rework is written
@@ -27,7 +27,7 @@ import { createSignal, untrack } from "solid-js";
 
 import type { DaydreamApi } from "@daydream/plugin-api";
 
-import { DEFAULT_VARIANTS, VERBS as VERB_SPECS } from "./bridge/verbs";
+import { VERBS as VERB_SPECS } from "./bridge/verbs";
 import createCaption from "./Caption";
 import { exportPage } from "./pageExport";
 import createPicker, { type PickerEntry } from "./Picker";
@@ -168,11 +168,11 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
   // What the canvas can see of a VARIANTS round's progress: the variants
   // of the source's page it gains while the round builds — each a copy the
   // agent finalized, landing as a viewport whose `payload.variant` the
-  // kernel wrote — counted against the copies a pick's round opens (the
-  // verb's default: the session hands impeccable_verb no count). A variant
-  // of the page already there before the round is not one of its own, and
-  // neither is anything else the canvas gains. Nothing is stored: a
-  // variant carries nothing of the plugin's, and the round is this tab's.
+  // kernel wrote — counted, never against a total: impeccable_verb takes
+  // any count, so only the agent's impeccable_done ends the round. A
+  // variant of the page already there before the round is not one of its
+  // own, and neither is anything else the canvas gains. Nothing is stored:
+  // a variant carries nothing of the plugin's, and the round is this tab's.
   let round: { page: string; landed: Set<string> } | null = null;
   const pageOf = (viewportId: string): string | null =>
     dd.core.viewportItems(dd.document()).find((v) => v.id === viewportId)?.payload.page ?? null;
@@ -186,7 +186,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
         round.landed.add(id);
       }
     }
-    if (round.landed.size > 0) session.progress(round.landed.size, DEFAULT_VARIANTS);
+    if (round.landed.size > 0) session.progress(round.landed.size);
   };
 
   dd.registerTool({
@@ -213,7 +213,7 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     name: DONE_TOOL,
     title: "Impeccable done",
     description:
-      "Tell the canvas the round is complete — every copy finalized as a variant, the rework written to the page's files, the report given, or you stopped — so its caption stops saying building. The canvas counts a round's variants as they land but cannot see any other end: call it at the end of every round.",
+      "Tell the canvas the round is complete — every copy finalized as a variant, the rework written to the page's files, the report given, or you stopped — so its caption stops saying building. The canvas counts a round's variants as they land but cannot tell when the round is over: call it at the end of every round.",
     inputSchema: { type: "object", properties: {}, required: [] },
     annotations: { idempotentHint: true, destructiveHint: false },
     run: () => {

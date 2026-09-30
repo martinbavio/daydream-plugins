@@ -62,6 +62,39 @@ function fakeHost(
   return { host, prompts, tools, instructions: () => instructions };
 }
 
+// The kernel's single-source rule (decision #80, docs/conventions.md):
+// when a variant is ended is said once, in the core tool guide, and a
+// text beside it points there. The kernel's own check reaches no plugin
+// of this repository, so its sentence split and its predicate are copied
+// here and run over every text this plugin hands an agent.
+// mirrors: tools/knowledge/singleSource.test.ts MIN_LENGTH
+const MIN_LENGTH = 40;
+
+// mirrors: tools/knowledge/singleSource.test.ts sentences
+function sentences(text: string): string[] {
+  return text
+    .split(/\r?\n\s*\r?\n/)
+    .flatMap((paragraph) =>
+      paragraph
+        .split(/\r?\n/)
+        .map((l) => l.replace(/^[\s>#*-]+/, "").trim())
+        .join(" ")
+        .split(/(?<=[.!?])\s+(?=[A-Z`*"(])/),
+    )
+    .map((s) => s.trim())
+    .filter((s) => s.length > MIN_LENGTH);
+}
+
+// mirrors: tools/knowledge/singleSource.test.ts onTheUsersWord
+/** The sentences that speak of the user beside a variant's end. */
+const onTheUsersWord = (text: string): string[] =>
+  sentences(text).filter(
+    (s) =>
+      /\buser\b/i.test(s) &&
+      (s.includes("resolve_variant") ||
+        (/variant/i.test(s) && /\b(accept|discard|resolv)/i.test(s))),
+  );
+
 const pricing = {
   id: "vp_pricing",
   page: "pricing.html",
@@ -74,6 +107,9 @@ const docs = {
   frame: { width: 720 },
   position: { x: 0, y: 900 },
 };
+
+/** How a variant ends, as every deliverable over `pricing.html` says it. */
+const END = "Each variant's title bar has Accept, which writes it into `pricing.html`, and Discard; to end one yourself, follow the server's instructions (Core tools, DRAFTS).";
 
 const state = (selection: StateSlice["selection"], viewports = [pricing, docs]) => ({
   project: { name: "site", title: "Site" },
@@ -147,23 +183,22 @@ describe("impeccable host part", () => {
     expect(text).not.toContain("· round ");
     expect(text).not.toContain("draft_open {from:");
     // Kernel Phase 9: every copy is finalized into .daydream/variants/,
-    // never the site, and the user ends each on its title bar or names it
-    // to the agent, who ends it as the kernel's guide says — pointed at,
-    // never restated (no resolve_variant call spelled out here).
+    // never the site, and ended on its title bar or by the agent as the
+    // kernel's guide says — pointed at, never restated: neither the
+    // resolve_variant call nor who decides is spelled out here.
     expect(text).toContain("4. FINALIZE EACH, once written: draft_finalize {draft, token}");
     expect(text).toContain("it lands as a variant where the draft stood, answered with its file (`<page-stem>.<n>.html`)");
     expect(text).toContain("Every copy of the round is finalized: none is left a draft.");
-    expect(text).toContain("A copy's finalize writes it into the project's `.daydream/variants/`, never the site: `pricing.html` stays as it is until the user accepts one.");
+    expect(text).toContain("A copy's finalize writes it into the project's `.daydream/variants/`, never the site: `pricing.html` stays as it is. The order of work");
     expect(text).not.toContain("THEY STAY DRAFTS");
     expect(text).not.toContain("never call draft_finalize");
     expect(text).not.toContain("no finalize");
     expect(text).not.toContain("adopt");
-    expect(text).toContain("When all 3 are finalized, report each direction in one line, by its variant's file");
-    expect(text).toContain("each variant's title bar accepts it into `pricing.html` or discards it — or they can name the one to keep to you, and you end the ones they name as the server's instructions say (Core tools, DRAFTS)");
+    expect(text).toContain(`When all 3 are finalized, report each direction in one line, by its variant's file. ${END} Then impeccable_done.`);
     expect(text).not.toContain("resolve_variant");
     expect(text).not.toContain("draft_discard");
     expect(text).not.toContain("with your file tools");
-    expect(text).toContain("End no variant on your own.");
+    expect(text).not.toContain("End no variant on your own.");
     // The canvas follows the files (kernel Phase 5): nothing to reload.
     expect(text).not.toContain("reload");
     // A variant is a copy of the source's page, then its target's markup
@@ -233,7 +268,7 @@ describe("impeccable host part", () => {
     const verb = tools.find((t) => t.name === VERB_TOOL)!;
     expect(Object.keys(verb.inputSchema)).toEqual(["verb", "viewport", "element", "brief", "variants"]);
     expect(verb.description).toContain("After a canvas pick, pass the pick's viewport and element.");
-    expect(verb.description).toContain("make variants of the source beside it — draft copies finalized into the project's .daydream/variants/ — for the user to accept into the page or discard");
+    expect(verb.description).toContain("make variants of the source beside it — draft copies finalized into the project's .daydream/variants/, each with Accept and Discard on its title bar;");
     expect(verb.description).toContain("written into the page's files");
     expect(verb.description).not.toMatch(/\bland/);
     const session = tools.find((t) => t.name === SESSION_TOOL)!;
@@ -241,7 +276,7 @@ describe("impeccable host part", () => {
     expect(text).toContain("impeccable_verb {verb, viewport, element, brief}");
     expect(text).not.toContain("round}");
     expect(text).toContain("every copy written and finalized as a variant");
-    expect(text).toContain("until the user accepts it into its page or discards it on its title bar; when they name one to you between rounds, end it as the server's instructions say (Core tools, DRAFTS)");
+    expect(text).toContain("its title bar has Accept and Discard, and to end one yourself between rounds, follow the server's instructions (Core tools, DRAFTS)");
     expect(text).not.toContain("adopt");
   });
 
@@ -267,7 +302,9 @@ describe("impeccable host part", () => {
     // #78), only what changed written back, and the canvas following the
     // files; a linked sheet's rule changed in its file, then linted.
     expect(text).toContain("3. draft_finalize {draft, token}: every gate runs over the page it is about to write, and it writes back into `pricing.html` only what the draft changed");
-    expect(text).toContain("fix in the draft what it names and finalize again");
+    // A finding in a sheet file the page already had is fixed in that
+    // file, never only in the draft.
+    expect(text).toContain("fix what it names where it names it (the draft, or a rule already in a sheet file, in that file) and finalize again");
     expect(text).toContain("read them, do not measure again");
     expect(text).toContain('then lint {viewportIds: ["vp_pricing"]} and fix in the files what a blocking finding names');
     expect(text).not.toContain("never call draft_finalize");
@@ -309,7 +346,7 @@ describe("impeccable host part", () => {
     expect(polish).not.toContain("4. Each rule of a linked sheet");
     expect(polish).not.toContain("lint {viewportIds");
     expect(polish).not.toContain("holds only the rules to ADD");
-    expect(polish).toContain("It stays a variant: each variant's title bar accepts it into `pricing.html` or discards it");
+    expect(polish).toContain(`It stays a variant. ${END} One draft, one rework.`);
     const bolder = await (prompts.find((p) => p.name === "impeccable-bolder")!.build as Build)({});
     expect(bolder).toContain('draft_open {copyOf: "vp_variant"');
     expect(bolder).toContain("each a copy of the variant the source shows — a new variant of `pricing.html` beside it");
@@ -493,5 +530,61 @@ describe("impeccable host part", () => {
     });
     expect(text.startsWith("# Impeccable: bolder\n")).toBe(true);
     expect(text).not.toContain("THE USER'S BRIEF");
+  });
+
+  test("when a variant is ended is the core tool guide's to say: no text the plugin hands an agent speaks of the user beside a variant's end", async () => {
+    // The check itself: the sentence the session text carried before,
+    // said again here, is caught.
+    expect(
+      onTheUsersWord(
+        "A variant stays beside its source, in the project's .daydream/variants/, until the user accepts it into its page or discards it on its title bar.",
+      ),
+    ).toHaveLength(1);
+
+    const texts: { name: string; text: string }[] = [
+      { name: "the manifest's instructions", text: manifest.contributes.instructions },
+      { name: "the instructions, the skill missing", text: instructionsText(manifest.contributes.instructions, null, ["/s"]) },
+      { name: "NO_PROJECT", text: NO_PROJECT },
+      { name: "SKILL_MISSING", text: SKILL_MISSING },
+    ];
+    /** A tool's or prompt's description, and each of its arguments'. */
+    const described = (name: string, description: string, args: Record<string, unknown> = {}): void => {
+      texts.push({ name, text: description });
+      for (const [arg, schema] of Object.entries(args)) {
+        texts.push({ name: `${name} ${arg}`, text: (schema as { description?: string }).description ?? "" });
+      }
+    };
+    const variant = {
+      id: "vp_variant",
+      page: "pricing.html",
+      variant: ".daydream/variants/pricing.1.html",
+      frame: { width: 960 },
+      position: { x: 1108, y: 40 },
+    };
+    // Every verb's deliverable over each kind of target: an element, a
+    // whole page, a variant's viewport, nothing decided, no tab.
+    const targets: [string, unknown][] = [
+      ["an element", state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [], selector: ".card" })],
+      ["a page", state({ elementId: "vp_pricing", viewportId: "vp_pricing", itemIds: ["vp_pricing"] })],
+      ["a variant", state({ elementId: "vp_variant", viewportId: "vp_variant", itemIds: ["vp_variant"] }, [pricing, variant])],
+      ["nothing selected", state(null)],
+      ["no tab", new Error("no tab")],
+    ];
+    for (const [where, s] of targets) {
+      const { host, prompts, tools, instructions } = fakeHost(s);
+      await activate(host);
+      if (where === "an element") {
+        texts.push({ name: "the instructions", text: instructions() ?? "" });
+        for (const t of tools) described(`the ${t.name} tool`, t.description, t.inputSchema);
+        const session = tools.find((t) => t.name === SESSION_TOOL)!;
+        texts.push({ name: "the session", text: (await (session.run as () => Promise<{ text: string }>)()).text });
+        for (const p of prompts) described(`the ${p.name} prompt`, `${p.title}. ${p.description}`, p.argsSchema);
+      }
+      for (const p of prompts) {
+        texts.push({ name: `${p.name} over ${where}`, text: await (p.build as Build)({ brief: "calmer", variants: "5" }) });
+      }
+    }
+    expect(texts.filter((t) => t.name.includes("over")).length).toBe(VERBS.length * targets.length);
+    for (const { name, text } of texts) expect(onTheUsersWord(text), name).toEqual([]);
   });
 });

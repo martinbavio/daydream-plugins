@@ -108,7 +108,7 @@ export function sessionText(dataFile: string): string {
     "2. WOKEN: the watch exited. Call impeccable_pick; it answers {pick, exit} and takes the pick (the canvas caption changes from waiting to building). exit true → say the session ended and stop, no watch. pick null → back to 1.",
     "3. WORKING: impeccable_verb {verb, viewport, element, brief} from the pick (brief when the pick carries one — the user's words, which outrank the playbook's defaults) and follow its deliverable TO THE END — every copy written and finalized as a variant, or the rework written into the page's files, or the report given — then one line per direction and impeccable_done (the canvas stops saying building). THE WATCH DOES NOT RUN DURING THIS STATE: a watch started here waits for a pick the user cannot make while you are still building, and stalls the round.",
     "4. Only when the round is done: back to 1 — start the watch again.",
-    "A variant stays beside its source, in the project's .daydream/variants/, until the user accepts it into its page or discards it on its title bar; when they name one to you between rounds, end it as the server's instructions say (Core tools, DRAFTS).",
+    "A variant stays beside its source, in the project's .daydream/variants/: its title bar has Accept and Discard, and to end one yourself between rounds, follow the server's instructions (Core tools, DRAFTS).",
     "",
     "Chat is overhead during a session: one line when the session starts, one line per round, one when it ends. Never run a verb the user did not pick.",
   ].join("\n");
@@ -172,7 +172,7 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
   host.registerTool({
     name: VERB_TOOL,
     title: "Impeccable verb",
-    description: `The playbook for one design verb over a viewport on the canvas, with the target resolved from the selection (or the arguments) and the deliverable spelled out — call it, then follow it. Verbs: ${verbNames.join(", ")}. ${VERBS.filter((v) => v.mode === "variants").length} of them make variants of the source beside it — draft copies finalized into the project's .daydream/variants/ — for the user to accept into the page or discard; ${VERBS.filter((v) => v.mode === "in-place").length} rework it in place, written into the page's files; critique and audit answer a report over the rendered page (impeccable_detect) and change nothing. After a canvas pick, pass the pick's viewport and element.`,
+    description: `The playbook for one design verb over a viewport on the canvas, with the target resolved from the selection (or the arguments) and the deliverable spelled out — call it, then follow it. Verbs: ${verbNames.join(", ")}. ${VERBS.filter((v) => v.mode === "variants").length} of them make variants of the source beside it — draft copies finalized into the project's .daydream/variants/, each with Accept and Discard on its title bar; ${VERBS.filter((v) => v.mode === "in-place").length} rework it in place, written into the page's files; critique and audit answer a report over the rendered page (impeccable_detect) and change nothing. After a canvas pick, pass the pick's viewport and element.`,
     inputSchema: {
       verb: z.enum(verbNames as [string, ...string[]]).describe("The verb."),
       ...TARGET_ARGS,

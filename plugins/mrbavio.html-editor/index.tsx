@@ -14,7 +14,9 @@
 // text where it was written (core's own Delete removes the whole item
 // when the page is selected; the `html`, `head` and `body` stay, since a
 // page has them); one the kernel cannot cut narrowly is refused, and said
-// on the console.
+// on the console. A variant's viewport, or an element in it, shows no
+// editor and cuts nothing: the pane says a variant changes through its
+// draft or its Accept, and nothing here ever writes its page's file.
 //
 // NOT here, on purpose: in-place text editing on the canvas. Nor a
 // resizer: the panel's width, its length and where it sits are the panel
@@ -27,7 +29,11 @@ import { untrack } from "solid-js";
 
 import type { DaydreamApi } from "@daydream/plugin-api";
 
-import createHtmlPanel, { type Draft, type PanelState } from "./HtmlPanel";
+import createHtmlPanel, {
+  type Draft,
+  isVariantViewport,
+  type PanelState,
+} from "./HtmlPanel";
 import { classPrefix, css } from "./styles";
 
 export const BLUR_COMMAND = "mrbavio.html-editor.blur";
@@ -136,14 +142,17 @@ export default function activate(dd: DaydreamApi): void {
   // selects its parent. The `when` is exact: an element inside a page —
   // not the page itself, whose selection is item-level and core's
   // `core.delete-item` (which removes the item), and not the `html`,
-  // `head` or `body`, which a page keeps — with no item selection, and
-  // never while typing.
+  // `head` or `body`, which a page keeps, and not in a variant's viewport
+  // — with no item selection, and never while typing.
   const innerSelection = (): { id: string; parentId: string } | null => {
     const id = dd.selection();
     if (id === null || dd.itemSelection().length > 0) return null;
     const element = dd.pageElement(id);
     const node = dd.geometry.node(id);
     if (element === null || element.parentId === null) return null;
+    // A variant's element is never cut here: the variant is not its
+    // page's file (the kernel refuses the edit too).
+    if (isVariantViewport(dd, element.viewportId)) return null;
     if (node === undefined || SKELETON.has(node.localName)) return null;
     return { id, parentId: element.parentId };
   };

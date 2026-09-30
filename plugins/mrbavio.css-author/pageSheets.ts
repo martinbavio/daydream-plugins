@@ -103,13 +103,22 @@ export function editable(page: Page, sheet: number): boolean {
   return page.sheets[sheet]?.readOnly === false;
 }
 
+/** Where a copy's finalize writes a variant, its markup and its own
+ * sheet (the kernel's `VARIANTS_FOLDER`, variantRound.ts). */
+export const VARIANTS_FOLDER = ".daydream/variants/";
+
 /** What a finding calls sheet `sheet` of the page: the project file, the
  * page's `<style>` block (counted from 1, in document order), or the
- * remote url — in backticks. */
+ * remote url — in backticks; a variant's own sheet, which only its
+ * draft writes, as the draft's css. */
 export function sheetName(page: Page, sheet: number): string {
   const source = page.sheets[sheet]?.source;
   if (source === undefined) return unpairedName(page);
-  if ("file" in source) return `\`${source.file}\``;
+  if ("file" in source) {
+    return source.file.startsWith(VARIANTS_FOLDER)
+      ? `the draft's css (\`${source.file}\`)`
+      : `\`${source.file}\``;
+  }
   if ("style" in source) {
     return `\`<style>\` block ${source.style + 1} of \`${page.path}\``;
   }
@@ -165,6 +174,17 @@ export function unjudgedLinks(
   return out;
 }
 
+/** The paths a lint judges, by what it was handed (`shown`): each
+ * viewport's page's `path`, and the path the viewport names, which at a
+ * variant's finalize is the variant's markup while its page sits at its
+ * page's path (variantRound.ts) — both are the page judged, never one
+ * that was not. */
+export function judgedPaths(shown: readonly Shown[]): Set<string> {
+  return new Set(
+    shown.flatMap(({ viewport, page }) => [page.path, viewport.payload.page]),
+  );
+}
+
 /** `\`a\``, `\`a\` and \`b\``, `\`a\`, \`b\` and \`c\``; past `cap`,
  * the rest counted: `\`a\`, \`b\`, \`c\` and 2 more`. */
 export function listText(names: readonly string[], cap = Infinity): string {
@@ -208,10 +228,29 @@ export function unjudgedNote(
   pages: readonly string[],
   count: number,
 ): Finding {
+  return noteWith(
+    tier,
+    sheet,
+    subject,
+    found,
+    unjudgedClause(sheet, pages, count),
+  );
+}
+
+/** One advisory for what a lint found of rules of `sheet` (`subject`,
+ * `found`, as `unjudgedNote` has them), `clause` saying why they are not
+ * refusals. */
+export function noteWith(
+  tier: string,
+  sheet: string,
+  subject: string,
+  found: string,
+  clause: string,
+): Finding {
   return {
     tier,
     severity: "advisory",
-    message: `${subject} of ${sheet} ${found}${unjudgedClause(sheet, pages, count)}`,
+    message: `${subject} of ${sheet} ${found}${clause}`,
   };
 }
 

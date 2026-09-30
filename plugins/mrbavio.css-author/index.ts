@@ -14,7 +14,11 @@
 // finalize, the page about to be written; pageMount.ts), and knows the
 // project's other pages (`dd.document().pages`): what a lint finds of a
 // rule of a sheet a page it did not judge links too is advisory, never a
-// refusal (pageSheets.ts `unjudgedLinks`). The lints: the
+// refusal (pageSheets.ts `unjudgedLinks`). At a VARIANT's finalize
+// (decision #80, variantRound.ts) they refuse only what the variant
+// causes: its own sheet is judged as its page will hold it once
+// accepted, and what they find in the page's own sheets, or in markup
+// the page already has, is advisory. The lints: the
 // static lint (staticLint.ts's facts from the texts, a stray `;` that
 // drops a rule among them, plus matchLint.ts's match-dependent ones: an
 // explicit initial value the page computes without, redundancy — an
@@ -35,12 +39,17 @@
 // silently softens the other. The host part (bridge.ts) carries the guidance: the
 // procedures resource, and the knowledge corpus through the manifest.
 
-import type { DaydreamApi } from "@daydream/plugin-api";
+import type {
+  DaydreamApi,
+  GateContext,
+  GateRegistration,
+} from "@daydream/plugin-api";
 
 import { matchLint } from "./matchLint";
 import { NECESSITY_BUDGET_MS, necessityLint } from "./necessity";
 import type { ProjectPaths } from "./pageSheets";
 import { staticLint } from "./staticLint";
+import { roundPageOf, variantRound, type VariantRound } from "./variantRound";
 
 /** The two gate ids; the runner's dedupe (src/ai/gates.ts) names the same
  * two strings. */
@@ -57,9 +66,10 @@ export default function activate(dd: DaydreamApi): void {
     // and mounts it through the context too, never `dd.mountViewport`.
     run: async (doc, ctx) => {
       const project = projectPaths(dd);
+      const { round, judging } = variantJudging(dd, doc, ctx);
       return [
-        ...staticLint(dd.core, doc, ctx.page, project),
-        ...(await matchLint(dd.core, doc, ctx, project)),
+        ...staticLint(dd.core, doc, judging.page, project, round),
+        ...(await matchLint(dd.core, doc, judging, project, round)),
       ];
     },
   });
@@ -67,12 +77,31 @@ export default function activate(dd: DaydreamApi): void {
     id: NECESSITY_GATE,
     title: "Necessity lint",
     // Its width sweep ends inside the runner's time for a gate.
-    run: (doc, ctx) =>
-      necessityLint(dd.core, doc, ctx, {
+    run: (doc, ctx) => {
+      const { round, judging } = variantJudging(dd, doc, ctx);
+      return necessityLint(dd.core, doc, judging, {
         deadline: Date.now() + NECESSITY_BUDGET_MS,
         project: projectPaths(dd),
-      }),
+        round,
+      });
+    },
   });
+}
+
+/** A variant's finalize (variantRound.ts), when the gate is judging one,
+ * and the context the lints read it through: the variant's own sheet a
+ * subject there, as the page will hold its rules after the accept. */
+function variantJudging(
+  dd: DaydreamApi,
+  doc: Parameters<GateRegistration["run"]>[0],
+  ctx: GateContext,
+): { round: VariantRound | null; judging: GateContext } {
+  const round = variantRound(dd.core, doc, ctx.page);
+  return {
+    round,
+    judging:
+      round === null ? ctx : { ...ctx, page: roundPageOf(ctx.page, round) },
+  };
 }
 
 /** The open project's pages by path: beside the judged document's own,

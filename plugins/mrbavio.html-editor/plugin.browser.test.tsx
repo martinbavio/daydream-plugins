@@ -8,9 +8,10 @@
 // (decision #78), and quick saves join one undo step; a save the kernel
 // refuses says why as you type; Delete on an inner element cuts it out of
 // the text and never removes the viewport, and one the kernel cannot cut
-// is said on the console. What a save cannot write is kept as a draft
-// (drafts.browser.test.tsx), and what is typed when the project goes is
-// saved into it first (leave.browser.test.tsx).
+// is said on the console. A variant's viewport shows no editor, and
+// nothing typed or deleted there writes its page. What a save cannot
+// write is kept as a draft (drafts.browser.test.tsx), and what is typed
+// when the project goes is saved into it first (leave.browser.test.tsx).
 //
 // With no host the edits live in the tab's memory, as a page's file
 // does until the host writes it; the tests of what reaches the disk put
@@ -18,13 +19,16 @@
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, onTestFinished, test, vi } from "vitest";
 
-import type { PluginManifest } from "@daydream/plugin-api";
+import type { DaydreamApi, PluginManifest } from "@daydream/plugin-api";
 import {
   createFileHost,
   createPageItem,
   createTestKernel,
+  createTestRequestHandlers,
   fixturePage,
   flush,
+  type Host,
+  type HostProject,
   type MountedPlugin,
   mountPlugin,
   overrideHostForTests,
@@ -32,10 +36,11 @@ import {
   pageNode,
   testProject,
   type TestProject,
+  unusedProjectFiles,
   viewportItems,
 } from "@daydream/plugin-testing";
 
-import { APPLY_DEBOUNCE_MS } from "./HtmlPanel";
+import { APPLY_DEBOUNCE_MS, VARIANT_VIEWPORT } from "./HtmlPanel";
 import activate, {
   BLUR_COMMAND,
   DELETE_COMMAND,
@@ -95,7 +100,7 @@ const onePage = (html = HTML): TestProject =>
  * for its first page to mount. `entry` stands in for the plugin's entry. */
 async function mountPage(
   project: TestProject = onePage(),
-  options: { entry?: typeof activate } = {},
+  options: { entry?: typeof activate; host?: Host } = {},
 ): Promise<MountedPlugin> {
   const viewport = fixturePage(project);
   itemId = viewport.id;
@@ -104,6 +109,7 @@ async function mountPage(
     entry: options.entry ?? activate,
     manifest,
     project,
+    ...(options.host === undefined ? {} : { host: options.host }),
   });
   await waitMounted(itemId, "h1");
   return mounted;
@@ -799,6 +805,131 @@ describe("mrbavio.html-editor", () => {
     outsideEdit(theirs);
     expect(text()).toBe(theirs);
     expect(document.activeElement).toBe(content());
+  });
+});
+
+// A VARIANT (a copy of the page an agent finalized into
+// `.daydream/variants/`) is shown by a viewport of its page, and what it
+// renders is not the page's file: the pane shows no editor there, only a
+// sentence, and nothing typed or deleted there writes the page — which
+// must stay the bytes the variant was copied from for it to be accepted.
+describe("mrbavio.html-editor: a variant's viewport", () => {
+  /** The sha-256 (hex) of `text`'s UTF-8 bytes: a variant's `base`. */
+  async function sha256(text: string): Promise<string> {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(text),
+    );
+    return Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+  }
+
+  test("a variant's viewport, or an element in it, shows a sentence and no editor; typing and Delete there leave the page's file as the variant was copied from, and it can still be accepted", async () => {
+    // The host's accept, faked: it refuses, as the host does, a page that
+    // is not the bytes the variant was copied from.
+    const project: HostProject = {
+      read: () => Promise.reject(new Error("this test reads no project")),
+      open: () => Promise.resolve({ cancelled: true }),
+      saveManifest: () => Promise.resolve({ hash: "unwritten" }),
+      ...unusedProjectFiles,
+      acceptVariant: async (request) => {
+        const page = mounted!.store.page(request.page)!.html;
+        if ((await sha256(page)) !== request.base) {
+          throw new Error(
+            `${request.page} is not the page the variant was copied from`,
+          );
+        }
+        return {
+          files: request.writes.map((write) => write.path),
+          removed: [request.file],
+          kept: [],
+        };
+      },
+      discardVariant: async (file) => ({ removed: [file], kept: [] }),
+    };
+    const host = { project } as Host;
+    overrideHostForTests(host);
+    onTestFinished(() => overrideHostForTests(null));
+    // The plugin's own API, for the accept the title bar's Accept takes.
+    let dd: DaydreamApi | undefined;
+    const m = await mountPage(onePage(), {
+      host,
+      entry: (api) => {
+        dd = api;
+        activate(api);
+      },
+    });
+
+    // An agent's variant of the page, finalized over the page as it is.
+    const base = await sha256(stored());
+    const handlers = await createTestRequestHandlers(m);
+    const opened = (await handlers.draftOpen({
+      copyOf: itemId,
+      position: { x: 1200, y: 0 },
+    })) as { draft: { id: string } };
+    const draft = opened.draft.id;
+    await handlers.draftReplace({
+      draft,
+      target: "h1",
+      html: '<h1 class="headline">Variant headline</h1>',
+    });
+    const plan = (await handlers.draftFinalize({
+      draft,
+      variant: { file: ".daydream/variants/page.1.html", base },
+    })) as { epoch: number };
+    const landed = (await handlers.draftCommit({
+      draft,
+      epoch: plan.epoch,
+    })) as { id: string };
+    flush();
+    const variant = viewportItems(m.store.document).find(
+      (item) => item.id === landed.id,
+    )!;
+    expect(variant.payload.variant?.base).toBe(base);
+    await waitMounted(variant.id, "h1");
+
+    /** No editor, the sentence; keys typed at the pane and on the canvas
+     * write nothing. */
+    const noEditorThere = (): void => {
+      expect(panel().querySelector(".cm-content")).toBeNull();
+      expect(panel().querySelector("[data-dd-editable]")).toBeNull();
+      expect(panel().textContent).toContain(VARIANT_VIEWPORT);
+      for (const target of [panel(), window]) {
+        for (const each of ["x", "Enter", "Delete", "Backspace"]) {
+          key(target, { key: each });
+        }
+      }
+    };
+
+    // The variant's viewport, as its title bar selects it.
+    select(variant.id);
+    await marks();
+    noEditorThere();
+    await settled();
+
+    // An element in it: the pane resolves it to the variant's viewport.
+    select(idOf("h1", variant.id));
+    await marks();
+    noEditorThere();
+    await settled();
+
+    // The page's file is the bytes the variant was copied from, the
+    // variant's viewport still on the canvas, and nothing to undo.
+    expect(stored()).toBe(HTML);
+    expect(await sha256(stored())).toBe(base);
+    expect(items().some((item) => item.id === variant.id)).toBe(true);
+    expect(m.store.canUndo()).toBe(false);
+
+    // The page's own viewport still shows the page's text, editable.
+    select(itemId);
+    await marks();
+    expect(text()).toBe(HTML);
+
+    // And the variant is accepted: its page is the one it was copied from.
+    await expect(dd!.acceptVariant(variant.id)).resolves.toMatchObject({
+      kept: [],
+    });
   });
 });
 
