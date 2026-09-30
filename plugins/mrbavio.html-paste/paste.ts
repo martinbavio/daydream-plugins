@@ -6,13 +6,15 @@
 // `text/html` parses to at least one element and is more than a single
 // paragraph of prose (prose.ts) — a paragraph is text however a browser
 // wrapped it, and is left for Text. A claimed paste is a new PAGE, and a
-// page is a file of the project (decision #78), which Daydream does not
-// make yet: the paste asks the kernel to place it (page.ts), as one undo
-// step the way the Text plugin does — `dd.mutateItems` then `dd.select` —
-// and reports the kernel's answer in one console line, today its "not
-// yet" refusal, with nothing placed. Claimed all the same: a page's markup
-// is not canvas text, so Text never gets it. No gates: a paste is the
-// user's own hand on the canvas, not an agent's page.
+// page is a file of the project (decision #78): the pasted text is
+// written as a new html file through `dd.createPage`, which names it
+// (`index.html` in a project with no page yet, else after its `<title>`),
+// downloads the remote media it names into `assets/`, and places a
+// viewport of it as one undo step; the paste selects it. One console line
+// says what was made, and one more names each file that could not be
+// downloaded, left as written; a refusal (no project open, no host) is
+// the paste's one console line. No gates: a paste is the user's own hand
+// on the canvas, not an agent's page.
 
 import type { DaydreamApi } from "@daydream/plugin-api";
 import { flush, untrack } from "solid-js";
@@ -21,7 +23,6 @@ import {
   hasElements,
   parseHtml,
   pastedElements,
-  pastedViewport,
   VIEWPORT_WIDTH,
 } from "./page";
 import { hasContent, isSingleParagraph } from "./prose";
@@ -48,8 +49,8 @@ export function looksLikeMarkup(text: string): boolean {
 
 /** What a transfer carries as markup: the text, and its parse. */
 export interface HtmlSource {
-  /** The face that was parsed, as it arrived: the page's markup the paste
-   * asks the kernel to place. */
+  /** The face that was parsed, as it arrived: the markup the paste
+   * writes as the new page's file. */
   text: string;
   doc: Document;
 }
@@ -83,10 +84,12 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
   // TODO(#56): a canvas-owned "where does the next paste land" is the
   // dedupe, when a third kind wants it.
   let consecutivePastes = 0;
-  let pasting = false;
+  // Pastes whose page is being written: while one is, the page landing
+  // and its selection are the paste's own, not an action in between.
+  let pasting = 0;
   let camera = untrack(() => dd.geometry.camera());
   const reset = () => {
-    if (!pasting) consecutivePastes = 0;
+    if (pasting === 0) consecutivePastes = 0;
   };
   dd.canvas.onActivity(reset);
   dd.on("document", reset);
@@ -102,34 +105,40 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
     camera = next;
   });
 
-  /** Ask the kernel to place the page `text` would be, at `position`,
-   * selected, as one undo step; say what it answered. A write it refuses
-   * throws before anything is written: today every one, since making a
-   * page on the canvas is not yet in the project model (decision #78). */
-  const land = (text: string, position: { x: number; y: number }): void => {
-    const item = pastedViewport(dd.core, text, position);
-    pasting = true;
+  /** Write `text` as a new page of the project, its viewport at
+   * `position`, and select it; say what was made. The kernel writes the
+   * file and places the viewport as one undo step, or refuses — no
+   * project open, no host — writing nothing. */
+  const land = async (
+    text: string,
+    position: { x: number; y: number },
+  ): Promise<void> => {
+    pasting += 1;
     try {
-      dd.mutateItems((items) => {
-        items.push(item);
+      const made = await dd.createPage(text, {
+        position,
+        frame: { width: VIEWPORT_WIDTH },
       });
-      // A page is selected as an item is: by its envelope id.
-      dd.select(item.id);
+      // A page is selected as an item is: by its envelope id. (One made
+      // while another project opened is refused, placed nowhere.)
+      dd.select(made.viewportId);
       // Flush the paste's own notifications while suppression is explicit.
       flush();
+      console.info(
+        `[${dd.plugin.id}] pasted a page: ${made.path}, ${VIEWPORT_WIDTH}px wide`,
+      );
+      for (const { url, reason } of made.unvendored) {
+        console.warn(
+          `[${dd.plugin.id}] ${url} could not be downloaded into assets/ (${reason}): it stays as written`,
+        );
+      }
     } catch (error) {
       console.error(
         `[${dd.plugin.id}] paste refused: ${error instanceof Error ? error.message : String(error)}`,
       );
-      return;
     } finally {
-      pasting = false;
+      pasting -= 1;
     }
-    // A write from a deactivated plugin is ignored, not thrown: say
-    // "placed" only when it was.
-    if (!untrack(() => dd.items().some((placed) => placed.id === item.id)))
-      return;
-    console.info(`[${dd.plugin.id}] pasted a page at ${VIEWPORT_WIDTH}px`);
   };
 
   dd.canvas.onPaste(
@@ -165,7 +174,7 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
         x: center.x - VIEWPORT_WIDTH / 2 + cascade,
         y: center.y - VIEWPORT_WIDTH / 4 + cascade,
       };
-      land(source.text, position);
+      void land(source.text, position);
     },
     { priority: PASTE_PRIORITY },
   );

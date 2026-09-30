@@ -1,16 +1,11 @@
-// The page a paste would make (decision #78). A page is an html file of
-// the open project, and a viewport shows one by its path: a paste of
-// markup is a new page, which Daydream does not write yet. So what a
-// paste hands the kernel is the viewport it would place — the pasted
-// text as the page, at a 960 frame — and the kernel's answer, today its
-// "not yet" refusal (`dd.mutateItems` throws before anything is
-// written), is what the paste reports. Phase 6 of the project model makes
-// a pasted page a file of the project; the cleaning this plugin ran
-// before (the kernel's `dd.cleanPage`, gone in 0.1.44) and the `data:`
-// images it stored through the host (`dd.vendorFile`, which refuses) come
-// back with it, from git history if they still fit.
-
-import type { CoreApi, DreamItem } from "@daydream/plugin-api";
+// The page a paste makes (decision #78). A page is an html file of the
+// open project, and a viewport shows one by its path: a paste of markup
+// is a new page, the pasted text written as a new file of the project
+// through `dd.createPage` (paste.ts), at a 960 frame. The kernel names
+// the file, downloads the remote media it names into `assets/` and
+// writes every other byte as sent — nothing is cleaned or folded: what
+// would run is the render walk's to leave off the mount, as for every
+// page. What is here is the parse the claiming reads and the cap counts.
 
 /** Every pasted viewport's frame width: the frame rule (knowledge/
  * format.md) wants a width and no height, and 960 is the desktop page a
@@ -48,22 +43,4 @@ export function pastedElements(doc: Document): number {
  * between markup and text that happens to start with `<`. */
 export function hasElements(doc: Document): boolean {
   return doc.body.firstElementChild !== null;
-}
-
-/** The viewport a paste of `text` would place at `position`: the pasted
- * text verbatim as the page's markup, 960 wide. Its payload carries a
- * page's text, which is what a viewport cannot hold yet (decision #78):
- * the kernel refuses it by name. */
-export function pastedViewport(
-  core: CoreApi,
-  text: string,
-  position: { x: number; y: number },
-): DreamItem {
-  return {
-    id: core.generateId(),
-    kind: core.viewportKind,
-    position,
-    frame: { width: VIEWPORT_WIDTH },
-    payload: { html: text },
-  };
 }
