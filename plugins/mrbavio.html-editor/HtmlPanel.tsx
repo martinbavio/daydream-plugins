@@ -24,7 +24,7 @@ interface Typed {
 
 /** Text a save did not write, held on screen and kept per page, so a
  * refusal, a page that changed underneath, another page's selection or a
- * hidden dock never loses what was typed. Panel memory, never the
+ * panel minimized or hidden never loses what was typed. Panel memory, never the
  * project. `kind` is what ⌘S goes by: a HELD draft was typed over a page
  * that moved — it changed where the text was typed, or it left the
  * canvas — and ⌘S saves it over the page as it is now; a REFUSED one is
@@ -37,7 +37,7 @@ export type Draft =
 
 /** What the entry (index.tsx) shares with the panel: the API, the live
  * editor handle its Escape command acts on, and the drafts that outlive a
- * panel mount (the dock unmounts its panels while hidden). */
+ * panel mount (the body is unmounted while minimized or hidden). */
 export interface PanelState {
   dd: DaydreamApi;
   /** The CodeMirror handle while a page is shown; written here, read by
@@ -231,7 +231,7 @@ interface Resolution {
  * pending or held — a minimal span change, so the caret maps through.
  *
  * A factory, not a `<Component>`: the panel's `render` (index.tsx) calls
- * it under the dock's owner, and `state` is a plain object shared with
+ * it under the panel's owner, and `state` is a plain object shared with
  * the entry — never a reactive props proxy.
  */
 export default function createHtmlPanel(state: PanelState) {
@@ -564,12 +564,12 @@ export default function createHtmlPanel(state: PanelState) {
     );
   }
 
-  // The panel unmounting — the dock hidden (⌘\), the plugin unloading —
-  // mid-edit: save what is pending the way blur would, after the disposal
-  // has run (never a write inside it). Only into the state the typing
-  // belongs to: a load or an undo, a redo, before the save runs — the
-  // same project reopened, a viewport of the same id — drops it, as the
-  // restore drops what is pending while the panel is up.
+  // The panel's body unmounting — minimized, hidden (⌘\), the plugin
+  // unloading — mid-edit: save what is pending the way blur would, after
+  // the disposal has run (never a write inside it). Only into the state
+  // the typing belongs to: a load or an undo, a redo, before the save
+  // runs — the same project reopened, a viewport of the same id — drops
+  // it, as the restore drops what is pending while the panel is up.
   onSettled(() => () => {
     clearDebounce();
     const ed = editor();

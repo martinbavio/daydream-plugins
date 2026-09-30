@@ -365,10 +365,10 @@ describe("mrbavio.html-editor: typing when the project goes", () => {
     expect(mounted!.store.project()).toEqual(MINE);
   });
 
-  test("a save the hidden dock deferred is dropped when another project loads, or an undo runs, before it lands", async () => {
+  test("a save focus mode deferred is dropped when another project loads, or an undo runs, before it lands", async () => {
     const m = await mountPage();
-    // The dock hidden is the shell's state: shown again whatever happens,
-    // as the next test expects to find it.
+    // Focus mode (⌘\, every panel hidden) is the shell's state: left
+    // again whatever happens, as the next test expects to find the panel.
     try {
       select(itemId);
       content().focus();

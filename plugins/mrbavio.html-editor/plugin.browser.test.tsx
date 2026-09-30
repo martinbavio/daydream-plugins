@@ -746,7 +746,7 @@ describe("mrbavio.html-editor", () => {
     expect(stored()).toBe(edited("    <p>", "      <p>"));
   });
 
-  test("hiding the dock mid-edit saves what is pending", async () => {
+  test("focus mode (⌘\\, every panel hidden) mid-edit saves what is pending", async () => {
     const m = await mountPage();
     select(itemId);
     content().focus();
@@ -760,6 +760,35 @@ describe("mrbavio.html-editor", () => {
     key(window, { key: "\\", code: "Backslash", metaKey: true });
     expect(m.panel()).not.toBeNull();
     expect(text()).toBe(edited("Old headline", "Kept"));
+  });
+
+  test("minimizing the panel mid-edit saves what is pending, and it opens on what was saved", async () => {
+    const m = await mountPage();
+    // The header's icon, found by its name (decision #79: the kernel's
+    // chrome, not this plugin's). The layout is remembered per project,
+    // so the panel is opened again whatever happens.
+    const toggle = (name: "Minimize" | "Expand"): void => {
+      panel().querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!.click();
+      flush();
+    };
+    try {
+      select(itemId);
+      content().focus();
+      await typeAll(edited("Old headline", "Kept"));
+      toggle("Minimize");
+      // The body is unmounted, the section stays.
+      expect(panel().querySelector(".cm-content")).toBeNull();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flush();
+      expect(stored()).toBe(edited("Old headline", "Kept"));
+      expect(m.store.canUndo()).toBe(true);
+      toggle("Expand");
+      expect(text()).toBe(edited("Old headline", "Kept"));
+    } finally {
+      if (panel().querySelector('button[aria-label="Expand"]') !== null) {
+        toggle("Expand");
+      }
+    }
   });
 
   test("a page changed on the canvas with nothing pending is shown as it is now", async () => {

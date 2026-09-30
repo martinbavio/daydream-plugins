@@ -17,8 +17,8 @@
 // on the console.
 //
 // NOT here, on purpose: in-place text editing on the canvas. Nor a
-// resizer: the dock's width and the split between this pane and the CSS
-// editor above it are the dock's own chrome (decision #59).
+// resizer: the panel's width, its length and where it sits are the panel
+// layer's own chrome (decision #79).
 //
 // Everything it knows about the app arrives through `dd`; the entry
 // registers its five commands and the panel.
@@ -60,8 +60,9 @@ export default function activate(dd: DaydreamApi): void {
     redo: () => false,
     saveOver: () => false,
     leave: () => {},
-    // Drafts outlive a panel mount: the dock unmounts its panels while
-    // hidden (⌘\), and typed text must come back with it.
+    // Drafts outlive a panel mount: the panel's body is unmounted while
+    // it is minimized or hidden (⌘\), and typed text must come back
+    // with it.
     drafts: { load: untrack(dd.loadVersion), pages: new Map<string, Draft>() },
   };
 
@@ -177,8 +178,8 @@ export default function activate(dd: DaydreamApi): void {
     id: "html-editor",
     title: "HTML",
     ariaLabel: "HTML editor",
-    // A third of the dock's spare height by default, under the CSS
-    // editor's two thirds; the dock's divider moves the split.
+    // A third of the default stack's spare height, under the CSS
+    // editor's two thirds; the divider between them moves the split.
     grow: 1,
     // The panel's CSS, mounted by the kernel in the plugin layer
     // (decision #71) — never a <style> of the panel's own.

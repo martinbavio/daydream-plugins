@@ -4,7 +4,7 @@
 // project's title and notes, never a viewport's), with the source link of
 // the page in view — the page of the selection's viewport, or of a sole
 // viewport when nothing is selected — and renders nothing without meta
-// while staying in the dock. An element inside a page is selected by the
+// while its panel stays. An element inside a page is selected by the
 // id its mount stamped, and the pane finds its viewport through the
 // kernel.
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -251,7 +251,7 @@ describe("mrbavio.notes in the shell", () => {
     expect(source()).toBe(SIDEBAR_SOURCE);
   });
 
-  test("renders nothing without meta, and the panel stays in the dock", async () => {
+  test("renders nothing without meta, and the panel stays", async () => {
     const page = fixturePageAt(0);
     mounted = await mountPlugin({
       entry: activate,
@@ -264,7 +264,7 @@ describe("mrbavio.notes in the shell", () => {
     // The root holds nothing (its CSS is the kernel's <style> in the
     // panel section, from `styles` — decision #71) — and takes no
     // height: the padding is the body's, so an empty pane is a zero-height
-    // row under the dock's caption, not a blank inset.
+    // row under the panel's header, not a blank inset.
     const styles = panel.querySelectorAll("style");
     expect(styles).toHaveLength(1);
     expect(styles[0]!.textContent).toMatch(/^@layer dream-plugin \{/);
@@ -280,6 +280,35 @@ describe("mrbavio.notes in the shell", () => {
     );
     flush();
     expect(title()).toBe("Sidebar");
+  });
+
+  test("minimized, its body is gone; opened again, it shows the project's meta", async () => {
+    mounted = await mountPlugin({
+      entry: activate,
+      manifest,
+      project: projectOf([{ page: fixturePageAt(0) }], { title: "Sidebar" }),
+    });
+    // The header's icon, found by its name (decision #79: the kernel's
+    // chrome). The layout is remembered per project, so the panel is
+    // opened again whatever happens.
+    const toggle = (name: "Minimize" | "Expand"): void => {
+      mounted!
+        .panel()!
+        .querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!
+        .click();
+      flush();
+    };
+    try {
+      expect(title()).toBe("Sidebar");
+      toggle("Minimize");
+      expect(mounted.panel()!.querySelector(".mrbavio-notes-panel")).toBeNull();
+      toggle("Expand");
+      expect(title()).toBe("Sidebar");
+    } finally {
+      if (mounted.panel()!.querySelector('button[aria-label="Expand"]') !== null) {
+        toggle("Expand");
+      }
+    }
   });
 
   test("a copy under another id styles its own nodes: the class prefix derives from dd.plugin.id", async () => {

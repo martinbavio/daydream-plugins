@@ -8,8 +8,8 @@
 // viewport owning the current selection (the viewport item itself, or
 // the page an element sits in, decision #76) — or, with nothing selected
 // in a one-viewport project, the sole viewport's page. Absent meta
-// renders nothing; the panel stays registered so the dock order never
-// shifts with the document.
+// renders nothing; the panel stays registered so the panels never
+// shift with the document.
 
 import { createMemo, For, Show, untrack } from "solid-js";
 
@@ -20,8 +20,8 @@ import { classPrefix } from "./styles";
 
 /**
  * A factory, not a `<Component>`: the panel's `render` (index.tsx) calls
- * it under the dock's owner, so the memo below belongs to the dock section
- * and dies with it.
+ * it under the panel's owner, so the memo below belongs to the panel's
+ * body and dies with it (minimized, the body is unmounted).
  */
 export default function createNotesPanel(dd: DaydreamApi) {
   // Class prefix from the plugin id: a copy under another id styles its

@@ -14,12 +14,12 @@ export const classPrefix = (pluginId: string): string =>
   pluginId.replace(/[^A-Za-z0-9_-]/g, "-");
 
 export const css = (p: string): string => `
-/* The dock section (src/shell/Dock.tsx) is as tall as this: the notes take
-   the height their text needs and the DOCK scrolls (P5 settled the stack's
-   proportions; the CSS editor is the panel that grows), so the pane no
-   longer pins or caps itself the way it did as a strip inside the CSS
-   editor. No padding on the root: without meta the body is absent and the
-   section is a zero-height row under its caption. */
+/* The panel starts as tall as this (decision #79: a panel without
+   \`grow\` is measured once), and what is taller than the length the user
+   gives it scrolls in the panel's body, so the pane never pins or caps
+   itself the way it did as a strip inside the CSS editor. No padding on
+   the root: without meta the body is absent and the root a zero-height
+   row under the panel's header. */
 .${p}-panel {
   font-size: 11px;
   line-height: 1.55;
