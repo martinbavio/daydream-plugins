@@ -174,9 +174,12 @@ import {
 } from "./ruleRedundancy";
 import { hasStatePseudo, stripStatePseudo } from "./statePseudo";
 import {
+  goneClause,
+  inlineValue,
   inRound,
   markupClause,
   siteClause,
+  type SiteHow,
   type VariantRound,
 } from "./variantRound";
 
@@ -219,9 +222,15 @@ interface RuleSubject {
   sheet: string;
   name: string;
   /** What the finding's sentence ends with to say what to do (`; remove
-   * it from …`), or "": left out where the sheet is the site's at a
+   * it from …`), or "": left out where the rule is the site's at a
    * variant's finalize, which the round never writes. */
   fix: string;
+  /** The finding's `rule`: the rule's place among the page's rules. */
+  index: number;
+  /** A rule that matches no element, at a variant's finalize, that
+   * matches one of the page's markup (`VariantRound.matchedOnPage`):
+   * the variant's markup is what leaves it dead. */
+  gone: boolean;
 }
 
 /** Which viewports have a say in a rule finding: `applies`, every one
@@ -249,6 +258,7 @@ function ruleFinding(
   finding: Finding,
   findings: Finding[],
   fix = "",
+  gone = false,
 ): void {
   const written = read.written[index]!;
   const rule = ruleKey(written);
@@ -261,6 +271,8 @@ function ruleFinding(
     sheet: written.sheet,
     name: ruleName(written.written),
     fix,
+    index: written.rule,
+    gone,
   });
   findings.push(said);
 }
@@ -397,10 +409,12 @@ export async function matchLint(
  * pages; the dead rules among them — what the judged pages do not use
  * says nothing of a page that was not mounted — folded to one advisory
  * per sheet, after the rest (`unjudgedNote`), naming the viewports that
- * were judged (`viewports`). At a variant's finalize (`round`) a rule of
- * the site's sheets is advisory the same way, saying so instead and
- * naming no fix (variantRound.ts `siteClause`): the round never writes
- * them. */
+ * were judged (`viewports`). At a variant's finalize (`round`) a rule
+ * the site keeps (variantRound.ts `siteOf`) is advisory the same way,
+ * saying so instead and naming no fix (`siteClause`): the round never
+ * writes it — but a dead one the page's markup has an element for, in a
+ * sheet no page not judged links, is one advisory of its own, dead once
+ * the variant is accepted (`goneClause`). */
 function unjudged(
   held: readonly Finding[],
   kept: ReadonlyMap<Finding, RuleSubject>,
@@ -409,37 +423,53 @@ function unjudged(
   round: VariantRound | null,
 ): Finding[] {
   const out: Finding[] = [];
-  const dead = new Map<string, { sheet: string; names: string[] }>();
+  const dead = new Map<
+    string,
+    { key: string; sheet: string; how: SiteHow | null; names: string[] }
+  >();
   for (const finding of held) {
     const about = kept.get(finding);
-    const site = about !== undefined && round?.site.has(about.key) === true;
+    const how =
+      about === undefined ? null : (round?.siteOf(about.key, about.index) ?? null);
     const pages = about === undefined ? undefined : outside.get(about.key);
-    if (about === undefined || (!site && pages === undefined)) {
+    if (about === undefined || (how === null && pages === undefined)) {
       out.push(finding);
       continue;
     }
+    const fact = finding.message.slice(0, finding.message.length - about.fix.length);
     if (about.id.endsWith("\u0000dead")) {
-      const fold = dead.get(about.key) ?? { sheet: about.sheet, names: [] };
-      fold.names.push(about.name);
-      dead.set(about.key, fold);
+      // A rule the variant's markup leaves dead, in a sheet only the page
+      // links: said on its own, as dead once the variant is accepted.
+      if (how !== null && pages === undefined && about.gone) {
+        out.push({
+          ...finding,
+          severity: "advisory",
+          message: `${fact}${goneClause(round!, about.sheet)}`,
+        });
+        continue;
+      }
+      const fold = `${about.key}\u0000${how ?? ""}`;
+      const entry = dead.get(fold) ?? { key: about.key, sheet: about.sheet, how, names: [] };
+      entry.names.push(about.name);
+      dead.set(fold, entry);
       continue;
     }
-    const fact = finding.message.slice(0, finding.message.length - about.fix.length);
     out.push({
       ...finding,
       severity: "advisory",
-      message: site
-        ? `${fact}${siteClause(round!, about.sheet)}`
-        : `${finding.message}${unjudgedClause(about.sheet, pages!)}`,
+      message:
+        how !== null
+          ? `${fact}${siteClause(round!, about.sheet, 1, how)}`
+          : `${finding.message}${unjudgedClause(about.sheet, pages!)}`,
     });
   }
-  for (const [key, { sheet, names }] of dead) {
+  for (const { key, sheet, how, names } of dead.values()) {
     const one = names.length === 1;
     const subject = `${one ? "rule" : "rules"} ${listText(names, UNJUDGED_NAMED)}`;
     const found = `${one ? "matches" : "match"} no element in ${viewportsText(viewports)}`;
     out.push(
-      round?.site.has(key) === true
-        ? noteWith("static", sheet, subject, found, siteClause(round, sheet, names.length))
+      how !== null
+        ? noteWith("static", sheet, subject, found, siteClause(round!, sheet, names.length, how))
         : unjudgedNote("static", sheet, subject, found, outside.get(key)!, names.length),
     );
   }
@@ -676,7 +706,9 @@ function lintRestatedInitials(
       const cut = new Map([[node, [declaration.range]]]);
       if (!unchangedWithout(read, [], cut, [box])) continue;
       const selector = read.nameOf(node);
-      const had = read.round?.hadStyle(selector, declaration.property) === true;
+      const had =
+        read.round?.hadStyle(selector, declaration.property, inlineValue(declaration)) ===
+        true;
       const fact = `${declaration.property}: ${declaration.value} on \`${selector}\` restates the initial value`;
       findings.push({
         tier: "static",
@@ -752,7 +784,7 @@ function lintRedundancy(
           break;
         }
         const selector = read.nameOf(node);
-        const had = read.round?.hadStyle(selector, property) === true;
+        const had = read.round?.hadStyle(selector, property, value) === true;
         const fact = `${property}: ${value} on \`${selector}\` restates rule ${ruleOf(read, rule.index)}`;
         findings.push({
           tier: "static",
@@ -883,6 +915,7 @@ function lintDeadRules(read: MountedPage, findings: Finding[]): void {
       );
     }
     if (!dead) continue;
+    const written = read.written[rule.index]!;
     ruleFinding(
       read,
       rule.index,
@@ -892,10 +925,12 @@ function lintDeadRules(read: MountedPage, findings: Finding[]): void {
         tier: "static",
         severity: "blocking",
         elementId: "html",
-        rule: read.written[rule.index]!.rule,
+        rule: written.rule,
         message: `rule ${ruleOf(read, rule.index)} in viewport ${read.viewport.id} matches no element`,
       },
       findings,
+      "",
+      read.round?.matchedOnPage(written.written) === true,
     );
   }
 }

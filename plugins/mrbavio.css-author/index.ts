@@ -16,9 +16,11 @@
 // rule of a sheet a page it did not judge links too is advisory, never a
 // refusal (pageSheets.ts `unjudgedLinks`). At a VARIANT's finalize
 // (decision #80, variantRound.ts) they refuse only what the variant
-// causes: its own sheet is judged as its page will hold it once
-// accepted, and what they find in the page's own sheets, or in markup
-// the page already has, is advisory. The lints: the
+// causes: its own sheet, and the rules it writes or changes in the
+// `<style>` blocks, are judged as its page will hold them once
+// accepted, and what they find in the page's own sheets, the rules of
+// its blocks the variant keeps, or markup the page already has, is
+// advisory. The lints: the
 // static lint (staticLint.ts's facts from the texts, a stray `;` that
 // drops a rule among them, plus matchLint.ts's match-dependent ones: an
 // explicit initial value the page computes without, redundancy — an

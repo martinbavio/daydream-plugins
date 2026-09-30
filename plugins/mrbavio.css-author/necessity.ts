@@ -184,12 +184,15 @@ import {
   type WrittenRule,
 } from "./pageSheets";
 import { ruleMatcher } from "./ruleMatch";
-import { hasStatePseudo } from "./statePseudo";
+import { hasStatePseudo, stripStatePseudo } from "./statePseudo";
 import {
+  goneClause,
   inRound,
   markupClause,
   overriddenClause,
+  sharedClause,
   siteClause,
+  type SiteHow,
   type VariantRound,
 } from "./variantRound";
 
@@ -267,13 +270,13 @@ export async function necessityLint(
       shown,
       live,
       options.deadline,
-      inRound(round, shown.viewport) ? round.own : undefined,
+      inRound(round, shown.viewport) ? round : undefined,
     );
     if (inRound(round, shown.viewport)) {
       for (const c of judged.candidates) {
         const selector = c.finding.elementId;
         if (c.element && selector !== undefined) {
-          c.had = round.hadStyle(selector, c.property);
+          c.had = round.hadStyle(selector, c.property, c.value);
         }
       }
     }
@@ -354,10 +357,15 @@ interface Candidate {
   /** An element's own line its page already has there, at a variant's
    * finalize (`VariantRound.hadStyle`): no refusal of the variant's. */
   had?: boolean;
-  /** A rule's line, at a variant's finalize, that reads dead at the
-   * frame and live there without the variant's own sheet
-   * (`markOverridden`): the variant's css overrides it. */
+  /** A rule's line of what the site keeps, at a variant's finalize,
+   * that reads dead at some width the lint read and live there without
+   * what the variant adds to the cascade (`markOverridden`): the
+   * variant's css overrides it. */
   overridden?: boolean;
+  /** A rule's line of what the site keeps, at a variant's finalize,
+   * whose rule matches no element of the variant and one of the page's
+   * markup (`markGone`): the variant's markup leaves it dead. */
+  gone?: boolean;
 }
 
 /** A mounted page prepared for removals. */
@@ -382,16 +390,18 @@ interface Prepared {
  * earlier viewport — each probe width a fresh mount of the same window at
  * that width, while `deadline` leaves time for one. A finding that
  * survives names every width. `notes` is the advisory on the images the
- * copy could not load. At a variant's finalize, `ownSheet` is the
- * variant's own sheet (`sheetKey`), and the dead lines of the other sheets are
- * read again without it at the frame (`markOverridden`). */
+ * copy could not load. At a variant's finalize (`round`), the dead lines
+ * of what the site keeps are read again without what the variant adds
+ * to the cascade, at the frame and at each swept width
+ * (`markOverridden`), and asked whether the page's markup is what they
+ * matched (`markGone`). */
 async function lintViewport(
   core: CoreApi,
   ctx: MountContext,
   { viewport, page }: Shown,
   answered: ReadonlySet<string>,
   deadline: number | undefined,
-  ownSheet?: string,
+  round?: VariantRound,
 ): Promise<{ candidates: Candidate[]; notes: Finding[] }> {
   // The page as its files hold it, for naming: the mounted copy's sheets
   // have the routed urls in them, and a finding should quote what the
@@ -414,8 +424,9 @@ async function lintViewport(
       const width =
         prepared.doc.defaultView?.innerWidth ?? viewport.frame?.width ?? 0;
       const judged = await judgeAll(viewport, page, prepared, width, nameOf);
-      if (ownSheet !== undefined) {
-        await markOverridden(prepared, judged, ownSheet);
+      if (round !== undefined) {
+        markGone(prepared, judged, round);
+        await markOverridden(prepared, judged, round);
       }
       return {
         own: width,
@@ -448,6 +459,8 @@ async function lintViewport(
         c.applies ||= appliesIn(prepared, c.removal[0]!);
         c.dead = await isDead(prepared, probe, c.removal);
       }
+      // A line only this width lets apply is overridden only here.
+      if (round !== undefined) await markOverridden(prepared, pending, round);
     });
     slowest = Math.max(slowest, Date.now() - began);
     swept.push(width);
@@ -748,36 +761,97 @@ async function judgeAll(
   return candidates;
 }
 
-/** At a variant's finalize, mark each rule's line of a sheet other than
- * the variant's own (`own`, its `sheetKey`) that read dead as
- * `overridden` when it is live with that sheet cut from the copy: read
- * against a baseline taken without it, the line and its own sheet cut
- * together. A sheet with no rules overrides nothing. */
+/** How the round keeps the rule a line is in (`VariantRound.siteOf`),
+ * or null: the variant's, or no rule's. */
+function siteOfLine(
+  prepared: Prepared,
+  c: Candidate,
+  round: VariantRound,
+): SiteHow | null {
+  const first = c.removal[0];
+  if (c.sheet === undefined || first === undefined || !("rule" in first)) {
+    return null;
+  }
+  return round.siteOf(c.sheet.key, prepared.written[first.rule]?.rule);
+}
+
+/** At a variant's finalize, mark each dead line (`candidates`) of a rule
+ * the site keeps as it stands (`siteOfLine`: `sheet`, `kept`) as
+ * `overridden` when it is live without what the variant adds to the
+ * cascade: its own sheet (`VariantRound.own`) and the declarations of
+ * the rules it writes, changes or moves in the `<style>` blocks
+ * (`VariantRound.changed`) — read against a baseline taken without
+ * them, the line and those cut together. A moved rule's own line cannot
+ * be read so (its rule is among the cuts): its clause says the move may
+ * be what leaves it dead (variantRound.ts `siteClause`). */
 async function markOverridden(
   prepared: Prepared,
   candidates: readonly Candidate[],
-  own: string,
+  round: VariantRound,
 ): Promise<void> {
-  const at = prepared.written.findIndex((rule) => rule.key === own);
-  if (at < 0) return;
-  const sheet = prepared.rules[at]!.sheet;
-  const dead = candidates.filter(
-    (c) => c.dead && c.sheet !== undefined && c.sheet.key !== own,
-  );
+  const cut: Cut = { ranges: [] };
+  prepared.written.forEach((written, r) => {
+    const rule = prepared.rules[r]!;
+    if (written.key === round.own) {
+      if (cut.whole === undefined) {
+        cut.whole = rule.sheet;
+        const text = prepared.styles[rule.sheet]?.textContent ?? "";
+        cut.ranges.push({ sheet: rule.sheet, range: [0, text.length] });
+      }
+    } else if (round.changed.has(written.rule)) {
+      for (const declaration of rule.declarations) {
+        cut.ranges.push({ sheet: rule.sheet, range: declaration.range });
+      }
+    }
+  });
+  if (cut.ranges.length === 0) return;
+  const dead = candidates.filter((c) => {
+    if (!c.dead || c.overridden === true || c.gone === true) return false;
+    const how = siteOfLine(prepared, c, round);
+    return how === "sheet" || how === "kept";
+  });
   if (dead.length === 0) return;
-  const whole: SheetRange = {
-    sheet,
-    range: [0, (prepared.styles[sheet]?.textContent ?? "").length],
-  };
   const without = await readWithoutReloading(
     prepared.doc,
     prepared.styles,
-    [whole],
+    cut.ranges,
     new Map(),
     () => baseline(prepared),
   );
   for (const c of dead) {
-    c.overridden = !(await isDead(prepared, without, c.removal, whole));
+    c.overridden = !(await isDead(prepared, without, c.removal, cut));
+  }
+}
+
+/** At a variant's finalize, mark each dead line (`candidates`) of a rule
+ * the site keeps as `gone` when the rule matches no element of the
+ * mounted variant — its states stripped too — and one of the page's
+ * markup (`VariantRound.matchedOnPage`). */
+function markGone(
+  prepared: Prepared,
+  candidates: readonly Candidate[],
+  round: VariantRound,
+): void {
+  const match = ruleMatcher(prepared.doc);
+  const matches = new Map<number, boolean>();
+  for (const c of candidates) {
+    if (!c.dead || siteOfLine(prepared, c, round) === null) continue;
+    const r = (c.removal[0] as { rule: number }).rule;
+    let gone = matches.get(r);
+    if (gone === undefined) {
+      const rule = prepared.rules[r]!;
+      const selectors = [rule.selector, stripStatePseudo(rule.selector)].map(
+        selectorForMatching,
+      );
+      const here = selectors.some(
+        (selector) =>
+          selector.trim() !== "" &&
+          prepared.nodes.some((node) => match(node, selector, rule.scopes)),
+      );
+      gone = !here && round.matchedOnPage(prepared.written[r]!.written);
+      matches.set(r, gone);
+    }
+    c.gone = gone;
   }
 }
 
@@ -891,21 +965,27 @@ function refused(doc: Document, selector: string): boolean {
  * again has loaded, then everything put back as it was. The read is a
  * single sweep that stops at the first element whose observation left
  * the baseline. `also`, when given, is cut in the same write: a whole
- * sheet (`markOverridden`). */
+ * sheet and some rules' declarations (`markOverridden`). */
 function isDead(
   prepared: Prepared,
   probe: Probe,
   removal: readonly At[],
-  also?: SheetRange,
+  also?: Cut,
 ): Promise<boolean> {
-  const cssRanges: SheetRange[] = also === undefined ? [] : [also];
+  const cssRanges: SheetRange[] = [...(also?.ranges ?? [])];
+  const cut = new Set(cssRanges.map(({ sheet, range }) => `${sheet}:${range[0]}`));
   const inline = new Map<Element, TextRange[]>();
   for (const where of removal) {
     if ("rule" in where) {
       const rule = prepared.rules[where.rule];
       const declaration = rule?.declarations[where.at];
-      // A range of the sheet `also` cuts whole is cut with it.
-      if (declaration !== undefined && rule!.sheet !== also?.sheet) {
+      // A range `also` cuts already — its whole sheet's, or the same
+      // declaration — is cut with it.
+      if (
+        declaration !== undefined &&
+        rule!.sheet !== also?.whole &&
+        !cut.has(`${rule!.sheet}:${declaration.range[0]}`)
+      ) {
         cssRanges.push({ sheet: rule!.sheet, range: declaration.range });
       }
     } else {
@@ -922,6 +1002,13 @@ function isDead(
   );
 }
 
+/** What a read cuts besides the line it judges (`isDead`): ranges of
+ * the copy's sheets, `whole` the one of them cut whole. */
+interface Cut {
+  ranges: SheetRange[];
+  whole?: number;
+}
+
 /** Rule 3: dead only where dead everywhere the declaration exists. Order
  * is first appearance — the first viewport's order, then whatever later
  * viewports add — elements' own before rules', and the finding is the
@@ -931,12 +1018,16 @@ function isDead(
  * page renders it, so it is no finding of its own: the lines of each
  * such sheet are one advisory, after the rest, naming the pages and the
  * viewports judged (`viewports`). At a variant's finalize (`round`) the
- * site's sheets are folded the same way, saying why (variantRound.ts
- * `siteClause`) — but for a line the variant's css overrides, which is
- * one advisory of its own, naming its rule (`overriddenClause`), when no
- * page not judged links its sheet: the accept leaves it dead there, and
- * an in-place rework of the page refuses it — and an element's own line
- * the page already has is advisory. */
+ * lines of what the site keeps (variantRound.ts `siteOf`) are folded the
+ * same way, per sheet and per how it is kept, saying why (`siteClause`)
+ * — but for a line the variant leaves dead once it is accepted, which is
+ * one advisory of its own, naming its rule: one the variant overrides
+ * (`overriddenClause`) or whose element it removes (`goneClause`), when
+ * no page not judged links its sheet, so an in-place rework of the page
+ * refuses it then; and one it overrides in a sheet such pages link, when
+ * the accept appends to a sheet they link too, so `lint` refuses it
+ * then (`sharedClause`). An element's own line the page already has is
+ * advisory. */
 function intersect(
   perViewport: readonly Candidate[][],
   outside: ReadonlyMap<string, string[]>,
@@ -953,6 +1044,7 @@ function intersect(
       sheet: Candidate["sheet"];
       had: boolean;
       overridden: boolean;
+      gone: boolean;
     }
   >();
   for (const candidates of perViewport) {
@@ -968,6 +1060,7 @@ function intersect(
           sheet: c.sheet,
           had: c.had === true,
           overridden: c.overridden === true,
+          gone: c.gone === true,
         });
       } else {
         seen.dead = seen.dead && c.dead;
@@ -977,32 +1070,45 @@ function intersect(
   }
   const entries = [...merged.values()].filter((entry) => entry.dead);
   const out: Finding[] = [];
-  const unjudged = new Map<string, { name: string; lines: string[] }>();
+  const folded = new Map<
+    string,
+    { key: string; name: string; how: SiteHow | null; lines: string[] }
+  >();
   for (const entry of [
     ...entries.filter((entry) => entry.element),
     ...entries.filter((entry) => !entry.element),
   ]) {
     const { sheet } = entry;
-    if (
-      sheet !== undefined &&
-      entry.overridden &&
-      round?.site.has(sheet.key) === true &&
-      !outside.has(sheet.key)
-    ) {
-      out.push({
-        ...entry.finding,
-        severity: "advisory",
-        message: `${entry.finding.message}${overriddenClause(round, sheet.name)}`,
-      });
-      continue;
+    const how =
+      sheet === undefined || round === null
+        ? null
+        : round.siteOf(sheet.key, entry.finding.rule);
+    if (sheet !== undefined && how !== null && (entry.overridden || entry.gone)) {
+      const pages = outside.get(sheet.key);
+      const shared =
+        round!.target === null ? undefined : outside.get(round!.target);
+      const clause =
+        pages === undefined
+          ? entry.gone
+            ? goneClause(round!, sheet.name, true)
+            : overriddenClause(round!, sheet.name)
+          : entry.overridden && shared !== undefined
+            ? sharedClause(round!, sheet.name, shared)
+            : null;
+      if (clause !== null) {
+        out.push({
+          ...entry.finding,
+          severity: "advisory",
+          message: `${entry.finding.message}${clause}`,
+        });
+        continue;
+      }
     }
-    if (
-      sheet !== undefined &&
-      (outside.has(sheet.key) || round?.site.has(sheet.key) === true)
-    ) {
-      const fold = unjudged.get(sheet.key) ?? { name: sheet.name, lines: [] };
+    if (sheet !== undefined && (outside.has(sheet.key) || how !== null)) {
+      const at = `${sheet.key}\u0000${how ?? ""}`;
+      const fold = folded.get(at) ?? { key: sheet.key, name: sheet.name, how, lines: [] };
       fold.lines.push(sheet.line);
-      unjudged.set(sheet.key, fold);
+      folded.set(at, fold);
       continue;
     }
     if (entry.had && round !== null) {
@@ -1015,13 +1121,13 @@ function intersect(
     }
     out.push(entry.cut ? { ...entry.finding, severity: "advisory" } : entry.finding);
   }
-  for (const [key, { name, lines }] of unjudged) {
+  for (const { key, name, how, lines } of folded.values()) {
     const one = lines.length === 1;
     const subject = `${one ? "declaration" : "declarations"} ${listText(lines, UNJUDGED_NAMED)}`;
     const found = `${one ? "changes" : "change"} nothing in ${viewportsText(viewports)}`;
     out.push(
-      round?.site.has(key) === true
-        ? noteWith("necessity", name, subject, found, siteClause(round, name, lines.length))
+      how !== null
+        ? noteWith("necessity", name, subject, found, siteClause(round!, name, lines.length, how))
         : unjudgedNote("necessity", name, subject, found, outside.get(key)!, lines.length),
     );
   }

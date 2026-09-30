@@ -67,9 +67,11 @@ import {
   type ProjectPaths,
 } from "./pageSheets";
 import {
+  inlineValue,
   inRound,
   markupClause,
   siteClause,
+  type SiteHow,
   type VariantRound,
 } from "./variantRound";
 
@@ -132,16 +134,21 @@ export function staticLint(
       judged.add(`rules\u0000${key}`);
       return [sheet];
     });
-    /** The round's site clause for sheet `sheet`, or null. */
-    const site = (sheet: number): ((count?: number) => string) | null =>
-      variant !== null && variant.site.has(sheetKey(page, sheet))
-        ? (count) => siteClause(variant, sheetName(page, sheet), count)
-        : null;
+    /** The round's site clause for a rule of sheet `sheet` (`siteOf`)
+     * or a block of it (`siteBlock`), or null: the variant's. */
+    const clause = (
+      sheet: number,
+      how: SiteHow | null | undefined,
+    ): ((count?: number) => string) | null =>
+      variant === null || how === null || how === undefined
+        ? null
+        : (count) => siteClause(variant, sheetName(page, sheet), count, how);
     lintUnitlessLengthsOnRules(
       rules.filter((rule) => fresh.includes(rule.sheet)),
       (sheet) => sheetName(page, sheet),
       findings,
-      site,
+      (rule) =>
+        clause(rule.sheet, variant?.siteOf(sheetKey(page, rule.sheet), rule.index)),
     );
     lintUnreferencedClasses(
       blocks.flatMap(selectorPreludes),
@@ -157,7 +164,7 @@ export function staticLint(
         blocks[sheet]!,
         sheetName(page, sheet),
         findings,
-        site(sheet),
+        (block) => clause(sheet, variant?.siteBlock(sheetKey(page, sheet), block)),
       );
     }
   }
@@ -300,7 +307,8 @@ function lintUnitlessLengths(
   for (const declaration of own) {
     if (!hasUnitlessLength(declaration)) continue;
     const fact = `${declaration.property}: ${declaration.value} on ${named(selector)} has no unit`;
-    const had = round?.hadStyle(selector, declaration.property) === true;
+    const had =
+      round?.hadStyle(selector, declaration.property, inlineValue(declaration)) === true;
     findings.push({
       tier: "static",
       severity: had ? "advisory" : "blocking",
@@ -350,18 +358,18 @@ function topLevelTokens(value: string): string[] {
  * as an element's own, so the same check applies verbatim, under any
  * condition — a dropped declaration is dropped at every width. Each
  * finding names the sheet the rule is written in (`sheetOf`, from the
- * rule's `sheet`); one of a sheet `site` answers a clause for — the
+ * rule's `sheet`); one of a rule `site` answers a clause for — the
  * site's, at a variant's finalize — is advisory, with that clause. */
 export function lintUnitlessLengthsOnRules(
   rules: readonly PageRule[],
   sheetOf: (sheet: number) => string,
   findings: Finding[],
-  site: (sheet: number) => ((count?: number) => string) | null = () => null,
+  site: (rule: PageRule) => ((count?: number) => string) | null = () => null,
 ): void {
   for (const rule of rules) {
     for (const declaration of rule.declarations) {
       if (!hasUnitlessLength(declaration)) continue;
-      const aside = site(rule.sheet);
+      const aside = site(rule);
       const fact = `${declaration.property}: ${declaration.value} in rule ${ruleName(rule)} of ${sheetOf(rule.sheet)} has no unit`;
       findings.push({
         tier: "static",
@@ -508,7 +516,7 @@ function familyNamer(read: ReadPage): (family: string) => boolean {
 
 /** Rule 3 for one page: each face of its editable sheets that no page
  * carrying it names, reported once — at the first page that carries it;
- * one of the site's sheets at a variant's finalize (`round`) is
+ * one the site keeps at a variant's finalize (`round`, `siteBlock`) is
  * advisory. */
 function lintUnusedFontFaces(
   read: ReadPage,
@@ -525,15 +533,16 @@ function lintUnusedFontFaces(
       if (use === undefined || use.used || judged.has(`face\u0000${key}`)) continue;
       judged.add(`face\u0000${key}`);
       const name = sheetName(read.page, sheet);
-      const site = round?.site.has(sheetKey(read.page, sheet)) === true;
+      const how = round?.siteBlock(sheetKey(read.page, sheet), block) ?? null;
       const fact = `@font-face ${use.family} in ${name} is named by no font-family in ${pagesText(use.pages)}`;
       findings.push({
         tier: "static",
-        severity: site ? "advisory" : "blocking",
+        severity: how !== null ? "advisory" : "blocking",
         elementId: "html",
-        message: site
-          ? `${fact}${siteClause(round!, name)}`
-          : `${fact} — remove the face or use it`,
+        message:
+          how !== null
+            ? `${fact}${siteClause(round!, name, 1, how)}`
+            : `${fact} — remove the face or use it`,
       });
     }
   });
@@ -679,15 +688,16 @@ export function lintUnreferencedClasses(
 // once, and a read-only sheet never (staticLint above).
 
 /** Rule 5 over one sheet's blocks, read from its text `css`; `sheet` is
- * what the findings call it (pageSheets.ts `sheetName`). With `site` —
- * the site's sheet at a variant's finalize — each is advisory, its fix
- * that clause instead. */
+ * what the findings call it (pageSheets.ts `sheetName`). Where `site`
+ * answers a clause for the refused block — one the site keeps at a
+ * variant's finalize — its finding is advisory, its fix that clause
+ * instead. */
 export function lintStrayDelimiters(
   css: string,
   blocks: readonly CssBlock[],
   sheet: string,
   findings: Finding[],
-  site: ((count?: number) => string) | null = null,
+  site: (block: CssBlock) => ((count?: number) => string) | null = () => null,
 ): void {
   const levels: { blocks: readonly CssBlock[]; at: number; within: string[] }[] = [
     { blocks, at: 0, within: [] },
@@ -700,7 +710,7 @@ export function lintStrayDelimiters(
       continue;
     }
     const label = refused(block)
-      ? strayFinding(css, block, level.within, sheet, findings, site)
+      ? strayFinding(css, block, level.within, sheet, findings, site(block))
       : block.prelude;
     if (block.children.length > 0) {
       levels.push({ blocks: block.children, at: 0, within: [...level.within, label] });
