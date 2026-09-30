@@ -4,9 +4,9 @@ import {
   type AppStore,
   type MountPluginOptions,
   type MountedPlugin,
-  createEmptyDocument,
   isDragActive,
   screenToWorld,
+  testProject,
 } from "@daydream/plugin-testing";
 import {
   beforeEach,
@@ -42,7 +42,7 @@ beforeEach(() => {
     spy.mockRestore();
     expect(stacks).toEqual([]);
   });
-  const kernel = createTestKernel({ document: createEmptyDocument() });
+  const kernel = createTestKernel({ project: testProject([]) });
   appStore = kernel.store;
   onTestFinished(() => kernel.dispose());
 });
@@ -54,7 +54,7 @@ function mountShell(
 }
 
 afterEach(() => {
-  appStore.loadDocument(createEmptyDocument(), { slug: null });
+  appStore.loadProject(testProject([]));
 });
 
 function canvasEl(host: HTMLElement): HTMLElement {
@@ -81,23 +81,20 @@ function inputText(editor: HTMLElement, text: string): void {
 describe("canvas text plugin", () => {
   test("command-driven editor switching commits the previous session without duplicate editors", async () => {
     const { host, kernel } = await mountShell({
-      document: {
-        version: 7,
-        items: [
-          {
-            id: "first",
-            kind: "mrbavio.text",
-            position: { x: 0, y: 0 },
-            payload: { text: "First" },
-          },
-          {
-            id: "second",
-            kind: "mrbavio.text",
-            position: { x: 0, y: 80 },
-            payload: { text: "Second" },
-          },
-        ],
-      },
+      project: testProject([
+        {
+          id: "first",
+          kind: "mrbavio.text",
+          position: { x: 0, y: 0 },
+          payload: { text: "First" },
+        },
+        {
+          id: "second",
+          kind: "mrbavio.text",
+          position: { x: 0, y: 80 },
+          payload: { text: "Second" },
+        },
+      ]),
     });
     appStore.setSelectedId("first");
     flush();
@@ -128,15 +125,13 @@ describe("canvas text plugin", () => {
     );
     flush();
     appStore.undo();
-    expect(appStore.document.items.map((item) => item.payload)).toEqual([
-      { text: "First changed" },
-      { text: "Second" },
-    ]);
+    expect(
+      appStore.document.canvases[0]!.items.map((item) => item.payload),
+    ).toEqual([{ text: "First changed" }, { text: "Second" }]);
     appStore.undo();
-    expect(appStore.document.items.map((item) => item.payload)).toEqual([
-      { text: "First" },
-      { text: "Second" },
-    ]);
+    expect(
+      appStore.document.canvases[0]!.items.map((item) => item.payload),
+    ).toEqual([{ text: "First" }, { text: "Second" }]);
   });
 
   test.each([false, true])(
@@ -190,7 +185,7 @@ describe("canvas text plugin", () => {
       );
       flush();
       expect(host.querySelector("[data-text-editor]")).toBeNull();
-      expect(appStore.document.items).toHaveLength(0);
+      expect(appStore.document.canvases[0]!.items).toHaveLength(0);
 
       // A subsequent non-moving press clears the one-shot suppression.
       pointer("pointerdown", 180, 1);
@@ -241,15 +236,15 @@ describe("canvas text plugin", () => {
       expect(editor).not.toBeNull();
       expect(document.activeElement).toBe(editor);
     });
-    expect(appStore.document.items).toHaveLength(0);
+    expect(appStore.document.canvases[0]!.items).toHaveLength(0);
 
     inputText(editor!, "Hello");
-    expect(appStore.document.items).toHaveLength(1);
+    expect(appStore.document.canvases[0]!.items).toHaveLength(1);
     // Longer than history's ordinary 500ms typing burst: the editor owns a
     // transaction, so this is still one canvas undo when committed.
     await new Promise((resolve) => setTimeout(resolve, 550));
     inputText(editor!, "Hello  world\n🌎");
-    const item = appStore.document.items[0]!;
+    const item = appStore.document.canvases[0]!.items[0]!;
     expect(item.kind).toBe("mrbavio.text");
     expect(item.payload).toEqual({ text: "Hello  world\n🌎" });
     expect(item.position.x).toBeCloseTo(expected.x, 4);
@@ -275,24 +270,20 @@ describe("canvas text plugin", () => {
 
     appStore.undo();
     flush();
-    expect(appStore.document.items).toHaveLength(0);
+    expect(appStore.document.canvases[0]!.items).toHaveLength(0);
     expect(appStore.canUndo()).toBe(false);
   });
 
   test("Enter edits the sole selected text at the end and Escape commits it as one undo step", async () => {
-    appStore.loadDocument(
-      {
-        version: 7,
-        items: [
-          {
-            id: "text-1",
-            kind: "mrbavio.text",
-            position: { x: 40, y: 50 },
-            payload: { text: "Original" },
-          },
-        ],
-      },
-      { slug: null },
+    appStore.loadProject(
+      testProject([
+        {
+          id: "text-1",
+          kind: "mrbavio.text",
+          position: { x: 40, y: 50 },
+          payload: { text: "Original" },
+        },
+      ]),
     );
     const { host } = await mountShell();
     const box = host.querySelector<HTMLElement>("[data-text-item]");
@@ -334,32 +325,30 @@ describe("canvas text plugin", () => {
     );
     flush();
     expect(host.querySelector("[data-text-editor]")).toBeNull();
-    expect(appStore.document.items[0]!.payload).toEqual({
+    expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
       text: "Changed after a pause",
     });
     expect(appStore.selectedItemIds()).toEqual(["text-1"]);
 
     appStore.undo();
     flush();
-    expect(appStore.document.items[0]!.payload).toEqual({ text: "Original" });
+    expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
+      text: "Original",
+    });
     expect(appStore.canUndo()).toBe(false);
   });
 
   test("text uses ordinary resize handles, clamps to 1rem, hides handles while editing, and double-click resets natural sizing", async () => {
-    appStore.loadDocument(
-      {
-        version: 7,
-        items: [
-          {
-            id: "text-1",
-            kind: "mrbavio.text",
-            position: { x: 40, y: 50 },
-            frame: { width: 120, height: 40 },
-            payload: { text: "A long line that wraps in a narrow frame" },
-          },
-        ],
-      },
-      { slug: null },
+    appStore.loadProject(
+      testProject([
+        {
+          id: "text-1",
+          kind: "mrbavio.text",
+          position: { x: 40, y: 50 },
+          frame: { width: 120, height: 40 },
+          payload: { text: "A long line that wraps in a narrow frame" },
+        },
+      ]),
     );
     const { host } = await mountShell();
     const box = host.querySelector<HTMLElement>("[data-text-item]")!;
@@ -396,7 +385,7 @@ describe("canvas text plugin", () => {
       }),
     );
     flush();
-    expect(appStore.document.items[0]!.frame?.width).toBe(16);
+    expect(appStore.document.canvases[0]!.items[0]!.frame?.width).toBe(16);
 
     const grownRight = host.querySelector<HTMLElement>(
       '[data-item-resize="edgeRight"]',
@@ -427,7 +416,9 @@ describe("canvas text plugin", () => {
       }),
     );
     flush();
-    expect(appStore.document.items[0]!.frame?.width).toBeGreaterThan(6_000);
+    expect(
+      appStore.document.canvases[0]!.items[0]!.frame?.width,
+    ).toBeGreaterThan(6_000);
 
     box.dispatchEvent(
       new MouseEvent("dblclick", {
@@ -456,7 +447,7 @@ describe("canvas text plugin", () => {
       new MouseEvent("dblclick", { bubbles: true, cancelable: true }),
     );
     flush();
-    expect(appStore.document.items[0]!.frame).toBeUndefined();
+    expect(appStore.document.canvases[0]!.items[0]!.frame).toBeUndefined();
   });
 
   test("long clipboard text wraps at 60ch and stays centered with all content intact", async () => {
@@ -473,7 +464,7 @@ describe("canvas text plugin", () => {
       }),
     );
     flush();
-    const item = appStore.document.items[0]!;
+    const item = appStore.document.canvases[0]!.items[0]!;
     const natural = measureNaturalTextItem("0".repeat(60))!;
     expect(item.frame?.width).toBeLessThanOrEqual(natural.width);
     expect(item.frame?.height).toBeUndefined();
@@ -492,7 +483,7 @@ describe("canvas text plugin", () => {
       2,
     );
     appStore.undo();
-    expect(appStore.document.items).toHaveLength(0);
+    expect(appStore.document.canvases[0]!.items).toHaveLength(0);
   });
 
   test("plain-text paste outside editors centers auto-width items, cascades repeats, resets after canvas interaction, and undoes one paste at a time", async () => {
@@ -515,13 +506,13 @@ describe("canvas text plugin", () => {
 
     const firstPaste = paste("first  line\n第二行");
     expect(firstPaste.defaultPrevented).toBe(true);
-    expect(appStore.document.items).toHaveLength(1);
-    expect(appStore.document.items[0]!.frame).toBeUndefined();
-    expect(appStore.document.items[0]!.payload).toEqual({
+    expect(appStore.document.canvases[0]!.items).toHaveLength(1);
+    expect(appStore.document.canvases[0]!.items[0]!.frame).toBeUndefined();
+    expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
       text: "first  line\n第二行",
     });
     expect(appStore.selectedItemIds()).toEqual([
-      appStore.document.items[0]!.id,
+      appStore.document.canvases[0]!.items[0]!.id,
     ]);
     expect(host.querySelector("[data-text-editor]")).toBeNull();
     const first = host
@@ -573,10 +564,10 @@ describe("canvas text plugin", () => {
 
     appStore.undo();
     flush();
-    expect(appStore.document.items).toHaveLength(2);
+    expect(appStore.document.canvases[0]!.items).toHaveLength(2);
     appStore.undo();
     flush();
-    expect(appStore.document.items).toHaveLength(1);
+    expect(appStore.document.canvases[0]!.items).toHaveLength(1);
 
     paste("after undo");
     const afterUndo = host
@@ -591,7 +582,7 @@ describe("canvas text plugin", () => {
       1,
     );
 
-    appStore.loadDocument(createEmptyDocument(), { slug: "loaded" });
+    appStore.loadProject(testProject([]));
     flush();
     paste("after load");
     const afterLoad = host
@@ -616,7 +607,7 @@ describe("canvas text plugin", () => {
     window.dispatchEvent(empty);
     flush();
     expect(empty.defaultPrevented).toBe(false);
-    expect(appStore.document.items).toHaveLength(1);
+    expect(appStore.document.canvases[0]!.items).toHaveLength(1);
 
     const pluginEditor = document.createElement("div");
     pluginEditor.dataset["ddEditable"] = "";
@@ -633,7 +624,7 @@ describe("canvas text plugin", () => {
     pluginEditor.dispatchEvent(nativePaste);
     flush();
     expect(nativePaste.defaultPrevented).toBe(false);
-    expect(appStore.document.items).toHaveLength(1);
+    expect(appStore.document.canvases[0]!.items).toHaveLength(1);
 
     pluginEditor.blur();
     const alreadyHandled = new ClipboardEvent("paste", {
@@ -644,23 +635,19 @@ describe("canvas text plugin", () => {
     alreadyHandled.preventDefault();
     window.dispatchEvent(alreadyHandled);
     flush();
-    expect(appStore.document.items).toHaveLength(1);
+    expect(appStore.document.canvases[0]!.items).toHaveLength(1);
   });
 
   test("an unrelated document mutation finalizes editing first and remains a separate undo step", async () => {
-    appStore.loadDocument(
-      {
-        version: 7,
-        items: [
-          {
-            id: "text-1",
-            kind: "mrbavio.text",
-            position: { x: 40, y: 50 },
-            payload: { text: "Original" },
-          },
-        ],
-      },
-      { slug: null },
+    appStore.loadProject(
+      testProject([
+        {
+          id: "text-1",
+          kind: "mrbavio.text",
+          position: { x: 40, y: 50 },
+          payload: { text: "Original" },
+        },
+      ]),
     );
     const { host } = await mountShell();
     const box = host.querySelector<HTMLElement>("[data-text-item]")!;
@@ -682,9 +669,9 @@ describe("canvas text plugin", () => {
     });
     inputText(editor!, "Edited");
 
-    // This is the same public write path an ingest/agent landing uses.
+    // Another writer's document mutation: an agent's update_item, say.
     appStore.setDocument((doc) => {
-      doc.items.push({
+      doc.canvases[0]!.items.push({
         id: "agent-item",
         kind: "example.agent",
         position: { x: 300, y: 200 },
@@ -693,34 +680,35 @@ describe("canvas text plugin", () => {
     });
     flush();
     expect(host.querySelector("[data-text-editor]")).toBeNull();
-    expect(appStore.document.items.map((item) => item.id)).toEqual([
-      "text-1",
-      "agent-item",
-    ]);
+    expect(appStore.document.canvases[0]!.items.map((item) => item.id)).toEqual(
+      ["text-1", "agent-item"],
+    );
 
     appStore.undo();
     flush();
-    expect(appStore.document.items.map((item) => item.id)).toEqual(["text-1"]);
-    expect(appStore.document.items[0]!.payload).toEqual({ text: "Edited" });
+    expect(appStore.document.canvases[0]!.items.map((item) => item.id)).toEqual(
+      ["text-1"],
+    );
+    expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
+      text: "Edited",
+    });
     appStore.undo();
     flush();
-    expect(appStore.document.items[0]!.payload).toEqual({ text: "Original" });
+    expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
+      text: "Original",
+    });
   });
 
   test("loading another document invalidates an edit session, and later edits commit against that session's fresh value", async () => {
-    appStore.loadDocument(
-      {
-        version: 7,
-        items: [
-          {
-            id: "text-1",
-            kind: "mrbavio.text",
-            position: { x: 0, y: 0 },
-            payload: { text: "First" },
-          },
-        ],
-      },
-      { slug: "first" },
+    appStore.loadProject(
+      testProject([
+        {
+          id: "text-1",
+          kind: "mrbavio.text",
+          position: { x: 0, y: 0 },
+          payload: { text: "First" },
+        },
+      ]),
     );
     const { host } = await mountShell();
     const begin = async (): Promise<HTMLElement> => {
@@ -746,23 +734,19 @@ describe("canvas text plugin", () => {
 
     const firstEditor = await begin();
     inputText(firstEditor, "Uncommitted");
-    appStore.loadDocument(
-      {
-        version: 7,
-        items: [
-          {
-            id: "text-2",
-            kind: "mrbavio.text",
-            position: { x: 10, y: 10 },
-            payload: { text: "Loaded" },
-          },
-        ],
-      },
-      { slug: "second" },
+    appStore.loadProject(
+      testProject([
+        {
+          id: "text-2",
+          kind: "mrbavio.text",
+          position: { x: 10, y: 10 },
+          payload: { text: "Loaded" },
+        },
+      ]),
     );
     flush();
     expect(host.querySelector("[data-text-editor]")).toBeNull();
-    expect(appStore.document.items[0]!.id).toBe("text-2");
+    expect(appStore.document.canvases[0]!.items[0]!.id).toBe("text-2");
     expect(appStore.canUndo()).toBe(false);
 
     const secondEditor = await begin();
@@ -786,26 +770,22 @@ describe("canvas text plugin", () => {
       }),
     );
     flush();
-    expect(appStore.document.items[0]!.payload).toEqual({
+    expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
       text: "Escaped, not discarded",
     });
   });
 
-  test("the pre-landing measurement seam matches the mounted natural text box", async () => {
+  test("the paste's measurement seam matches the mounted natural text box", async () => {
     const text = "Measured  text\n🌎";
-    appStore.loadDocument(
-      {
-        version: 7,
-        items: [
-          {
-            id: "text-1",
-            kind: "mrbavio.text",
-            position: { x: 0, y: 0 },
-            payload: { text },
-          },
-        ],
-      },
-      { slug: null },
+    appStore.loadProject(
+      testProject([
+        {
+          id: "text-1",
+          kind: "mrbavio.text",
+          position: { x: 0, y: 0 },
+          payload: { text },
+        },
+      ]),
     );
     const { host } = await mountShell();
     const measured = measureNaturalTextItem(text);
@@ -816,19 +796,15 @@ describe("canvas text plugin", () => {
   });
 
   test("unmounting a text item disposes its active drag without mutating the loaded document", async () => {
-    appStore.loadDocument(
-      {
-        version: 7,
-        items: [
-          {
-            id: "old-text",
-            kind: "mrbavio.text",
-            position: { x: 40, y: 50 },
-            payload: { text: "Old" },
-          },
-        ],
-      },
-      { slug: "old" },
+    appStore.loadProject(
+      testProject([
+        {
+          id: "old-text",
+          kind: "mrbavio.text",
+          position: { x: 40, y: 50 },
+          payload: { text: "Old" },
+        },
+      ]),
     );
     const { host } = await mountShell();
     const box = host.querySelector<HTMLElement>("[data-text-item]")!;
@@ -846,24 +822,23 @@ describe("canvas text plugin", () => {
     );
     expect(isDragActive()).toBe(true);
 
-    appStore.loadDocument(
-      {
-        version: 7,
-        items: [
-          {
-            id: "new-text",
-            kind: "mrbavio.text",
-            position: { x: 700, y: 800 },
-            payload: { text: "New" },
-          },
-        ],
-      },
-      { slug: "new" },
+    appStore.loadProject(
+      testProject([
+        {
+          id: "new-text",
+          kind: "mrbavio.text",
+          position: { x: 700, y: 800 },
+          payload: { text: "New" },
+        },
+      ]),
     );
     flush();
     expect(isDragActive()).toBe(false);
-    expect(appStore.document.items[0]!.id).toBe("new-text");
-    expect(appStore.document.items[0]!.position).toEqual({ x: 700, y: 800 });
+    expect(appStore.document.canvases[0]!.items[0]!.id).toBe("new-text");
+    expect(appStore.document.canvases[0]!.items[0]!.position).toEqual({
+      x: 700,
+      y: 800,
+    });
     expect(appStore.canUndo()).toBe(false);
   });
 });

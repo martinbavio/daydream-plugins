@@ -4,7 +4,7 @@ import {
   type AppStore,
   type MountPluginOptions,
   type MountedPlugin,
-  createEmptyDocument,
+  testProject,
 } from "@daydream/plugin-testing";
 import {
   afterEach,
@@ -18,11 +18,11 @@ import { flush } from "solid-js";
 
 import activate from "./index";
 import manifest from "./manifest.json";
-import type { DreamDocument } from "@daydream/plugin-api";
+import type { DreamItem } from "@daydream/plugin-api";
 
 let appStore: AppStore;
 beforeEach(() => {
-  const kernel = createTestKernel({ document: createEmptyDocument() });
+  const kernel = createTestKernel({ project: testProject([]) });
   appStore = kernel.store;
   onTestFinished(() => kernel.dispose());
 });
@@ -36,33 +36,27 @@ function mountShell(
 beforeEach(() => window.getSelection()?.removeAllRanges());
 
 afterEach(() => {
-  appStore.loadDocument(createEmptyDocument(), { slug: null });
+  appStore.loadProject(testProject([]));
 });
 
-const textDocument = (): DreamDocument => ({
-  version: 7,
-  items: [
-    {
-      id: "text-1",
-      kind: "mrbavio.text",
-      position: { x: 24, y: 32 },
-      payload: { text: "Hello\nworld 🌎" },
-    },
-  ],
-});
+const textItems = (): DreamItem[] => [
+  {
+    id: "text-1",
+    kind: "mrbavio.text",
+    position: { x: 24, y: 32 },
+    payload: { text: "Hello\nworld 🌎" },
+  },
+];
 
-const twoItemDocument = (): DreamDocument => ({
-  version: 7,
-  items: [
-    ...textDocument().items,
-    {
-      id: "text-2",
-      kind: "mrbavio.text",
-      position: { x: 80, y: 96 },
-      payload: { text: "Second" },
-    },
-  ],
-});
+const twoItems = (): DreamItem[] => [
+  ...textItems(),
+  {
+    id: "text-2",
+    kind: "mrbavio.text",
+    position: { x: 80, y: 96 },
+    payload: { text: "Second" },
+  },
+];
 
 function copy(target: EventTarget): {
   event: ClipboardEvent;
@@ -80,7 +74,7 @@ function copy(target: EventTarget): {
 
 describe("copying a canvas text item", () => {
   test("one selected text item copies its complete plain text", async () => {
-    await mountShell({ document: textDocument() });
+    await mountShell({ project: testProject(textItems()) });
     appStore.setItemSelection(["text-1"]);
     flush();
 
@@ -92,7 +86,7 @@ describe("copying a canvas text item", () => {
   });
 
   test("an active editor retains native copy behavior", async () => {
-    const { host } = await mountShell({ document: textDocument() });
+    const { host } = await mountShell({ project: testProject(textItems()) });
     appStore.setItemSelection(["text-1"]);
     flush();
     const editor = document.createElement("textarea");
@@ -108,7 +102,7 @@ describe("copying a canvas text item", () => {
   });
 
   test("a multi-item selection is left for a future structured clipboard", async () => {
-    await mountShell({ document: twoItemDocument() });
+    await mountShell({ project: testProject(twoItems()) });
     appStore.setItemSelection(["text-1", "text-2"]);
     flush();
 
@@ -119,7 +113,7 @@ describe("copying a canvas text item", () => {
   });
 
   test("copy inside a plugin editor keeps its native clipboard behavior", async () => {
-    const { host } = await mountShell({ document: textDocument() });
+    const { host } = await mountShell({ project: testProject(textItems()) });
     appStore.setItemSelection(["text-1"]);
     flush();
     const editor = document.createElement("div");
@@ -137,7 +131,7 @@ describe("copying a canvas text item", () => {
   });
 
   test("copy adds no undo step and stops intercepting after the shell unmounts", async () => {
-    const mounted = await mountShell({ document: textDocument() });
+    const mounted = await mountShell({ project: testProject(textItems()) });
     appStore.setItemSelection(["text-1"]);
     flush();
     copy(document.body);

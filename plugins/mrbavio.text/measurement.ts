@@ -14,7 +14,7 @@ export function measureNaturalTextItem(
   return measureText(text, frame, undefined, fontSize);
 }
 
-/** An ingest/paste creation default, not a permanent resize limit. */
+/** A paste's creation default, not a permanent resize limit. */
 export function measureInitialTextFrame(
   text: string,
   fontSize?: number,

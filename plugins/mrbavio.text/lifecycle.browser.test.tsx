@@ -1,8 +1,4 @@
-import {
-  createEmptyDocument,
-  flush,
-  mountPlugin,
-} from "@daydream/plugin-testing";
+import { flush, testProject, mountPlugin } from "@daydream/plugin-testing";
 import { expect, test } from "vitest";
 
 import activate from "./index";
@@ -22,18 +18,19 @@ function elementWithClass(host: HTMLElement, prefix: string): HTMLElement {
 test.each([false, true])(
   "startup centers the activated text renderer, not its temporary placeholder (width-only frame: %s)",
   async (framed) => {
-    const doc = createEmptyDocument();
-    doc.items.push({
-      id: "annotation",
-      kind: "mrbavio.text",
-      position: { x: 125, y: 450 },
-      ...(framed ? { frame: { width: 340 } } : {}),
-      payload: { text: "A short annotation", fontSize: 28 },
-    });
+    const project = testProject([
+      {
+        id: "annotation",
+        kind: "mrbavio.text",
+        position: { x: 125, y: 450 },
+        ...(framed ? { frame: { width: 340 } } : {}),
+        payload: { text: "A short annotation", fontSize: 28 },
+      },
+    ]);
     const mounted = await mountPlugin({
       entry: activate,
       manifest,
-      document: doc,
+      project,
     });
     const canvas = elementWithClass(
       mounted.host,
@@ -58,17 +55,18 @@ test.each([false, true])(
 test.each([null, { text: 17 }, { text: "Dormant", fontSize: "huge" }])(
   "malformed dormant text stays an inert placeholder after activation: %j",
   async (payload) => {
-    const doc = createEmptyDocument();
-    doc.items.push({
-      id: "dormant",
-      kind: "mrbavio.text",
-      position: { x: 0, y: 0 },
-      payload,
-    });
+    const project = testProject([
+      {
+        id: "dormant",
+        kind: "mrbavio.text",
+        position: { x: 0, y: 0 },
+        payload,
+      },
+    ]);
     const mounted = await mountPlugin({
       entry: activate,
       manifest,
-      document: doc,
+      project,
     });
     const { host, store } = mounted;
     store.setSelectedId("dormant");
@@ -106,18 +104,19 @@ test.each([null, { text: 17 }, { text: "Dormant", fontSize: "huge" }])(
 );
 
 test("disabling text keeps its data, removes interactions and styles, and re-enabling restores it", async () => {
-  const doc = createEmptyDocument();
-  doc.items.push({
-    id: "annotation",
-    kind: "mrbavio.text",
-    position: { x: 12, y: 24 },
-    frame: { width: 340 },
-    payload: { text: "Keep this annotation", fontSize: 28 },
-  });
+  const project = testProject([
+    {
+      id: "annotation",
+      kind: "mrbavio.text",
+      position: { x: 12, y: 24 },
+      frame: { width: 340 },
+      payload: { text: "Keep this annotation", fontSize: 28 },
+    },
+  ]);
   const mounted = await mountPlugin({
     entry: activate,
     manifest,
-    document: doc,
+    project,
   });
   const { host, store, pluginHost } = mounted;
   store.setSelectedId("annotation");
@@ -136,7 +135,9 @@ test("disabling text keeps its data, removes interactions and styles, and re-ena
   ).toContain("mrbavio.text");
   // The kind's CSS lived in the item root the kernel mounted (decision
   // #71); with the plugin gone, so is every sheet of its.
-  expect(document.querySelector('[data-plugin-item="mrbavio.text"]')).toBeNull();
+  expect(
+    document.querySelector('[data-plugin-item="mrbavio.text"]'),
+  ).toBeNull();
   expect(JSON.stringify(store.document)).toBe(before);
 
   const clipboardData = new DataTransfer();
@@ -180,17 +181,18 @@ test("disabling text keeps its data, removes interactions and styles, and re-ena
 });
 
 test("unloading during an editor session cancels its draft without losing the committed text", async () => {
-  const doc = createEmptyDocument();
-  doc.items.push({
-    id: "annotation",
-    kind: "mrbavio.text",
-    position: { x: 0, y: 0 },
-    payload: { text: "Committed" },
-  });
+  const project = testProject([
+    {
+      id: "annotation",
+      kind: "mrbavio.text",
+      position: { x: 0, y: 0 },
+      payload: { text: "Committed" },
+    },
+  ]);
   const mounted = await mountPlugin({
     entry: activate,
     manifest,
-    document: doc,
+    project,
   });
   mounted.host
     .querySelector("[data-text-item]")!
@@ -203,12 +205,12 @@ test("unloading during an editor session cancels its draft without losing the co
     new InputEvent("input", { bubbles: true, inputType: "insertText" }),
   );
   flush();
-  expect(mounted.store.document.items[0]!.payload).toEqual({
+  expect(mounted.store.document.canvases[0]!.items[0]!.payload).toEqual({
     text: "Uncommitted",
   });
   mounted.pluginHost.deactivate("mrbavio.text");
   flush();
-  expect(mounted.store.document.items[0]!.payload).toEqual({
+  expect(mounted.store.document.canvases[0]!.items[0]!.payload).toEqual({
     text: "Committed",
   });
   expect(mounted.host.querySelector("[data-text-editor]")).toBeNull();

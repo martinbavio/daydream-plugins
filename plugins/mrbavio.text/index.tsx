@@ -4,8 +4,7 @@ import { createSignal, Show } from "solid-js";
 import { registerClipboard } from "./clipboard";
 import { registerTextCommands } from "./commands";
 import { createTextEditing } from "./editing";
-import { measureInitialTextFrame, measureNaturalTextItem } from "./measurement";
-import { isTextItem, TEXT_KIND, textOf, textPayloadProblem } from "./model";
+import { TEXT_KIND, textOf, textPayloadProblem } from "./model";
 import { textStyles } from "./styles";
 import TextItemView from "./TextItem";
 
@@ -32,22 +31,6 @@ export default function activate(dd: DaydreamApi): void {
         <TextItemView dd={dd} editing={editing} item={props.item} />
       </Show>
     ),
-    prepare: (item) => {
-      if (item.frame !== undefined || !isTextItem(item)) return;
-      const frame = measureInitialTextFrame(
-        item.payload.text,
-        item.payload.fontSize,
-      );
-      if (frame !== undefined) item.frame = frame;
-    },
-    measure: (item) =>
-      isTextItem(item)
-        ? measureNaturalTextItem(
-            item.payload.text,
-            item.frame,
-            item.payload.fontSize,
-          )
-        : null,
     describe: textOf,
     title: false,
     resize: { min: 16, max: Number.POSITIVE_INFINITY, reset: true },
