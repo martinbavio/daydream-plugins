@@ -1,8 +1,8 @@
 {
   "id": "mrbavio.grid",
   "name": "Grid overlay",
-  "version": "0.1.3",
-  "minCore": "0.1.39",
+  "version": "0.1.4",
+  "minCore": "0.1.44",
   "contributes": {
     "overlays": [
       "grid"
