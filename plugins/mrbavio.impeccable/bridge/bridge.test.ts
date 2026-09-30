@@ -9,8 +9,7 @@ import type {
   HostToolRegistration,
 } from "@daydream/plugin-api/host";
 
-import activate, { DETECT_TOOL, instructionsText, SESSION_TOOL, VERB_TOOL, watchCommand } from "../bridge.ts";
-import { parseVariantMarker } from "../variants.ts";
+import activate, { DETECT_TOOL, instructionsText, NO_PROJECT, SESSION_TOOL, VERB_TOOL, watchCommand } from "../bridge.ts";
 import manifest from "../manifest.json" with { type: "json" };
 import { candidateSkillDirs, findSkillDir, SKILL_MISSING, skillVersion } from "./skill.ts";
 import {
@@ -27,6 +26,7 @@ type Build = (args: Record<string, string | undefined>) => Promise<string>;
 
 function fakeHost(
   state: unknown | Error,
+  dataFile: string | null = "/served/.daydream/plugin-data/mrbavio.impeccable.json",
 ): {
   host: DaydreamHostApi;
   prompts: HostPromptRegistration[];
@@ -40,7 +40,7 @@ function fakeHost(
     plugin: {
       id: manifest.id,
       dir: "/nowhere",
-      dataFile: "/served/.daydream/plugin-data/mrbavio.impeccable.json",
+      dataFile,
       manifest: manifest as DaydreamHostApi["plugin"]["manifest"],
     },
     registerTool: (t) => void tools.push(t as HostToolRegistration),
@@ -64,19 +64,19 @@ function fakeHost(
 
 const pricing = {
   id: "vp_pricing",
-  title: "Pricing",
+  page: "pricing.html",
   frame: { width: 960, height: 600 },
   position: { x: 100, y: 40 },
 };
 const docs = {
   id: "vp_docs",
-  title: null,
+  page: "docs/index.html",
   frame: { width: 720 },
   position: { x: 0, y: 900 },
 };
 
 const state = (selection: StateSlice["selection"], viewports = [pricing, docs]) => ({
-  document: { slug: "site", title: "Site" },
+  project: { name: "site", title: "Site" },
   items: [],
   viewports,
   selection,
@@ -129,26 +129,31 @@ describe("impeccable host part", () => {
     expect(text.startsWith("# Impeccable: bolder (Impeccable 9.9.9)")).toBe(true);
     // The element is named by the selector canvas_state answers for it
     // (decision #76), never by the canvas's render-time id.
-    expect(text).toContain('TARGET: the element `.card` (a CSS selector naming it alone) inside viewport `vp_pricing` ("Pricing", 960×600, at 100, 40)');
+    expect(text).toContain("TARGET: the element `.card` (a CSS selector naming it alone) inside viewport `vp_pricing` (the page `pricing.html`, 960×600, at 100, 40)");
     expect(text).toContain('get_viewport {id: "vp_pricing", element: ".card"}');
     expect(text).not.toContain("el_card");
-    expect(text).toContain("The rules that style it are in the page's one stylesheet");
+    expect(text).toContain("The rules that style it are in the page's sheets");
     expect(text).toContain("Read THE TARGET, not the page");
     // Variants land beside the source, one frame plus a gap apart.
     expect(text).toContain("3 VARIANTS");
     expect(text).toContain("1 at {x: 1108, y: 40}, 2 at {x: 2116, y: 40}, 3 at {x: 3124, y: 40}");
-    expect(text).toContain('"Pricing · bolder n/3"');
-    // The notes marker the canvas reads back, as the adopt command parses it.
-    // Each run of the verb is a round of its own, named on the line: a
-    // second run over the same source is another round, which adopting
-    // from the first leaves alone.
-    const round = /`Impeccable bolder · variant n of 3 of vp_pricing · round ([a-z0-9]+)`/.exec(text)?.[1];
-    expect(round).toMatch(/^[a-z0-9]{6}$/);
-    const again = await (bolder.build as Build)({});
-    expect(again).toMatch(/`Impeccable bolder · variant n of 3 of vp_pricing · round [a-z0-9]+`/);
-    expect(again).not.toContain(`· round ${round}`);
-    expect(parseVariantMarker(`Impeccable bolder · variant 2 of 3 of vp_pricing · round ${round}\n\nA denser card.`)).toEqual({ verb: "bolder", n: 2, of: 3, sourceId: "vp_pricing", round });
+    // Each copy is titled for the user to tell apart, from its page's path
+    // (a viewport has no title of its own, decision #78); the notes carry
+    // its direction and no marker, since nothing reads one back.
+    expect(text).toContain('meta: {title: "pricing.html · bolder n/3", notes: <the direction>}');
+    expect(text).not.toContain("Impeccable bolder · variant");
+    expect(text).not.toContain("· round ");
     expect(text).not.toContain("draft_open {from:");
+    // No draft lands in this release: the copies stay drafts, the agent
+    // is told never to finalize and to say so, and nothing promises an
+    // adopt.
+    expect(text).toContain("THEY STAY DRAFTS");
+    expect(text).toContain("never call draft_finalize");
+    expect(text).not.toMatch(/draft_finalize (IMMEDIATELY|lands)/);
+    expect(text).not.toContain("adopt (");
+    expect(text).toContain("tell the user the copies stay on the canvas as drafts to compare");
+    expect(text).toContain("you write its direction into `pricing.html` with your file tools");
+    expect(text).toContain("then draft_discard every copy of the round and reload the canvas tab");
     // A variant is a copy of the source's page, then its target's markup
     // replaced by selector and its rules edited by text (decision #76),
     // fanned out to sub-agents where the harness has them.
@@ -157,25 +162,31 @@ describe("impeccable host part", () => {
     expect(text).toContain("the copy is the source's text, so it names the same element");
     expect(text).toContain("draft_replace {draft, token, target: <the target's selector");
     expect(text).toContain("html: <the target's markup rewritten for that direction>");
-    expect(text).toContain("draft_edit {draft, token, css: {old, new}}");
+    // A copy's css starts empty and applies after the page's sheets: a
+    // rule is overridden there, or edited in a `<style>` block of the
+    // markup — never edited in the draft's css, which holds none of the
+    // page's.
+    expect(text).toContain("The draft's css starts empty and applies after the page's own sheets");
     expect(text).toContain("draft_append {draft, token, css}");
-    expect(text).toContain("draft_finalize IMMEDIATELY");
-    expect(text).toContain("Never hold finalizes for the end");
+    expect(text).toContain("draft_edit {draft, token, html: {old, new}}");
+    expect(text).not.toContain("css: {old, new}");
+    expect(text).toContain("and stop there: no finalize");
     expect(text).toContain("THE TARGET'S MARKUP AND THE CSS RULES THAT STYLE IT");
     expect(text).toContain("a fast model handles well");
     // The page is HTML and CSS whole: nothing the tree lacked is ruled out.
     expect(text).toContain("`@keyframes` and `animation`");
-    expect(text).toContain("What would run is removed at landing");
-    expect(text).toContain("an `@font-face` rule in the css");
+    expect(text).toContain("What would run is never rendered");
+    expect(text).not.toContain("landing");
+    expect(text).toContain("an `@font-face` rule in a sheet");
     expect(text).not.toContain("There is NO `@keyframes`");
     expect(text).not.toContain("`styles` map");
     expect(text).not.toContain("JSON");
-    expect(text).toContain("do not search one");
+    expect(text).toContain("do not search it");
     expect(text).toContain("IN PARALLEL");
     expect(text).toContain("(c) Write the target rewritten");
     expect(text).toContain("THE VERY FIRST CALL");
     expect(text).toContain("Give each sub-agent THIS SCRIPT");
-    expect(text).toContain("never send the whole page");
+    expect(text).toContain("Never send the whole page");
     // Then Impeccable's own text, verbatim, in order.
     const playbook = text.indexOf("# Impeccable's playbook: bolder");
     const floor = text.indexOf("# Impeccable's craft floor");
@@ -193,11 +204,7 @@ describe("impeccable host part", () => {
     const run = tools[0]!.run as (args: Record<string, string | undefined>) => Promise<{ text: string; isError?: boolean }>;
     const viaTool = await run({ verb: "quieter", brief: "less shouty" });
     const viaPrompt = await (prompts.find((p) => p.name === "impeccable-quieter")!.build as Build)({ brief: "less shouty" });
-    // The same text but for the round id: each run of the verb is a round
-    // of its own.
-    const sameRound = (text: string) => text.replace(/ · round [a-z0-9]+`/g, " · round <id>`");
-    expect(sameRound(viaTool.text)).toBe(sameRound(viaPrompt));
-    expect(viaTool.text).not.toBe(viaPrompt);
+    expect(viaTool.text).toBe(viaPrompt);
     expect(viaTool.isError).toBe(false);
     expect(viaTool.text).toContain("# Impeccable: quieter");
     // The verb is an enum of the same list the prompts cover.
@@ -205,26 +212,23 @@ describe("impeccable host part", () => {
     expect(verb.options).toEqual(VERBS.map((v) => v.verb));
   });
 
-  test("a pick's round is the round: every call given it — a retry too — writes it on the marker, and the tool and the session say to pass it", async () => {
-    const { host, tools, prompts } = fakeHost(
+  test("the verb takes a pick's viewport, element and brief, and no round: the tool and the session say so", async () => {
+    const { host, tools } = fakeHost(
       state({ elementId: "el_card", viewportId: "vp_pricing", itemIds: [], selector: ".card" }),
     );
     await activate(host);
     const verb = tools.find((t) => t.name === VERB_TOOL)!;
-    const run = verb.run as (args: Record<string, string | undefined>) => Promise<{ text: string }>;
-    const marker = "`Impeccable bolder · variant n of 3 of vp_pricing · round k3x9q2`";
-    expect((await run({ verb: "bolder", round: "k3x9q2" })).text).toContain(marker);
-    expect((await run({ verb: "bolder", round: "k3x9q2" })).text).toContain(marker);
-    const bolder = prompts.find((p) => p.name === "impeccable-bolder")!;
-    expect(await (bolder.build as Build)({ round: "k3x9q2" })).toContain(marker);
-    // Only a round a marker can carry.
-    const schema = verb.inputSchema as unknown as { round: { safeParse(v: unknown): { success: boolean } } };
-    expect(schema.round.safeParse("k3x9q2").success).toBe(true);
-    expect(schema.round.safeParse("Not one").success).toBe(false);
-    expect(verb.description).toContain("the pick's viewport, element and round");
+    expect(Object.keys(verb.inputSchema)).toEqual(["verb", "viewport", "element", "brief", "variants"]);
+    expect(verb.description).toContain("After a canvas pick, pass the pick's viewport and element.");
+    expect(verb.description).toContain("which stay drafts for the user to compare");
+    expect(verb.description).toContain("written into the page's files");
+    expect(verb.description).not.toMatch(/\bland/);
     const session = tools.find((t) => t.name === SESSION_TOOL)!;
     const { text } = await (session.run as () => Promise<{ text: string }>)();
-    expect(text).toContain("impeccable_verb {verb, viewport, element, brief, round}");
+    expect(text).toContain("impeccable_verb {verb, viewport, element, brief}");
+    expect(text).not.toContain("round}");
+    expect(text).toContain("nothing adopts one yet");
+    expect(text).not.toMatch(/\badopts? a variant from the canvas/);
   });
 
   test("a selected viewport item is the whole page; an in-place verb reworks it as an edit draft", async () => {
@@ -237,10 +241,19 @@ describe("impeccable host part", () => {
     expect(text).toContain("TARGET: the whole page of viewport `vp_pricing`");
     expect(text).toContain('draft_open {from: "vp_pricing"}');
     expect(text).toContain("IN PLACE");
-    // Reworked by selector and by exact text, not resent whole.
+    // Previewed by selector and by exact text, not resent whole.
     expect(text).toContain("draft_replace {draft, token, target: <its selector>, html: <its reworked markup>}");
-    expect(text).toContain("draft_edit {draft, token, css: {old, new}}");
-    expect(text).toContain("never the whole css resent");
+    expect(text).toContain("The draft's css starts empty and applies after the page's own sheets");
+    expect(text).toContain("draft_edit {draft, token, html: {old, new}}");
+    expect(text).toContain("never the whole page resent");
+    // Then written into the page's own files, the draft discarded and the
+    // tab reloaded, as the core guide has a page written (decision #78):
+    // never a finalize, which writes nothing in this release.
+    expect(text).toContain("Write the same change into the project with your file tools: the markup into `pricing.html`");
+    expect(text).toContain("never call draft_finalize");
+    expect(text).not.toContain("draft_finalize lands");
+    expect(text).toContain('draft_discard the draft, reload the canvas tab, and lint {viewportIds: ["vp_pricing"]}');
+    expect(text).toContain("Then impeccable_done.");
     expect(text).not.toContain("root's styles");
     expect(text).not.toContain("VARIANTS");
     expect(text).toContain("THE USER'S BRIEF (it wins over the playbook's defaults): the footer feels crowded");
@@ -268,12 +281,12 @@ describe("impeccable host part", () => {
     await activate(host);
     const typeset = prompts.find((p) => p.name === "impeccable-typeset")!;
     const text = await (typeset.build as Build)({ viewport: "vp_docs", element: 'h1[data-role="title"]', variants: "2" });
-    expect(text).toContain('TARGET: the element `h1[data-role="title"]` (a CSS selector naming it alone) inside viewport `vp_docs` (untitled, 720 wide, at 0, 900)');
+    expect(text).toContain('TARGET: the element `h1[data-role="title"]` (a CSS selector naming it alone) inside viewport `vp_docs` (the page `docs/index.html`, 720 wide, at 0, 900)');
     // A selector with quotes in it reaches the call as valid JSON.
     expect(text).toContain('get_viewport {id: "vp_docs", element: "h1[data-role=\\"title\\"]"}');
     expect(text).toContain("2 VARIANTS");
     expect(text).toContain("1 at {x: 768, y: 900}, 2 at {x: 1536, y: 900}");
-    expect(text).toContain('"Untitled · typeset n/2"');
+    expect(text).toContain('"docs/index.html · typeset n/2"');
     expect(variantCount("0")).toBe(3);
     expect(variantCount("7")).toBe(3);
     expect(variantCount("x")).toBe(3);
@@ -354,6 +367,14 @@ describe("impeccable host part", () => {
     expect(text).toContain("impeccable_done");
   });
 
+  test("impeccable_session with no project open answers that there is nothing to watch", async () => {
+    const { host, tools } = fakeHost(state(null), null);
+    await activate(host);
+    const session = tools.find((t) => t.name === SESSION_TOOL)!;
+    expect(await (session.run as () => Promise<unknown>)()).toEqual({ text: NO_PROJECT, isError: true });
+    expect(NO_PROJECT).toMatch(/^No project is open/);
+  });
+
   test("a report verb (critique, audit): the rendered page through impeccable_html and the skill's own detector; nothing lands", async () => {
     const { host, prompts } = fakeHost(
       state({ elementId: "vp_pricing", viewportId: "vp_pricing", itemIds: ["vp_pricing"] }),
@@ -363,7 +384,7 @@ describe("impeccable host part", () => {
     expect(names).toContain("impeccable-critique");
     expect(names).toContain("impeccable-audit");
     const text = await (prompts.find((p) => p.name === "impeccable-audit")!.build as Build)({});
-    expect(text).toContain("DELIVERABLE: THE REPORT, in chat — nothing lands");
+    expect(text).toContain("DELIVERABLE: THE REPORT, in chat — nothing changes, on the canvas or in the project");
     expect(text).toContain('impeccable_detect {viewport: "vp_pricing"}');
     expect(text).toContain("ONE CALL");
     expect(text).toContain("Do not export, write or run anything yourself");
@@ -406,7 +427,6 @@ describe("impeccable host part", () => {
       state: { viewports: [pricing], selection: null },
       target: { viewport: pricing, selector: null },
       variants: 3,
-      round: "r1",
       playbook: "p",
       craftFloor: "f",
       skillVersion: null,

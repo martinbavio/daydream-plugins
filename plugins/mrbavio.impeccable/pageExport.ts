@@ -1,14 +1,77 @@
-// impeccable_html's work on a live mount's document (index.tsx): find the
-// target by selector, mark it, take it out for the detector's baseline,
-// and make the page's urls stand alone. The document is the mount's own
-// copy, mounted bare — the page and nothing of the measurer's — so it is
-// the page as exported; the caller disposes it and nothing here is ever
+// impeccable_html's work (index.tsx): one viewport's page as a standalone
+// HTML file, for a judge that reads HTML — Impeccable's detector (the
+// critique and audit verbs, bridge/detect.ts). The page is the project's
+// file (decision #78), read through the kernel's bare mount: its markup
+// made safe as the canvas makes it, with each sheet that applies —
+// the files it links, its `<style>` blocks — as a `<style>` of its own at
+// the end of the head, in cascade order, and nothing the measurer adds
+// for its own reads (no measuring ids, no container probes). The mount's
+// document is the caller's own copy, read once and disposed: the target
+// is found in it by selector, marked, taken out for the detector's
+// baseline, and its urls made to stand alone. Nothing here is ever
 // stored.
+
+import type { DaydreamApi } from "@daydream/plugin-api";
+
+export interface PageExport {
+  viewportId: string;
+  /** The page's path in the project: the file the export was made from. */
+  page: string;
+  html: string;
+  bytes: number;
+  /** With `element`: its selector, and how many elements its subtree
+   * holds, each marked `data-impeccable-target`. */
+  target?: { selector: string; kept: number };
+  /** With `element` and `baseline`: the page with the target taken out. */
+  baseline?: string;
+}
+
+/** The page of `viewportId` as one file, urls made absolute to `origin`.
+ * Throws for a viewport the canvas does not hold, a page the project
+ * does not, and an `element` that names no one element of it. */
+export async function exportPage(
+  dd: Pick<DaydreamApi, "core" | "document" | "mountViewport" | "page">,
+  input: { viewportId: string; element?: string; baseline?: boolean; origin: string },
+): Promise<PageExport> {
+  const { viewportId: id, element } = input;
+  const viewport = dd.core.viewportItems(dd.document()).find((v) => v.id === id);
+  if (viewport === undefined) throw new Error(`no viewport with id "${id}"`);
+  const path = viewport.payload.page;
+  if (dd.page(path) === undefined) {
+    throw new Error(`viewport "${id}" shows the page "${path}", which the project does not hold`);
+  }
+  // Bare: the page alone, with nothing the measurer adds for its own
+  // read, so the export is the page as the canvas renders it.
+  const mounted = await dd.mountViewport(viewport, { bare: true });
+  try {
+    const doc = mounted.document();
+    const node = element === undefined ? null : soleMatch(doc, element, id);
+    const target = node === null ? undefined : { selector: element!, kept: markTarget(node) };
+    absoluteUrls(doc, input.origin);
+    const serialized = (): string => `<!doctype html>\n${doc.documentElement.outerHTML}`;
+    const html = serialized();
+    let baseline: string | undefined;
+    if (node !== null && input.baseline === true) {
+      takeOut(node);
+      baseline = serialized();
+    }
+    return {
+      viewportId: id,
+      page: path,
+      html,
+      bytes: html.length,
+      ...(target === undefined ? {} : { target }),
+      ...(baseline === undefined ? {} : { baseline }),
+    };
+  } finally {
+    mounted.dispose();
+  }
+}
 
 /** The one element `selector` names in `doc` — the same addressing
  * get_viewport and the draft tools use (decision #76) — or an error that
  * says why not: a selector the browser refuses, none, or several. */
-export function soleMatch(doc: Document, selector: string, viewportId: string): Element {
+function soleMatch(doc: Document, selector: string, viewportId: string): Element {
   let matches: Element[];
   try {
     matches = Array.from(doc.querySelectorAll(selector));
@@ -30,7 +93,7 @@ export function soleMatch(doc: Document, selector: string, viewportId: string): 
  * inside it, the page otherwise untouched — a rule may reach the target
  * through its siblings (`.lead + .target`, `:nth-child(2)`), so nothing
  * around it is removed. Answers how many elements the subtree holds. */
-export function markTarget(node: Element): number {
+function markTarget(node: Element): number {
   const subtree = [node, ...node.querySelectorAll("*")];
   for (const n of subtree) n.setAttribute("data-impeccable-target", "");
   return subtree.length;
@@ -40,7 +103,7 @@ export function markTarget(node: Element): number {
  * a bare element of its own tag in its place — no attribute, nothing
  * inside — so every other element keeps its position among its
  * siblings, and the rules that find them by it still do. */
-export function takeOut(node: Element): void {
+function takeOut(node: Element): void {
   node.replaceWith(node.ownerDocument.createElementNS(node.namespaceURI, node.localName));
 }
 
@@ -52,10 +115,11 @@ const rootRelative = (url: string): boolean => /^\/(?!\/)/.test(url.trim());
 
 /** Every root-relative url in the document made absolute to `origin`:
  * the url attributes, each `srcset` candidate, and `url()` and an
- * `image-set()` string in every `<style>` and `style` attribute. The mount points a page's own
- * `assets/<file>` at this host's route for its document, so the exported
- * file loads them from wherever it is opened. */
-export function absoluteUrls(doc: Document, origin: string): void {
+ * `image-set()` string in every `<style>` and `style` attribute. The
+ * mount points a page's relative urls at where this host serves the
+ * project's files, so the exported file loads them from wherever it is
+ * opened. */
+function absoluteUrls(doc: Document, origin: string): void {
   for (const el of doc.querySelectorAll("*")) {
     for (const name of URL_ATTRIBUTES) {
       const value = el.getAttribute(name);

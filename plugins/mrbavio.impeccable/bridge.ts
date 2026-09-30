@@ -22,8 +22,6 @@ import { z } from "zod";
 
 import type { DaydreamHostApi } from "@daydream/plugin-api/host";
 
-import { ROUND_ID, roundId } from "./variants.ts";
-
 import type * as Detect from "./bridge/detect.ts";
 import type * as Skill from "./bridge/skill.ts";
 import type * as Verbs from "./bridge/verbs.ts";
@@ -33,9 +31,7 @@ import type * as Verbs from "./bridge/verbs.ts";
  * imported statically from bridge/ stays in Node's module cache for the
  * life of the host — so a shipped change to verbs.ts (the verb list,
  * every deliverable) would sit inert until a restart. A dynamic import
- * with its own query is the kernel's trick, applied one level down.
- * (variants.ts, which verbs.ts imports statically, still needs a restart
- * when it changes; it rarely does.) */
+ * with its own query is the kernel's trick, applied one level down. */
 async function helpers(): Promise<{ skill: typeof Skill; verbs: typeof Verbs; detect: typeof Detect }> {
   const t = Date.now();
   const [skill, verbs, detect] = await Promise.all([
@@ -55,7 +51,6 @@ interface VerbArgs {
   element?: string;
   brief?: string;
   variants?: string;
-  round?: string;
 }
 
 const TARGET_ARGS = {
@@ -79,13 +74,6 @@ const TARGET_ARGS = {
     .string()
     .optional()
     .describe("How many draft variants to open (1–6, default 3); ignored by in-place verbs."),
-  round: z
-    .string()
-    .regex(ROUND_ID)
-    .optional()
-    .describe(
-      "The pick's round (impeccable_pick answers it). Every variant's marker carries it, so the canvas counts the round and adopt clears it whole — pass the same one when you call the verb again for the same pick. Default: a fresh round, for a verb with no pick.",
-    ),
 };
 
 /** The shell loop that exits when the storage file's contents change (or
@@ -96,6 +84,11 @@ const TARGET_ARGS = {
 export function watchCommand(file: string): string {
   return `f='${file}'; s=$(cksum < "$f" 2>/dev/null); while [ "$(cksum < "$f" 2>/dev/null)" = "$s" ]; do sleep 1; done; cat "$f"`;
 }
+
+/** What impeccable_session answers with no project open: nothing to
+ * watch, since `dd.storage` keeps nothing until one is. */
+export const NO_PROJECT =
+  "No project is open on the canvas, so there is no storage file for a pick to reach you through. Have the user open one (the mark's Open…, or `daydream <folder>`), then call impeccable_session again.";
 
 /** What impeccable_session answers: the watch command and the loop. */
 export function sessionText(dataFile: string): string {
@@ -113,9 +106,9 @@ export function sessionText(dataFile: string): string {
     "THE LOOP — one state at a time, never two:",
     "1. WAITING: call impeccable_pick FIRST — a pick made before you were watching is already in the file, and a watch started now would never wake for it. A pick → step 3. exit → stop. Nothing → start the watch (and nothing else) and tell the user in one line that the session is on and they can pick a verb on the canvas.",
     "2. WOKEN: the watch exited. Call impeccable_pick; it answers {pick, exit} and takes the pick (the canvas caption changes from waiting to building). exit true → say the session ended and stop, no watch. pick null → back to 1.",
-    "3. WORKING: impeccable_verb {verb, viewport, element, brief, round} from the pick (brief when the pick carries one — the user's words, which outrank the playbook's defaults; round always, the same one if you call the verb again for this pick) and follow it TO THE END — every draft landed, one line per direction, then impeccable_done (the canvas stops saying building). THE WATCH DOES NOT RUN DURING THIS STATE: a watch started here waits for a pick the user cannot make while you are still building, and stalls the round.",
+    "3. WORKING: impeccable_verb {verb, viewport, element, brief} from the pick (brief when the pick carries one — the user's words, which outrank the playbook's defaults) and follow its deliverable TO THE END — every copy open and written, or the rework written into the page's files, or the report given — then one line per direction and impeccable_done (the canvas stops saying building). THE WATCH DOES NOT RUN DURING THIS STATE: a watch started here waits for a pick the user cannot make while you are still building, and stalls the round.",
     "4. Only when the round is done: back to 1 — start the watch again.",
-    "The user adopts a variant from the canvas; nothing for you to do there.",
+    "A variant stays a draft beside its source, for the user to compare, until it is discarded — nothing adopts one yet. When the user names the one to keep, write its direction into the page's files as the verb's deliverable says, between rounds.",
     "",
     "Chat is overhead during a session: one line when the session starts, one line per round, one when it ends. Never run a verb the user did not pick.",
   ].join("\n");
@@ -169,9 +162,6 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
       target: state === null ? null : resolveTarget(state, args),
       ...(args.brief === undefined ? {} : { brief: args.brief }),
       variants: variantCount(args.variants),
-      // The pick's round when there is one: a second call for the same
-      // pick lands into the same round, never a round of its own.
-      round: args.round ?? roundId(),
       playbook,
       craftFloor,
       skillVersion: version,
@@ -182,7 +172,7 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
   host.registerTool({
     name: VERB_TOOL,
     title: "Impeccable verb",
-    description: `The playbook for one design verb over a viewport on the canvas, with the target resolved from the selection (or the arguments) and the deliverable spelled out — call it, then follow it. Verbs: ${verbNames.join(", ")}. ${VERBS.filter((v) => v.mode === "variants").length} of them open draft variants beside the source, ${VERBS.filter((v) => v.mode === "in-place").length} rework it in place, and critique and audit answer a report over the rendered page (impeccable_html + Impeccable's detector) and land nothing. After a canvas pick, pass the pick's viewport, element and round.`,
+    description: `The playbook for one design verb over a viewport on the canvas, with the target resolved from the selection (or the arguments) and the deliverable spelled out — call it, then follow it. Verbs: ${verbNames.join(", ")}. ${VERBS.filter((v) => v.mode === "variants").length} of them open draft copies of the source beside it, which stay drafts for the user to compare; ${VERBS.filter((v) => v.mode === "in-place").length} rework it in place, written into the page's files; critique and audit answer a report over the rendered page (impeccable_detect) and change nothing. After a canvas pick, pass the pick's viewport and element.`,
     inputSchema: {
       verb: z.enum(verbNames as [string, ...string[]]).describe("The verb."),
       ...TARGET_ARGS,
@@ -202,7 +192,12 @@ export default async function activate(host: DaydreamHostApi): Promise<void> {
       "Start a design session on the Daydream canvas: answers the watch command that wakes you when the user picks a verb on the canvas, and the loop to run — wait, impeccable_pick, impeccable_verb, wait again. Call it when the user asks for a session (a design session, an Impeccable session); then run the watch. Not the /impeccable skill's live mode: the canvas is the page.",
     inputSchema: {},
     annotations: { readOnlyHint: true },
-    run: () => ({ text: sessionText(host.plugin.dataFile) }),
+    // Read at the call, not at activation: it names the file of the
+    // project open now, and none while no project is.
+    run: () => {
+      const file = host.plugin.dataFile;
+      return file === null ? { text: NO_PROJECT, isError: true } : { text: sessionText(file) };
+    },
   });
 
   // The detector as one call (decision #72): the tab renders, the

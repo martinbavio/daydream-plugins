@@ -2,10 +2,17 @@
 // session's canvas side: the picker (⌘P on a selection, decision #67:
 // Impeccable's own list in the interactive overlay slot, beside the target),
 // the caption that says a pick is waiting or building, the impeccable_pick
-// tool an agent takes the pick with, `adopt` in a variant's title bar
-// (a title-bar action), and cancel / end-session. The verbs themselves —
-// Impeccable's playbooks over a viewport — are the host part's
-// (bridge.ts): impeccable_verb and one prompt each.
+// tool an agent takes the pick with and impeccable_done it ends the round
+// with, the page export the detector reads (impeccable_html), and cancel /
+// end-session. The verbs themselves — Impeccable's playbooks over a
+// viewport — are the host part's (bridge.ts): impeccable_verb and one
+// prompt each.
+//
+// A variant round's copies stay drafts on the canvas and a rework is
+// written to the page's files (decision #78): nothing lands in the
+// document, so the canvas counts nothing and adopts nothing, and the round
+// ends when the agent says so. Phase 9 of the project model moves the
+// variants to `.daydream/variants/`, where the canvas can know them again.
 //
 // How a pick reaches an agent: through dd.storage. Every change here is
 // written to `.daydream/plugin-data/mrbavio.impeccable.json` at once, and an
@@ -16,10 +23,9 @@ import { createSignal, untrack } from "solid-js";
 
 import type { DaydreamApi } from "@daydream/plugin-api";
 
-import { adoptInto, isViewport, markerOf, roundOf } from "./adopt";
 import { VERBS as VERB_SPECS } from "./bridge/verbs";
 import createCaption from "./Caption";
-import { absoluteUrls, markTarget, soleMatch, takeOut } from "./pageExport";
+import { exportPage } from "./pageExport";
 import createPicker, { type PickerEntry } from "./Picker";
 import { createSession, SESSION_KEY } from "./session";
 import { captionCss, pickerCss } from "./styles";
@@ -29,7 +35,6 @@ const ID = "mrbavio.impeccable";
 /** The verbs, in the picker's order — the host part's list, shared. */
 const VERBS = VERB_SPECS.map((v) => v.verb);
 const modeOf = (verb: string) => VERB_SPECS.find((v) => v.verb === verb)?.mode;
-const isVariantsVerb = (verb: string): boolean => modeOf(verb) === "variants";
 /** The picker's last entry: the session's exit, beside the verbs. */
 const END_SESSION = "end session";
 
@@ -100,24 +105,6 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     },
   });
 
-  // `adopt`, one word in a variant's title bar: the source takes the
-  // variant's page, the round goes, one undo step (adopt.ts).
-  dd.registerItemAction({
-    id: "adopt",
-    title: "adopt",
-    when: (item) => roundOf(dd.items(), item.id) !== null,
-    run: (item) => {
-      const round = roundOf(dd.items(), item.id);
-      if (round === null) return;
-      dd.mutateItems((items) => {
-        adoptInto(items, item.id);
-      });
-      // The source, selected whole: its page is the variant's now, mounted
-      // anew, so no element id from before names anything in it.
-      dd.select(round.source.id);
-    },
-  });
-
   // Each overlay's CSS rides its registration: the kernel mounts it in the
   // overlay root, inside the dream-plugin layer (decision #71) — a
   // <style> the plugin appended to the head itself would be unlayered.
@@ -137,20 +124,14 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     render: () => createPicker(dd, entries, picker),
   });
 
-  // The viewport as one standalone HTML page, for a judge that reads
-  // HTML — Impeccable's detector (the critique and audit verbs). The
-  // kernel renders it: a live mount — the page's own text made safe, its
-  // css one <style> (decision #76) — mounted bare, so it carries nothing
-  // the measurer adds for its own reads (no measuring ids, no container
-  // probes), its document read once and disposed: the detector judges
-  // the page and nothing else. Root-relative urls (a page's
-  // `assets/<file>` pointed at this host's route for its document) are
-  // made absolute so the file stands alone.
+  // The viewport as one standalone HTML page (pageExport.ts). Root-
+  // relative urls — the mount's routes to the project's files — are made
+  // absolute to this tab's origin, so the file stands alone.
   dd.registerTool({
     name: HTML_TOOL,
     title: "Impeccable HTML",
     description:
-      "One viewport as a standalone HTML file — the page exactly as the canvas renders it, styles and fonts inline — for Impeccable's detector: write it to a file and run `impeccable detect --json <file>`. With `element`, a CSS selector matching exactly one element of the page, that element and its subtree carry data-impeccable-target=\"\" and the page is otherwise whole, so the target is styled as the page styles it; with `baseline` too, the answer adds the page with the target taken out (a bare element of its tag in its place) — the findings over the page that this one lacks are the target's, which is what impeccable_detect answers. Answers {viewportId, html, bytes, target?: {selector, kept}, baseline?}. Reads only.",
+      "One viewport's page as a standalone HTML file — the page exactly as the canvas renders it, each stylesheet that applies inline in cascade order — for Impeccable's detector: write it to a file and run `impeccable detect --json <file>`. With `element`, a CSS selector matching exactly one element of the page, that element and its subtree carry data-impeccable-target=\"\" and the page is otherwise whole, so the target is styled as the page styles it; with `baseline` too, the answer adds the page with the target taken out (a bare element of its tag in its place) — the findings over the page that this one lacks are the target's, which is what impeccable_detect answers. Answers {viewportId, page, html, bytes, target?: {selector, kept}, baseline?}, page the file's path in the project. Reads only.",
     inputSchema: {
       type: "object",
       properties: {
@@ -169,77 +150,31 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     },
     annotations: { readOnlyHint: true },
     run: async (input) => {
-      const id = String(input["viewport"] ?? "");
       const element = typeof input["element"] === "string" ? input["element"] : undefined;
-      const withBaseline = input["baseline"] === true;
-      const viewport = dd.core.viewportItems(dd.document()).find((v) => v.id === id);
-      if (viewport === undefined) throw new Error(`no viewport with id "${id}"`);
-      // Bare: the page alone, with nothing the measurer adds for its own
-      // read, so the export is the page as the canvas renders it.
-      const mounted = await dd.mountViewport(viewport, { bare: true });
-      try {
-        const doc = mounted.document();
-        const node = element === undefined ? null : soleMatch(doc, element, id);
-        const target = node === null ? undefined : { selector: element!, kept: markTarget(node) };
-        absoluteUrls(doc, window.location.origin);
-        const serialized = (): string => `<!doctype html>\n${doc.documentElement.outerHTML}`;
-        const html = serialized();
-        let baseline: string | undefined;
-        if (node !== null && withBaseline) {
-          takeOut(node);
-          baseline = serialized();
-        }
-        return {
-          viewportId: id,
-          html,
-          bytes: html.length,
-          ...(target === undefined ? {} : { target }),
-          ...(baseline === undefined ? {} : { baseline }),
-        };
-      } finally {
-        mounted.dispose();
-      }
+      return exportPage(dd, {
+        viewportId: String(input["viewport"] ?? ""),
+        ...(element === undefined ? {} : { element }),
+        baseline: input["baseline"] === true,
+        origin: window.location.origin,
+      });
     },
   });
-
-  // What the canvas can see of a round's progress (the agent's impeccable_done
-  // is the explicit end). A VARIANTS round: every variant carries the
-  // source, the verb and the pick's round in its notes marker, so the
-  // count on the canvas against the marker's `of` is the progress, and
-  // reaching it is the end — the round known by its id alone, as adopt
-  // knows it, so another run of the verb on the same source, before or
-  // during, is not this one's.
-  // An IN-PLACE round lands as one change to the source's page: its two
-  // texts, compared before and after — a move, a rename or a meta edit
-  // is not it.
-  const pageText = (viewportId: string): string | null => {
-    const item = dd.items().find((i) => i.id === viewportId);
-    if (item === undefined || !isViewport(item)) return null;
-    return JSON.stringify([item.payload.html, item.payload.css]);
-  };
-  let sourceBefore: string | null = null;
 
   dd.registerTool({
     name: PICK_TOOL,
     title: "Impeccable pick",
     description:
-      "Take the verb the user picked on the canvas: answers {pick: {verb, viewportId, element, brief?, round, at} | null, exit} — element a CSS selector naming the target in the viewport's page, null for the whole page — and clears it (the canvas shows the pick as building). Call it first on any Impeccable request and on every wake-up of a session's watch; then impeccable_verb with the pick's verb, viewport, element, round — every variant's marker carries it, a retried call's too — and, when present, brief, the user's own words about this round, which outrank the playbook's defaults. exit true means the user ended the session.",
+      "Take the verb the user picked on the canvas: answers {pick: {verb, viewportId, element, brief?, at} | null, exit} — element a CSS selector naming the target in the viewport's page, null for the whole page — and clears it (the canvas shows the pick as building until impeccable_done). Call it first on any Impeccable request and on every wake-up of a session's watch; then impeccable_verb with the pick's verb, viewport, element and, when present, brief, the user's own words about this round, which outrank the playbook's defaults. exit true means the user ended the session.",
     inputSchema: { type: "object", properties: {}, required: [] },
     annotations: { idempotentHint: false, destructiveHint: false },
-    run: () => {
-      const taken = session.take();
-      // The round's baseline, taken with its pick and only then: a call
-      // with nothing waiting leaves the round being built as it is.
-      if (taken.pick !== null) sourceBefore = pageText(taken.pick.viewportId);
-      return taken;
-    },
+    run: () => session.take(),
   });
 
   dd.registerTool({
     name: DONE_TOOL,
     title: "Impeccable done",
     description:
-      "Tell the canvas the round is complete: every variant landed, or the in-place rework landed, or you stopped. The canvas infers most of this from what lands, but call it at the end of every round anyway — a round that stopped short would otherwise read as still building.",
+      "Tell the canvas the round is complete — every variant open as a draft, the rework written to the page's files, the report given, or you stopped — so its caption stops saying building. The canvas cannot see a round end on its own: call it at the end of every round.",
     inputSchema: { type: "object", properties: {}, required: [] },
     annotations: { idempotentHint: true, destructiveHint: false },
     run: () => {
@@ -248,65 +183,11 @@ export default async function activate(dd: DaydreamApi): Promise<void> {
     },
   });
 
-  const trackBuilding = (): void => {
-    const phase = untrack(session.phase);
-    if (phase.kind !== "building") return;
-    const { verb, viewportId, round } = phase.pick;
-    if (isVariantsVerb(verb)) {
-      let landed = 0;
-      let of: number | null = null;
-      for (const item of dd.items()) {
-        const m = markerOf(item);
-        if (m !== null && m.sourceId === viewportId && m.verb === verb && m.round === round) {
-          landed += 1;
-          of = Math.max(of ?? 0, m.of);
-        }
-      }
-      if (of !== null) session.progress(landed, of);
-    } else {
-      const now = pageText(viewportId);
-      if (now === null) session.done(); // the source is gone
-      else if (sourceBefore !== null && now !== sourceBefore) session.done();
-    }
-  };
-  // A variant's title bar says which one it is — `<source> · <verb> n/N`,
-  // from the marker and the source's own shown name, which for a page is
-  // its meta title (decision #76) — whatever title the agent gave it: the
-  // marker is the one truth, and an agent handing a sub-agent a stale base
-  // title was the first thing that went wrong.
-  const titleVariants = (added: string[]): void => {
-    for (const id of added) {
-      const item = dd.items().find((i) => i.id === id);
-      if (item === undefined || !isViewport(item)) continue;
-      const m = markerOf(item);
-      if (m === null) continue;
-      const source = dd.items().find((i) => i.id === m.sourceId);
-      const base =
-        source !== undefined && isViewport(source)
-          ? (source.payload.meta?.title ?? "Untitled")
-          : "Untitled";
-      const title = `${base} · ${m.verb} ${m.n}/${m.of}`;
-      if (item.payload.meta?.title === title) continue;
-      dd.updateItem(id, (working) => {
-        if (!isViewport(working)) return;
-        working.payload.meta = { ...(working.payload.meta ?? {}), title };
-      });
-    }
-  };
-  // A hook handler runs in an effect's apply phase: the document is read
-  // there as a snapshot, never tracked. The titles are written after it,
-  // in a microtask: dd.updateItem flushes, and a flush from inside an
-  // effect callback is a no-op Solid warns about (FLUSH_IN_EFFECT_CALLBACK).
-  dd.on("items", ({ added }) => {
-    untrack(trackBuilding);
-    if (added.length > 0) queueMicrotask(() => titleVariants(added));
-  });
-  dd.on("document", ({ restored }) => {
+  dd.on("document", () => {
     untrack(session.check);
-    if (!restored) untrack(trackBuilding);
   });
-  // A markup edit remounts the page, and until it has, the selector may
-  // name nothing the check can place.
+  // A new text of the page remounts it, and until it has, the selector
+  // may name nothing the check can place.
   dd.on("geometry", () => {
     untrack(session.check);
   });
