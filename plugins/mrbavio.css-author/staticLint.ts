@@ -1,8 +1,9 @@
 // The STATIC lint (docs/agent-css-knowledge-prd.md, "Lints"; decision
 // #43, #48 P9): what can be said about a page from its text alone, with
-// no render. Deliberately small — three rules, each a fact about CSS the
+// no render. Deliberately small — four rules, each a fact about CSS the
 // browser would enforce silently (a declaration the parser drops, a font
-// face nothing names, a class no selector names) — because anything that
+// face nothing names, a class no selector names, a rule a stray `;` has
+// the parser drop) — because anything that
 // needs a render is the necessity lint's (necessity.ts), and anything
 // that needs a selector MATCHED or a value MEASURED — dead rules,
 // redundancy, an explicit initial value (rule 2, initialValues.ts), a
@@ -37,17 +38,19 @@ import type {
 import {
   fontFaceBlocks,
   pageRules,
+  refused,
   ruleName,
   selectorPreludes,
+  strayDelimiter,
   type PageRule,
 } from "./pageCss";
 import { lintElements } from "./pageDom";
 
 /** Every static finding for the document: per page, the elements' own
  * unit-less lengths in tree order, then the page's unused font faces,
- * then its rules' unit-less lengths, then the classes no rule names.
- * Empty when the document is clean. Browser only: the markup is parsed
- * by the browser. */
+ * then its rules' unit-less lengths, then the classes no rule names, then
+ * the stray `;`s that drop a rule. Empty when the document is clean.
+ * Browser only: the markup is parsed by the browser. */
 export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
   const findings: Finding[] = [];
   for (const page of core.viewportItems(doc) as DreamPage[]) {
@@ -80,6 +83,7 @@ export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
       page.id,
       findings,
     );
+    lintStrayDelimiters(css, blocks, page.id, findings);
   }
   return findings;
 }
@@ -435,4 +439,132 @@ export function lintUnreferencedClasses(
       });
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Rule 5 — a stray `;` that drops a rule. Where the parser reads rules
+// alone — the sheet's top level, and the block of a `@media`, `@supports`,
+// `@container`, `@layer`, `@starting-style` or `@keyframes` no style rule
+// encloses — a `;` ends nothing: `.a { … };` followed by `.b { … }` reads
+// `; .b` as the next rule's selector, and the browser drops that rule
+// whole, with nothing said. The kernel's scan reads it as the parser does
+// (`CssBlock.prelude` holds the `;`, its `range` starts at it); among
+// declarations, and after the last rule, a `;` is harmless and no prelude
+// holds one. A statement after the `;` is swallowed too (`; @layer q;
+// .c` drops the `@layer q` and the rule `.c`), so the finding names what
+// is dropped. One finding per stray `;`: the refused rule is none of the
+// page's for every other walk (pageCss.ts `refused`), so it is never also
+// a rule that matches nothing, a dead declaration, or an unused face.
+// Blocking, as every static finding is: a rule silently gone is a defect,
+// and the fix is one character. A `Finding` carries no text range, so the
+// sentence names the line of the css the `;` is on.
+
+/** Rule 5 over a page's blocks, read from `css`. */
+export function lintStrayDelimiters(
+  css: string,
+  blocks: readonly CssBlock[],
+  viewportId: string,
+  findings: Finding[],
+): void {
+  const levels: { blocks: readonly CssBlock[]; at: number; within: string[] }[] = [
+    { blocks, at: 0, within: [] },
+  ];
+  while (levels.length > 0) {
+    const level = levels[levels.length - 1]!;
+    const block = level.blocks[level.at++];
+    if (block === undefined) {
+      levels.pop();
+      continue;
+    }
+    const label = refused(block)
+      ? strayFinding(css, block, level.within, viewportId, findings)
+      : block.prelude;
+    if (block.children.length > 0) {
+      levels.push({ blocks: block.children, at: 0, within: [...level.within, label] });
+    }
+  }
+}
+
+/** The finding for one refused block; answers what the block reads as
+ * without its stray `;`, which is what a stray `;` nested in it is said
+ * to be inside. */
+function strayFinding(
+  css: string,
+  block: CssBlock,
+  within: readonly string[],
+  viewportId: string,
+  findings: Finding[],
+): string {
+  // Named on one line, however the text breaks it.
+  const prelude = block.prelude.replace(/\s+/g, " ");
+  const at = strayDelimiter(prelude);
+  const head = prelude.slice(0, at).trim();
+  // What follows the `;`: any statement it swallowed, then the rule.
+  const after = splitStray(prelude.slice(at + 1));
+  const where = within.length === 0 ? "" : ` in \`${within.join(" › ")}\``;
+  const inKeyframes = /^@(?:-\w+-)?keyframes\b/i.test(within.at(-1) ?? "");
+  const line = lineOf(css, block);
+  const place = `${where} of viewport ${viewportId} (line ${line} of its css)`;
+  if (head !== "") {
+    findings.push({
+      tier: "static",
+      severity: "blocking",
+      message: `the stray \`;\` after \`${head}\`${place} makes the browser drop the rule \`${prelude}\` whole; remove the \`;\`, and \`${head}\` too if it is a leftover`,
+    });
+    return prelude;
+  }
+  // The run of `;` itself, however many (`;;`).
+  const stray = /^[;\s]*/.exec(prelude)![0].replace(/\s+/g, "");
+  const rule = after.at(-1);
+  if (rule === undefined) {
+    findings.push({
+      tier: "static",
+      severity: "blocking",
+      message: `the stray \`${stray}\`${place} makes the browser drop the block after it; remove it`,
+    });
+    return prelude;
+  }
+  const noun = inKeyframes ? "the keyframe" : "the rule";
+  const dropped = listed([
+    ...after.slice(0, -1).map((part) => `\`${part}\``),
+    `${noun} \`${rule}\``,
+  ]);
+  findings.push({
+    tier: "static",
+    severity: "blocking",
+    message: `the stray \`${stray}\` before \`${after.join("; ")}\`${place} makes the browser drop ${dropped}; remove it`,
+  });
+  return rule;
+}
+
+/** The parts of a prelude's text after a stray `;`, split at each
+ * further top-level `;`, trimmed, the empty ones (`;;`) left out. */
+function splitStray(text: string): string[] {
+  const parts: string[] = [];
+  let rest = text;
+  for (let at = strayDelimiter(rest); at !== -1; at = strayDelimiter(rest)) {
+    parts.push(rest.slice(0, at).trim());
+    rest = rest.slice(at + 1);
+  }
+  parts.push(rest.trim());
+  return parts.filter((part) => part !== "");
+}
+
+/** `a`, `a and b`, `a, b and c`. */
+function listed(items: readonly string[]): string {
+  return items.length < 2
+    ? items.join("")
+    : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
+
+/** The line of `css` the block's stray `;` is on, counted from 1: where
+ * the scan's range starts, or, for a prelude with text before its `;`
+ * (`.a;b`), that `;` found in the text. */
+function lineOf(css: string, block: CssBlock): number {
+  const [start, end] = block.range;
+  const found = strayDelimiter(css, start, end);
+  const at = found === -1 ? start : found;
+  let line = 1;
+  for (let i = 0; i < at && i < css.length; i++) if (css[i] === "\n") line++;
+  return line;
 }
