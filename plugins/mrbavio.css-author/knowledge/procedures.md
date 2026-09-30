@@ -15,7 +15,7 @@ tags:
   ]
 tier: procedure
 status: v1 draft from general expertise — to be corrected against the maintainer's notes; hard budget about 1,200 tokens
-summary: Decision procedures against the three judgment failures — which formatting context, whether a declaration is needed at all, where in the cascade to set it — and the author → write → lint → fix loop.
+summary: Decision procedures against the three judgment failures — which formatting context, whether a declaration is needed at all, where in the cascade to set it — and the author → finalize → fix loop.
 ---
 
 ## 1. Which formatting context
@@ -56,5 +56,5 @@ Then: would the page change if this line went — at this width or at another? I
 1. This file rides the `dream-author` prompt; `knowledge_bundle {query}` brings the format rules with the nearest example.
 2. Gather the source or the intent; decide each container's formatting context with §1.
 3. Author the smallest page; pass every declaration through §2 and §3.
-4. Write it into the project's files (the `dream-author` prompt says how), then `lint`: every enabled gate runs over the project's pages — static, necessity. Each finding names the element, or the rule and the stylesheet it is written in; fix it in that file and lint again.
+4. `draft_finalize` it (the `dream-author` prompt says how): every enabled gate runs over the page first — static, necessity — and a blocking finding refuses the write. Each names the element, or the rule and its stylesheet; fix it and finalize again. `lint` judges pages already written.
 5. Your reply comes from what `lint` and `measure` answered, not from a second look; the track summaries are `measure`'s.

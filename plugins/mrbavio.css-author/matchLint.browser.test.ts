@@ -850,4 +850,41 @@ describe("matchLint: a page of several sheets", () => {
       ],
     ]);
   });
+  test("a sheet file the host would never write is read-only as a remote one is; a remote sheet the host could not fetch holds no rule", async () => {
+    const findings = await matchLint(
+      sheeted(
+        `<link rel="stylesheet" href="${KIT}"><link rel="stylesheet" href="kit.css"><link rel="stylesheet" href="v1.css">`,
+        '<div class="card"></div>',
+        [
+          {
+            source: { url: KIT },
+            text: "",
+            readOnly: true,
+            error: "it answered HTTP 404",
+          },
+          {
+            source: { file: "kit.css" },
+            text: ".nope { color: red; }\n.card { color: #333; }",
+            readOnly: true,
+            unwritable:
+              "kit.css is a link: it is neither written nor removed through it",
+          },
+          {
+            source: { file: "v1.css" },
+            text: ".card { color: #333; }\n.ghost { color: red; }",
+            readOnly: false,
+          },
+        ],
+      ),
+    );
+    // kit.css's `.nope` matches nothing and is not said; its `.card` is
+    // the rule v1.css's restates. The empty remote sheet numbers nothing.
+    expect(findings.map((f) => [f.rule, f.message])).toEqual([
+      [
+        2,
+        "color: #333 in rule `.card` of `v1.css` in viewport v1 restates rule `.card` of `kit.css` for every element it reaches; remove it from `.card`",
+      ],
+      [3, "rule `.ghost` of `v1.css` in viewport v1 matches no element"],
+    ]);
+  });
 });

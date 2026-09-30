@@ -307,6 +307,31 @@ describe("staticLint: a page of several sheets", () => {
     expect(staticLint(project)).toEqual([]);
   });
 
+  test("a remote sheet the host could not fetch is an empty text with its error: nothing to read, and no finding", () => {
+    const project = sheeted('<div class="card"></div>', [
+      {
+        ...sheet({ url: "https://cdn.example/kit.css" }, "", true),
+        error: "it answered text/html, not text/css",
+      },
+      sheet({ file: "v1.css" }, ".card { color: red }"),
+    ]);
+    expect(staticLint(project)).toEqual([]);
+  });
+
+  test("a sheet file the host would never write (unwritable) is read-only: its rules are no finding's subject, yet a class only it names is named, and its rules take their numbers", () => {
+    const project = sheeted('<div class="btn"></div>', [
+      {
+        ...sheet({ file: "vendor/kit.css" }, ".btn { width: 100 }", true),
+        unwritable:
+          "vendor/kit.css is a link: it is neither written nor removed through it",
+      },
+      sheet({ file: "v1.css" }, ".x { gap: 5 }"),
+    ]);
+    expect(staticLint(project).map((f) => [f.rule, f.message])).toEqual([
+      [1, "gap: 5 in rule `.x` of `v1.css` has no unit; a length needs one (px, rem, %, …)"],
+    ]);
+  });
+
   test("a sheet several pages link is one text: a unit-less length in it is said once, and its face is used when any of them names it", () => {
     const shared = sheet(
       { file: "site.css" },

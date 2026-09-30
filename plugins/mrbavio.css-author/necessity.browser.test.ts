@@ -521,6 +521,30 @@ describe("dead and live declarations", () => {
     expect(findings).toEqual([]);
   });
 
+  test("a sheet file the host would never write is read-only: its declarations are never judged; a remote sheet it could not fetch holds none", async () => {
+    const kit = "https://cdn.example/kit.css";
+    const findings = await necessityLint(
+      testProject([
+        withSheets(
+          shownPage(FRAME, '<div id="box" style="height: 10px"></div>', "", {
+            head: `<link rel="stylesheet" href="${kit}"><link rel="stylesheet" href="kit.css">`,
+          }),
+          [
+            { source: { url: kit }, text: "", readOnly: true, error: "HTTP 404" },
+            {
+              source: { file: "kit.css" },
+              text: "#box { position: static; --unused: 1px; }",
+              readOnly: true,
+              unwritable:
+                "kit.css is a link: it is neither written nor removed through it",
+            },
+          ],
+        ),
+      ]),
+    );
+    expect(findings).toEqual([]);
+  });
+
   test("an element is named by its selector in the stored markup, which still holds an element the safety walk removed", async () => {
     // The mount drops the `<script>`, so `#box` is unique there; in the
     // markup an agent reads and addresses, it is not.

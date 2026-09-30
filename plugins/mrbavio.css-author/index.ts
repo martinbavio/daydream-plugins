@@ -7,9 +7,10 @@
 // declaration is judged as written (pageCss.ts, pageSheets.ts), every
 // match and every computed value the browser's.
 // The browser part registers the two lints as gates, which core runs on
-// MCP `lint` over the open project's pages (decision #78: no landing runs
-// them) — the static lint (staticLint.ts's facts from the texts, a stray
-// `;` that drops a rule among them, plus
+// MCP `lint` over the open project's pages, and over a draft's page at
+// its `draft_finalize`, before its files are written, a blocking finding
+// refusing the write (decision #78) — the static lint (staticLint.ts's
+// facts from the texts, a stray `;` that drops a rule among them, plus
 // matchLint.ts's match-dependent ones: an explicit initial value the page
 // computes without, redundancy — an element's own style against a rule,
 // and a rule's against the rule beneath it — dead rules, and a container

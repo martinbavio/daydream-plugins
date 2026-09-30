@@ -18,8 +18,9 @@
 // found by the kernel's scan (`dd.core.cssBlocks`, read by pageCss.ts),
 // and is put back after the read; an element's own declaration is cut
 // from its `style` attribute the same way. A read-only sheet's (a remote
-// one's) declarations are cut only to judge another's with them (rule 1
-// below), never judged themselves: the author cannot edit that sheet. The browser parses what is left, so the answer
+// one's, or an unwritable file's) declarations are cut only to judge
+// another's with them (rule 1 below), never judged themselves: no edit
+// through Daydream lands in that sheet. The browser parses what is left, so the answer
 // is the page without that line, whatever the line was: a shorthand, a
 // fallback, a declaration the parser drops, a custom property. Web fonts
 // would make that dishonest: re-parsing a sheet that declares a face

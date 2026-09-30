@@ -24,10 +24,10 @@
 // 100` before anyone could read it, which is the point of rule 1 — and a
 // rule finding carries the rule's position among the page's rules in
 // `rule`, the address the gate runner keys a declaration by, and names
-// the sheet it is written in. A read-only sheet (a remote one) is never
-// a finding's subject; its rules still name families and classes. What
-// only the browser can answer (a `font` shorthand's family list) is asked
-// of the CSSOM.
+// the sheet it is written in. A read-only sheet (a remote one, or an
+// unwritable file) is never a finding's subject; its rules still name
+// families and classes. What only the browser can answer (a `font`
+// shorthand's family list) is asked of the CSSOM.
 //
 // It reads TEXT alone, so it judges each page ONCE, however many
 // viewports show it, and names it by its path; a sheet several pages

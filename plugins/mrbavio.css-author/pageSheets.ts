@@ -8,10 +8,13 @@
 // the sheets in the page's order, so a finding's `rule` is the same count
 // in every gate and the runner keys one declaration one way.
 //
-// A REMOTE SHEET (`{url}`, read-only, its text perhaps not fetched) is
-// never the subject of a finding — the author cannot edit it — but its
-// rules are the page's for everything else: what an element matches,
-// what a rule restates, which classes a rule names.
+// A READ-ONLY SHEET — a remote one (`{url}`: its text as the host
+// fetched it, or empty with an `error` when it could not be), or a file
+// of the project the host would never write (`unwritable`: a link, bytes
+// that are not UTF-8) — is never the subject of a finding, since no edit
+// through Daydream lands in it; but its rules are the page's for
+// everything else: what an element matches, what a rule restates, which
+// classes a rule names.
 //
 // A finding names the sheet a rule is written in (`sheetName`), so an
 // agent knows which file to edit: the project file, the page's `<style>`
@@ -81,7 +84,7 @@ export function readSheets(core: CoreApi, page: Page): ReadSheets {
 }
 
 /** Whether a finding may be about sheet `sheet` of the page: any sheet
- * but a read-only one. */
+ * but a read-only one (a remote sheet, an unwritable file). */
 export function editable(page: Page, sheet: number): boolean {
   return page.sheets[sheet]?.readOnly === false;
 }
