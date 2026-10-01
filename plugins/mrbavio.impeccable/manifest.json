@@ -2,7 +2,7 @@
   "id": "mrbavio.impeccable",
   "name": "Impeccable",
   "version": "0.3.0",
-  "minCore": "0.1.44",
+  "api": "1.0",
   "contributes": {
     "commands": [
       "mrbavio.impeccable.pick",
