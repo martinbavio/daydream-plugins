@@ -5,31 +5,23 @@
 // channel: an agent's watch wakes on it (bridge.ts). Nothing here reads
 // layout; the caption overlay does.
 //
-// A waiting pick names its element by selector, and an edit of the page
-// can make that selector name another element, or none, or several. So
-// the session also holds the element itself, never stored: its
-// render-time id while its mount lives, and where it is written in the
-// page's text (held.ts), followed through each edit. Once the page is
-// edited, `check` asks whether the selector still names that element
-// alone, and drops the pick, with a note, when it does not — the agent's
-// tools would refuse a selector naming none or several, and rework the
-// wrong element by one naming another.
+// A waiting pick names its element by selector, and a new text of the
+// page — its file read again, when the project loads (decision #78) — can
+// make that selector name another element, or none, or several. So the
+// session also holds the element itself, never stored: its render-time
+// id while its mount lives, and where it is written in the page's text
+// (held.ts), followed through each change. Once the text changes, `check`
+// asks whether the selector still names that element alone, and drops
+// the pick, with a note, when it does not — the agent's tools would
+// refuse a selector naming none or several, and rework the wrong element
+// by one naming another.
 
 import type { DaydreamApi, ElementId } from "@daydream/plugin-api";
 import { createSignal, untrack } from "solid-js";
 
-import { isViewport } from "./adopt";
 import { follow, holdAt, isHeld, type Held } from "./held";
+import { EMPTY_SESSION, sessionState, type SessionState, type VerbPick } from "./pick";
 import type { Target } from "./target";
-
-import {
-  droppedLegacyPick,
-  EMPTY_SESSION,
-  roundId,
-  sessionState,
-  type Pick,
-  type SessionState,
-} from "./variants";
 
 export const SESSION_KEY = "session";
 
@@ -41,16 +33,18 @@ export const SESSION_KEY = "session";
 export type Phase =
   | { kind: "idle" }
   /** Picked on the canvas, no agent has taken it. */
-  | { kind: "waiting"; pick: Pick; anchor: ElementId | null }
-  /** An agent took it and is working; ends when the round is complete —
-   * every variant landed, the in-place rework landed, or the agent said
-   * so (impeccable_done). `landed` counts a variant round's progress. */
+  | { kind: "waiting"; pick: VerbPick; anchor: ElementId | null }
+  /** An agent took it and is working, until it says the round is done
+   * (impeccable_done): for a variants round, `landed` of its variants are
+   * on the canvas so far. The canvas never knows how many the agent makes
+   * — impeccable_verb takes any count — and a rework is written to the
+   * page's files (decision #78), which tells no end: the agent's word
+   * ends every round. */
   | {
       kind: "building";
-      pick: Pick;
+      pick: VerbPick;
       anchor: ElementId | null;
       landed: number;
-      of: number | null;
     };
 
 /** What the session knows of a waiting pick's element, beside its
@@ -84,16 +78,16 @@ export interface Session {
   /** An agent takes what waits (impeccable_pick): the pick and the exit flag,
    * both cleared. With nothing waiting, nothing changes and nothing is
    * written. */
-  take(): { pick: Pick | null; exit: boolean };
+  take(): { pick: VerbPick | null; exit: boolean };
   /** The user withdrew the pick (Escape, the cancel command). */
   cancel(): void;
   /** The user ended the session from the canvas. */
   end(): void;
   /** The round is complete: whatever was building is done. */
   done(): void;
-  /** A variant round's progress: `landed` of `of` variants are on the
-   * canvas. Reaching `of` completes the round. */
-  progress(landed: number, of: number): void;
+  /** A variants round's progress: `landed` variants are on the canvas.
+   * It never completes the round: only done does. */
+  progress(landed: number): void;
   /** What the last session left in storage — restored at activation so a
    * reload keeps a waiting pick; `exit` is never restored. */
   restore(saved: unknown, viewportExists: (id: string) => boolean): void;
@@ -106,7 +100,9 @@ export interface Session {
   check(): void;
 }
 
-export function createSession(dd: DaydreamApi): Session {
+export function createSession(
+  dd: Pick<DaydreamApi, "core" | "document" | "page" | "pageFind" | "pageSource" | "plugin" | "storage">,
+): Session {
   const [phase, setPhase] = createSignal<Phase>({ kind: "idle" });
   let state: SessionState = EMPTY_SESSION;
   let watch: Watch = NONE;
@@ -133,10 +129,13 @@ export function createSession(dd: DaydreamApi): Session {
       }
     });
   };
-  const pageHtml = (viewportId: string): string | null => {
-    const item = untrack(dd.items).find((i) => i.id === viewportId);
-    return item !== undefined && isViewport(item) ? item.payload.html : null;
-  };
+  /** The markup of the page the viewport shows (decision #78): null for
+   * a viewport that is gone, or whose page the project does not hold. */
+  const pageHtml = (viewportId: string): string | null =>
+    untrack(() => {
+      const viewport = dd.core.viewportItems(dd.document()).find((v) => v.id === viewportId);
+      return viewport === undefined ? null : (dd.page(viewport.payload.page)?.html ?? null);
+    });
   /** How many elements the selector names in the page's stored text,
    * as the agent's tools count them (0 for one the browser refuses).
    * The last answer is kept: while a page mounts, every geometry change
@@ -215,14 +214,11 @@ export function createSession(dd: DaydreamApi): Session {
     phase,
     pick(verb, target, brief) {
       const trimmed = brief?.trim() ?? "";
-      const pick: Pick = {
+      const pick: VerbPick = {
         verb,
         viewportId: target.viewportId,
         element: target.element,
         ...(trimmed === "" ? {} : { brief: trimmed }),
-        // The round is minted here, once: whatever the agent lands for
-        // this pick carries it, however often it calls the verb.
-        round: roundId(),
         at: Date.now(),
       };
       // The element, while its mount lives: where the anchor was written.
@@ -240,7 +236,7 @@ export function createSession(dd: DaydreamApi): Session {
       if (taken.pick !== null) {
         const current = untrack(phase);
         const anchor = current.kind === "idle" ? null : current.anchor;
-        setPhase({ kind: "building", pick: taken.pick, anchor, landed: 0, of: null });
+        setPhase({ kind: "building", pick: taken.pick, anchor, landed: 0 });
       }
       write({ pick: null, exit: false });
       return taken;
@@ -259,21 +255,11 @@ export function createSession(dd: DaydreamApi): Session {
       // Called from a hook handler (an effect's apply phase): read, don't track.
       if (untrack(phase).kind === "building") setPhase({ kind: "idle" });
     },
-    progress(landed, of) {
+    progress(landed) {
       const current = untrack(phase);
-      if (current.kind !== "building") return;
-      if (landed >= of) setPhase({ kind: "idle" });
-      else setPhase({ ...current, landed, of });
+      if (current.kind === "building") setPhase({ ...current, landed });
     },
     restore(saved, viewportExists) {
-      // A pick from before pages that named an element: nothing names it
-      // now, so it is dropped, said, and cleared from the file.
-      const dropped = droppedLegacyPick(saved);
-      if (dropped) {
-        console.info(
-          `[${dd.plugin.id}] a waiting pick saved before pages named its element by an id no page has, so it was dropped: pick the verb again`,
-        );
-      }
       const s = sessionState(saved);
       state = { ...s, exit: false };
       if (s.pick !== null && viewportExists(s.pick.viewportId)) {
@@ -282,7 +268,7 @@ export function createSession(dd: DaydreamApi): Session {
         watch = watchFor(s.pick.viewportId, s.pick.element, null);
         setPhase({ kind: "waiting", pick: s.pick, anchor: null });
         check();
-      } else if (s.pick !== null || dropped) {
+      } else if (s.pick !== null) {
         write({ pick: null, exit: false });
       }
     },

@@ -4,7 +4,7 @@ import {
   type AppStore,
   type MountPluginOptions,
   type MountedPlugin,
-  createEmptyDocument,
+  testProject,
 } from "@daydream/plugin-testing";
 import {
   beforeEach,
@@ -21,7 +21,7 @@ import manifest from "./manifest.json";
 
 let appStore: AppStore;
 beforeEach(() => {
-  const kernel = createTestKernel({ document: createEmptyDocument() });
+  const kernel = createTestKernel({ project: testProject([]) });
   appStore = kernel.store;
   onTestFinished(() => kernel.dispose());
 });
@@ -33,11 +33,11 @@ function mountShell(
 }
 
 afterEach(() => {
-  appStore.loadDocument(createEmptyDocument(), { slug: null });
+  appStore.loadProject(testProject([]));
 });
 
 test("native text undo edits content without invoking canvas undo", async () => {
-  const { host } = await mountShell({ document: createEmptyDocument() });
+  const { host } = await mountShell({ project: testProject([]) });
   await userEvent.dblClick(canvasEl(host));
   await vi.waitFor(() =>
     expect(host.querySelector("[data-text-editor]")).not.toBeNull(),
@@ -46,8 +46,8 @@ test("native text undo edits content without invoking canvas undo", async () => 
   const modifier = navigator.platform.includes("Mac") ? "Meta" : "Control";
   await userEvent.keyboard(`{${modifier}>}z{/${modifier}}`);
   expect(host.querySelector("[data-text-editor]")).not.toBeNull();
-  expect(appStore.document.items).toHaveLength(1);
-  expect(appStore.document.items[0]!.payload).not.toEqual({
+  expect(appStore.document.canvases[0]!.items).toHaveLength(1);
+  expect(appStore.document.canvases[0]!.items[0]!.payload).not.toEqual({
     text: "Hello\nworld",
   });
   await userEvent.keyboard(`{${modifier}>}{Enter}{/${modifier}}`);
@@ -55,13 +55,15 @@ test("native text undo edits content without invoking canvas undo", async () => 
 });
 
 test("committing a trailing line break retains the empty line and natural height", async () => {
-  const { host } = await mountShell({ document: createEmptyDocument() });
+  const { host } = await mountShell({ project: testProject([]) });
   await userEvent.dblClick(canvasEl(host));
   await vi.waitFor(() =>
     expect(host.querySelector("[data-text-editor]")).not.toBeNull(),
   );
   await userEvent.keyboard("Hello{Enter}");
-  expect(appStore.document.items[0]!.payload).toEqual({ text: "Hello\n" });
+  expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
+    text: "Hello\n",
+  });
   const editingHeight =
     host.querySelector<HTMLElement>("[data-text-item]")!.offsetHeight;
   const modifier = navigator.platform.includes("Mac") ? "Meta" : "Control";
@@ -72,7 +74,7 @@ test("committing a trailing line break retains the empty line and natural height
 });
 
 test("deleting back to a trailing line break does not persist the browser sentinel", async () => {
-  const { host } = await mountShell({ document: createEmptyDocument() });
+  const { host } = await mountShell({ project: testProject([]) });
   await userEvent.dblClick(canvasEl(host));
   await vi.waitFor(() =>
     expect(host.querySelector("[data-text-editor]")).not.toBeNull(),
@@ -80,18 +82,21 @@ test("deleting back to a trailing line break does not persist the browser sentin
   await userEvent.keyboard(
     "Hello{Enter}world{Backspace}{Backspace}{Backspace}{Backspace}{Backspace}",
   );
-  expect(appStore.document.items[0]!.payload).toEqual({ text: "Hello\n" });
+  expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
+    text: "Hello\n",
+  });
 });
 
 test("reopening trailing-newline text restores its empty line and edits at the logical end", async () => {
-  const doc = createEmptyDocument();
-  doc.items.push({
-    id: "text-1",
-    kind: "mrbavio.text",
-    position: { x: 40, y: 50 },
-    payload: { text: "Hello\n" },
-  });
-  const { host } = await mountShell({ document: doc });
+  const project = testProject([
+    {
+      id: "text-1",
+      kind: "mrbavio.text",
+      position: { x: 40, y: 50 },
+      payload: { text: "Hello\n" },
+    },
+  ]);
+  const { host } = await mountShell({ project });
   const box = host.querySelector<HTMLElement>("[data-text-item]")!;
   await userEvent.click(box);
   await userEvent.keyboard("{Enter}");
@@ -103,7 +108,9 @@ test("reopening trailing-newline text restores its empty line and edits at the l
   ).toBe(67);
 
   await userEvent.keyboard("x");
-  expect(appStore.document.items[0]!.payload).toEqual({ text: "Hello\nx" });
+  expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
+    text: "Hello\nx",
+  });
 });
 
 function canvasEl(host: HTMLElement): HTMLElement {
@@ -115,7 +122,7 @@ function canvasEl(host: HTMLElement): HTMLElement {
 }
 
 test("native typing preserves lines and clicking empty canvas commits", async () => {
-  const { host } = await mountShell({ document: createEmptyDocument() });
+  const { host } = await mountShell({ project: testProject([]) });
   const canvas = canvasEl(host);
   await userEvent.dblClick(canvas);
   await vi.waitFor(() =>
@@ -123,26 +130,31 @@ test("native typing preserves lines and clicking empty canvas commits", async ()
   );
   const editor = host.querySelector<HTMLElement>("[data-text-editor]")!;
   await userEvent.keyboard("Hello{Enter}world");
-  expect(appStore.document.items[0]!.payload).toEqual({ text: "Hello\nworld" });
+  expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
+    text: "Hello\nworld",
+  });
   expect(host.querySelector("[data-text-editor]")).toBe(editor);
 
   // Click the top-left of the actual canvas, away from the centered draft.
   await userEvent.click(canvas, { position: { x: 8, y: 8 } });
   expect(host.querySelector("[data-text-editor]")).toBeNull();
-  expect(appStore.selectedItemIds()).toEqual([appStore.document.items[0]!.id]);
+  expect(appStore.selectedItemIds()).toEqual([
+    appStore.document.canvases[0]!.items[0]!.id,
+  ]);
   appStore.undo();
-  expect(appStore.document.items).toHaveLength(0);
+  expect(appStore.document.canvases[0]!.items).toHaveLength(0);
 });
 
 test("a temporarily blank existing editor keeps valid document data until blank commit deletes it", async () => {
-  const doc = createEmptyDocument();
-  doc.items.push({
-    id: "text-1",
-    kind: "mrbavio.text",
-    position: { x: 40, y: 50 },
-    payload: { text: "Keep this valid" },
-  });
-  const { host } = await mountShell({ document: doc });
+  const project = testProject([
+    {
+      id: "text-1",
+      kind: "mrbavio.text",
+      position: { x: 40, y: 50 },
+      payload: { text: "Keep this valid" },
+    },
+  ]);
+  const { host } = await mountShell({ project });
   await userEvent.dblClick(
     host.querySelector<HTMLElement>("[data-text-item]")!,
   );
@@ -154,21 +166,20 @@ test("a temporarily blank existing editor keeps valid document data until blank 
   expect(
     host.querySelector<HTMLElement>("[data-text-editor]")!.innerText.trim(),
   ).toBe("");
-  expect(appStore.document.items[0]!.payload).toEqual({
+  expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
     text: "Keep this valid",
   });
 
   await userEvent.click(canvasEl(host), { position: { x: 8, y: 8 } });
-  expect(appStore.document.items).toHaveLength(0);
+  expect(appStore.document.canvases[0]!.items).toHaveLength(0);
   appStore.undo();
-  expect(appStore.document.items[0]!.payload).toEqual({
+  expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
     text: "Keep this valid",
   });
 });
 
 test("outside press commits the actively edited item when multiple text items are mounted", async () => {
-  const doc = createEmptyDocument();
-  doc.items.push(
+  const project = testProject([
     {
       id: "text-1",
       kind: "mrbavio.text",
@@ -181,8 +192,8 @@ test("outside press commits the actively edited item when multiple text items ar
       position: { x: 240, y: 50 },
       payload: { text: "Second" },
     },
-  );
-  const { host } = await mountShell({ document: doc });
+  ]);
+  const { host } = await mountShell({ project });
   const first = host.querySelector<HTMLElement>('[data-text-item="text-1"]')!;
   await userEvent.dblClick(first);
   await vi.waitFor(() =>
@@ -193,7 +204,11 @@ test("outside press commits the actively edited item when multiple text items ar
   await userEvent.click(canvasEl(host), { position: { x: 8, y: 8 } });
 
   expect(host.querySelector("[data-text-editor]")).toBeNull();
-  expect(appStore.document.items[0]!.payload).toEqual({ text: "Changed" });
-  expect(appStore.document.items[1]!.payload).toEqual({ text: "Second" });
+  expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
+    text: "Changed",
+  });
+  expect(appStore.document.canvases[0]!.items[1]!.payload).toEqual({
+    text: "Second",
+  });
   expect(appStore.selectedItemIds()).toEqual(["text-1"]);
 });

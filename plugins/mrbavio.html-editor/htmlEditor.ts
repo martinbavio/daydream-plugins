@@ -19,6 +19,12 @@
  *   and a mark revealing it are no user event, so a canvas selection
  *   shown in the text never echoes back as a caret move.
  *
+ * The text and the offsets the handle trades in are the FILE's: its
+ * line breaks as written (`\r\n`, a lone `\r`), which CodeMirror holds
+ * as `\n`, are kept beside the view and put back (lineBreaks.ts), so an
+ * edit writes only what was typed, and a mark or a caret lands on the
+ * same character as the kernel's offsets name.
+ *
  * Deliberately absent: CodeMirror's history. The store's burst-based
  * history is the only undo model; the command router handles ⌘Z at
  * window capture phase, so CodeMirror never sees it. Escape (blur) is a
@@ -39,7 +45,12 @@ import {
   HighlightStyle,
   syntaxHighlighting,
 } from "@codemirror/language";
-import { Annotation, StateEffect, StateField } from "@codemirror/state";
+import {
+  Annotation,
+  StateEffect,
+  StateField,
+  type Transaction,
+} from "@codemirror/state";
 import {
   Decoration,
   drawSelection,
@@ -50,17 +61,26 @@ import {
 } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
 
+import {
+  editorOffset,
+  fileOffset,
+  joinBreaks,
+  spliceBreaks,
+  splitBreaks,
+  type BreakEdit,
+} from "./lineBreaks";
 import { diffSpan } from "./rebase";
 
 export interface HtmlEditorOptions {
   parent: HTMLElement;
+  /** The file's text, its line breaks as written. */
   doc: string;
   /** The document changed through an actual edit (typing, paste — never
    * a setText sync). Deferred to a microtask. */
   onDocChanged: () => void;
-  /** The person moved the caret to `offset` (a click, a key — never a
-   * sync or a mark). Deferred to the next frame, the last move of the
-   * frame only. */
+  /** The person moved the caret to `offset`, the file's (a click, a key
+   * — never a sync or a mark). Deferred to the next frame, the last move
+   * of the frame only. */
   onCaret: (offset: number) => void;
   /** The editor lost focus. */
   onBlur: () => void;
@@ -68,11 +88,15 @@ export interface HtmlEditorOptions {
 
 export interface HtmlEditorHandle {
   hasFocus: () => boolean;
+  /** The file's text as the editor holds it: its breaks as written, a
+   * typed one as the file writes most of its own. */
   text: () => string;
-  /** Sync the document to `text` via a minimal span change (no-op when
-   * equal). The selection maps through; onDocChanged stays silent. */
+  /** Sync the document to the file's `text` via a minimal span change
+   * (no-op when equal). The selection maps through; onDocChanged stays
+   * silent. */
   setText: (text: string) => void;
-  /** Mark `range` of the text as the selected element's (null: none).
+  /** Mark `range` of the file's text as the selected element's (null:
+   * none).
    * `reveal` scrolls it into view and puts the caret at its start — for a
    * selection made on the canvas, never under a caret being typed at. The
    * mark maps through edits until the next call. */
@@ -174,14 +198,47 @@ const highlight = HighlightStyle.define([
   { tag: tags.invalid, color: "var(--panel-amber)" },
 ]);
 
+/** What transaction `tr` changed of its text's breaks, by line. */
+function breakEdits(tr: Transaction): BreakEdit[] {
+  const before = tr.startState.doc;
+  const edits: BreakEdit[] = [];
+  tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+    const at = before.lineAt(fromA).number - 1;
+    edits.push({
+      at,
+      removed: before.lineAt(toA).number - 1 - at,
+      added: inserted.lines - 1,
+    });
+  });
+  return edits;
+}
+
 export function createHtmlEditor(options: HtmlEditorOptions): HtmlEditorHandle {
   let destroyed = false;
   let caretFrame: number | null = null;
+  // The file's breaks, as written, and the one a typed break is written
+  // as: set by each sync, carried through each edit.
+  const initial = splitBreaks(options.doc);
+  let breaks = initial.breaks;
+  let eol = initial.eol;
+  const lfText = (): string => view.state.doc.toString();
 
   const view: EditorView = new EditorView({
     parent: options.parent,
-    doc: options.doc,
+    doc: initial.text,
     extensions: [
+      // First, so every listener after it reads the breaks the edit left.
+      EditorView.updateListener.of((update) => {
+        for (const tr of update.transactions) {
+          if (!tr.docChanged || tr.annotation(storeSync) !== undefined) continue;
+          breaks = spliceBreaks(
+            breaks,
+            breakEdits(tr),
+            eol,
+            (line) => tr.newDoc.line(line + 1).length === 0,
+          );
+        }
+      }),
       html({ matchClosingTags: true, autoCloseTags: true }),
       syntaxHighlighting(highlight),
       autocompletion({ icons: false }),
@@ -213,7 +270,11 @@ export function createHtmlEditor(options: HtmlEditorOptions): HtmlEditorHandle {
         if (!update.transactions.some((tr) => tr.isUserEvent("select"))) {
           return;
         }
-        const offset = update.state.selection.main.head;
+        const offset = fileOffset(
+          update.state.doc.toString(),
+          breaks,
+          update.state.selection.main.head,
+        );
         if (caretFrame !== null) cancelAnimationFrame(caretFrame);
         caretFrame = requestAnimationFrame(() => {
           caretFrame = null;
@@ -240,22 +301,27 @@ export function createHtmlEditor(options: HtmlEditorOptions): HtmlEditorHandle {
     // caret-holding editor behind an unfocused window still counts, or
     // the sync effect would rewrite it under the caret.
     hasFocus: () => !destroyed && view.root.activeElement === view.contentDOM,
-    text: () => view.state.doc.toString(),
+    text: () => joinBreaks(lfText(), breaks, eol),
     setText: (text) => {
       if (destroyed) return;
-      const change = diffSpan(view.state.doc.toString(), text);
-      if (change === null) return;
-      view.dispatch({ changes: change, annotations: storeSync.of(true) });
+      const next = splitBreaks(text);
+      const change = diffSpan(lfText(), next.text);
+      if (change !== null) {
+        view.dispatch({ changes: change, annotations: storeSync.of(true) });
+      }
+      // A file whose breaks alone changed is synced too.
+      breaks = next.breaks;
+      eol = next.eol;
     },
     setMark: (range, reveal) => {
       if (destroyed) return;
-      const length = view.state.doc.length;
+      const lf = lfText();
       const mark =
         range === null
           ? null
           : {
-              from: Math.min(range.from, length),
-              to: Math.min(range.to, length),
+              from: editorOffset(lf, breaks, range.from),
+              to: editorOffset(lf, breaks, range.to),
             };
       const revealed = reveal && mark !== null;
       view.dispatch({

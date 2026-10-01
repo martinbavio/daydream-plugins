@@ -2,16 +2,23 @@
 // "Testing Decisions", seam 1): a page goes in, findings come out, and
 // every assertion is on the findings' shape and words — never on how the
 // lint decided. Real Chromium only (vite.config.ts): the lint removes
-// declarations from a live iframe core mounts (`dd.mountViewport`) and
-// reads the CSS engine's answer back. The API object is a test kernel's.
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+// declarations from a live iframe core mounts (the gate's mount,
+// `ctx.mountViewport`, the live face) and
+// reads the CSS engine's answer back. The context is a gate's as core
+// builds it (plugin-testing's `gateContext`), over the test's project:
+// the lint reads each viewport's page through it and mounts that page
+// through it (`ctx.mountViewport`), as a gate does.
+import { afterEach, describe, expect, test } from "vitest";
 import { commands } from "vitest/browser";
 
-import type { DreamDocument, Finding } from "@daydream/plugin-api";
+import type { Finding, PageSheet } from "@daydream/plugin-api";
 import {
   coreApi,
   createPageItem,
-  createTestKernel,
+  gateContext,
+  testProject,
+  type TestPage,
+  type TestProject,
 } from "@daydream/plugin-testing";
 
 import {
@@ -20,17 +27,28 @@ import {
   probeWidths,
   SWEEP_WIDTHS,
   widthsText,
-  type NecessityHost,
   type NecessityOptions,
 } from "./necessity";
+import type { MountContext } from "./pageMount";
+import { pagesOf, withSheets } from "./testPages.test-support";
 
-const kernel = createTestKernel();
-afterAll(() => kernel.dispose());
+/** A gate's context over a project's pages: what the lint reads and
+ * what it mounts. */
+const contextOf = (project: TestProject): MountContext =>
+  gateContext({ page: pagesOf(project) });
+
+function necessityWith(
+  ctx: MountContext,
+  project: TestProject,
+  options?: NecessityOptions,
+): Promise<Finding[]> {
+  return lintWith(coreApi(), project.document, ctx, options);
+}
 
 const necessityLint = (
-  doc: DreamDocument,
+  project: TestProject,
   options?: NecessityOptions,
-): Promise<Finding[]> => lintWith(kernel.dd, doc, options);
+): Promise<Finding[]> => necessityWith(contextOf(project), project, options);
 
 afterEach(() => {
   // Every lint disposes its own iframe; a leftover is a bug, not a
@@ -38,27 +56,38 @@ afterEach(() => {
   expect(document.querySelectorAll("iframe")).toHaveLength(0);
 });
 
-/** One page: html › body (its own style `margin: 0` unless given) › the
- * markup, the css, a frame, an id (`v1` unless given). */
+/** One viewport and its page: html › body (its own style `margin: 0`
+ * unless given) › the markup, the css (its one sheet, `<id>.css`), a
+ * frame, an id (`v1` unless given) and the page's path (`<id>.html`
+ * unless given). */
+function shownPage(
+  frame: { width: number; height?: number } | undefined,
+  body: string,
+  css = "",
+  options: { bodyStyle?: string; id?: string; path?: string; head?: string } = {},
+): TestPage {
+  const bodyStyle = options.bodyStyle ?? "margin: 0";
+  return createPageItem(
+    {
+      html: `<!doctype html><html><head><title>t</title>${options.head ?? ""}</head><body style="${bodyStyle}">${body}</body></html>`,
+      css,
+    },
+    {
+      id: options.id ?? "v1",
+      ...(options.path === undefined ? {} : { path: options.path }),
+      ...(frame === undefined ? {} : { frame }),
+    },
+  );
+}
+
+/** A project of that one viewport. */
 function makeDocument(
   frame: { width: number; height?: number } | undefined,
   body: string,
   css = "",
   options: { bodyStyle?: string; id?: string } = {},
-): DreamDocument {
-  const bodyStyle = options.bodyStyle ?? "margin: 0";
-  return {
-    version: 7,
-    items: [
-      createPageItem(
-        {
-          html: `<!doctype html><html><head><title>t</title></head><body style="${bodyStyle}">${body}</body></html>`,
-          css,
-        },
-        { id: options.id ?? "v1", ...(frame === undefined ? {} : { frame }) },
-      ),
-    ],
-  };
+): TestProject {
+  return testProject([shownPage(frame, body, css, options)]);
 }
 
 const FRAME = { width: 400, height: 300 };
@@ -444,29 +473,77 @@ describe("dead and live declarations", () => {
     }
   });
 
-  test("a `<style>` the markup keeps in a noscript is never taken for the page's css", async () => {
-    // The kernel keeps a noscript's stylesheet in the markup, and the
-    // measurer's copy (no scripting there) parses it as a `<style>` in the
-    // head, before the page's own.
-    const findings = await necessityLint({
-      version: 7,
-      items: [
-        createPageItem(
-          {
-            html: '<!doctype html><html><head><noscript><style>#box { color: red; }</style></noscript></head><body style="margin: 0"><div id="box" style="height: 20px"></div></body></html>',
-            css: "#box { position: static; }",
-          },
-          { id: "v1", frame: FRAME },
+  test("a page of several sheets: each declaration is cut from its own sheet's `<style>` in the copy, numbered across the page's sheets and named with its sheet", async () => {
+    const block = "#box { height: 20px; }";
+    const findings = await necessityLint(
+      testProject([
+        withSheets(
+          shownPage(FRAME, '<div id="box"></div>', "", {
+            head: `<style>${block}</style><link rel="stylesheet" href="v1.css">`,
+          }),
+          [
+            { source: { style: 0 }, text: block, readOnly: false },
+            {
+              source: { file: "v1.css" },
+              text: "#box { width: 50px; position: static; }",
+              readOnly: false,
+            },
+          ],
         ),
-      ],
-    });
+      ]),
+    );
     expect(findings.map((f) => [f.rule, f.property, f.message])).toEqual([
       [
-        0,
+        1,
         "position",
-        `position: static in rule \`#box\` of viewport v1 changes nothing at ${sweptAt(400)}`,
+        `position: static in rule \`#box\` of \`v1.css\` in viewport v1 changes nothing at ${sweptAt(400)}`,
       ],
     ]);
+  });
+
+  test("a read-only sheet's declarations are never judged, though they are the page's", async () => {
+    const kit = "https://cdn.example/kit.css";
+    const findings = await necessityLint(
+      testProject([
+        withSheets(
+          shownPage(FRAME, '<div id="box" style="height: 10px"></div>', "", {
+            head: `<link rel="stylesheet" href="${kit}">`,
+          }),
+          [
+            {
+              source: { url: kit },
+              text: "#box { position: static; --unused: 1px; }",
+              readOnly: true,
+            },
+          ],
+        ),
+      ]),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  test("a sheet file the host would never write is read-only: its declarations are never judged; a remote sheet it could not fetch holds none", async () => {
+    const kit = "https://cdn.example/kit.css";
+    const findings = await necessityLint(
+      testProject([
+        withSheets(
+          shownPage(FRAME, '<div id="box" style="height: 10px"></div>', "", {
+            head: `<link rel="stylesheet" href="${kit}"><link rel="stylesheet" href="kit.css">`,
+          }),
+          [
+            { source: { url: kit }, text: "", readOnly: true, error: "HTTP 404" },
+            {
+              source: { file: "kit.css" },
+              text: "#box { position: static; --unused: 1px; }",
+              readOnly: true,
+              unwritable:
+                "kit.css is a link: it is neither written nor removed through it",
+            },
+          ],
+        ),
+      ]),
+    );
+    expect(findings).toEqual([]);
   });
 
   test("an element is named by its selector in the stored markup, which still holds an element the safety walk removed", async () => {
@@ -543,18 +620,18 @@ function responsiveGrid(holderWidth?: string): { body: string; css: string } {
   };
 }
 
+/** One page, `v1.html`, shown by two viewports of these widths (`v1`,
+ * `v2`): its viewports share it. */
 function twoViewports(
   widths: [number, number],
-  content: (width: number) => { body: string; css: string },
-): DreamDocument {
-  const first = content(widths[0]);
-  const second = content(widths[1]);
-  const doc = makeDocument({ width: widths[0], height: 300 }, first.body, first.css);
-  doc.items.push(
-    makeDocument({ width: widths[1], height: 300 }, second.body, second.css, { id: "v2" })
-      .items[0]!,
-  );
-  return doc;
+  content: { body: string; css: string },
+): TestProject {
+  const one = shownPage({ width: widths[0], height: 300 }, content.body, content.css);
+  const two = shownPage({ width: widths[1], height: 300 }, "", "", {
+    id: "v2",
+    path: "v1.html",
+  });
+  return testProject([one, two]);
 }
 
 describe("a correct conditional page lands", () => {
@@ -571,17 +648,17 @@ describe("a correct conditional page lands", () => {
         severity: "blocking",
         rule: 1,
         property: "grid-template-columns",
-        message: `grid-template-columns: 1fr 1fr in rule \`.grid\` in \`@container (width >= 400px)\` of viewport v1 changes nothing at ${sweptAt(900)}`,
+        message: `grid-template-columns: 1fr 1fr in rule \`.grid\` in \`@container (width >= 400px)\` of \`v1.css\` in viewport v1 changes nothing at ${sweptAt(900)}`,
       },
     ]);
   });
 
   test("two viewports (360/900) of the same page: no findings", async () => {
-    expect(await necessityLint(twoViewports([360, 900], () => responsiveGrid()))).toEqual([]);
+    expect(await necessityLint(twoViewports([360, 900], responsiveGrid()))).toEqual([]);
   });
 
   test("a declaration dead in both viewports is one finding, named from the first", async () => {
-    const box = () => ({ body: '<div id="box" style="position: static; height: 10px"></div>', css: "" });
+    const box = { body: '<div id="box" style="position: static; height: 10px"></div>', css: "" };
     expect(await necessityLint(twoViewports([360, 900], box))).toEqual([
       {
         tier: "necessity",
@@ -596,21 +673,22 @@ describe("a correct conditional page lands", () => {
   test("elements without ids correspond by their unique selector", async () => {
     // Dead in both → one finding; the branch dead at 360 but live at 900
     // → none.
-    const dead = twoViewports([360, 900], () => ({
+    const dead = twoViewports([360, 900], {
       body: '<div style="position: static; height: 10px"></div>',
       css: "",
-    }));
+    });
     expect((await necessityLint(dead)).map((f) => f.elementId)).toEqual(["div"]);
-    expect(await necessityLint(twoViewports([360, 900], () => responsiveGrid()))).toEqual([]);
+    expect(await necessityLint(twoViewports([360, 900], responsiveGrid()))).toEqual([]);
   });
 
   test("same-looking siblings stay apart: each is its own selector, so one's live verdict never hides the other's", async () => {
-    // Two `.item` siblings: the first dead in both viewports, the second
-    // live in the second only.
-    const doc = twoViewports([360, 900], (width) => ({
-      body: `<div class="row"><div class="item" style="position: static; height: 10px"></div><div class="item" style="position: ${width === 360 ? "static" : "relative"}"></div></div>`,
-      css: "",
-    }));
+    // Two `.item` siblings: the first's `position` dead in both viewports,
+    // the second's live — at 900, where a rule offsets it — in the second
+    // viewport's frame.
+    const doc = twoViewports([360, 900], {
+      body: '<div class="row"><div class="item" style="position: static; height: 10px"></div><div class="item" style="position: relative"></div></div>',
+      css: "@media (width >= 800px) { .item + .item { top: 4px; } }",
+    });
     expect((await necessityLint(doc)).map((f) => f.elementId)).toEqual([
       "div.item:nth-of-type(1)",
     ]);
@@ -623,7 +701,7 @@ describe("the width sweep (a page is not a photo)", () => {
    * either way, so the line changes nothing THERE; at 360 the auto column
    * grows to the child's 500px min-content and `minmax(0, 1fr)` holds it
    * at 360 — the declaration exists for the width the frame is not at. */
-  function boundedColumn(frame: { width: number; height?: number } | undefined): DreamDocument {
+  function boundedColumn(frame: { width: number; height?: number } | undefined): TestProject {
     return makeDocument(frame, '<main><div style="width: 500px; height: 10px"></div></main>', "", {
       bodyStyle: "margin: 0; display: grid; grid-template-columns: minmax(0, 1fr)",
     });
@@ -646,7 +724,7 @@ describe("the width sweep (a page is not a photo)", () => {
       ),
     );
     expect(findings.map((f) => f.message)).toEqual([
-      `position: static in rule \`#box\` of viewport v1 changes nothing at ${sweptAt(768, 600)}`,
+      `position: static in rule \`#box\` of \`v1.css\` in viewport v1 changes nothing at ${sweptAt(768, 600)}`,
     ]);
     expect(sweptAt(768, 600)).toBe("360, 599, 600, 601, 768, 1280 or 1920px");
   });
@@ -692,37 +770,35 @@ describe("the width sweep (a page is not a photo)", () => {
         rule: 0,
         property: "position",
         message:
-          "position: static in rule `#box` of viewport v1 changes nothing at 768px (the lint ran out of time before it could read 360, 1280 or 1920px)",
+          "position: static in rule `#box` of `v1.css` in viewport v1 changes nothing at 768px (the lint ran out of time before it could read 360, 1280 or 1920px)",
       },
     ]);
   });
 
   test("the sweep mounts no width once the answer is known: a line live in an earlier viewport is not swept in a later one", async () => {
-    // `#box`'s red is live under the blue parent of v1 and reads dead
-    // under the red parent of v2: dead in only one viewport, it is never
-    // a finding, so v2 has nothing to sweep.
-    const doc = makeDocument(
-      FRAME,
-      '<div style="color: blue"><p id="box" style="color: red">x</p></div>',
-    );
-    doc.items.push(
-      makeDocument(
+    // One page in two viewports: `#box`'s red is live under the blue
+    // parent at 400 and reads dead under the red parent at 900 — dead in
+    // only one viewport, it is never a finding, so v2 has nothing to
+    // sweep.
+    const doc = testProject([
+      shownPage(
         FRAME,
-        '<div style="color: red"><p id="box" style="color: red">x</p></div>',
-        "",
-        { id: "v2" },
-      ).items[0]!,
-    );
+        '<div id="parent"><p id="box" style="color: red">x</p></div>',
+        "#parent { color: red; }\n@media (width < 500px) { #parent { color: blue; } }",
+      ),
+      shownPage({ width: 900, height: 300 }, "", "", { id: "v2", path: "v1.html" }),
+    ]);
     let mounts = 0;
-    const counted: NecessityHost = {
-      core: kernel.dd.core,
+    const ctx = contextOf(doc);
+    const counted: MountContext = {
+      page: ctx.page,
       // One function behind the API's overloads, as the kernel's is.
-      mountViewport: ((...args: Parameters<NecessityHost["mountViewport"]>) => {
+      mountViewport: ((...args: Parameters<MountContext["mountViewport"]>) => {
         mounts++;
-        return kernel.dd.mountViewport(...args);
-      }) as NecessityHost["mountViewport"],
+        return ctx.mountViewport(...args);
+      }) as MountContext["mountViewport"],
     };
-    expect(await lintWith(counted, doc)).toEqual([]);
+    expect(await necessityWith(counted, doc)).toEqual([]);
     expect(mounts).toBe(2);
   });
 
@@ -735,12 +811,12 @@ describe("the width sweep (a page is not a photo)", () => {
 
 describe("viewports and disposal", () => {
   test("viewportIds restricts the lint; an unknown id is an error", async () => {
-    const doc = makeDocument(FRAME, '<div id="a" style="position: static; height: 10px"></div>');
-    doc.items.push(
-      makeDocument(FRAME, '<div id="b" style="position: static; height: 10px"></div>', "", {
+    const doc = testProject([
+      shownPage(FRAME, '<div id="a" style="position: static; height: 10px"></div>'),
+      shownPage(FRAME, '<div id="b" style="position: static; height: 10px"></div>', "", {
         id: "other",
-      }).items[0]!,
-    );
+      }),
+    ]);
     expect((await necessityLint(doc)).map((f) => f.elementId)).toEqual(["#a", "#b"]);
     const some = await necessityLint(doc, { viewportIds: ["other"] });
     expect(some.map((f) => f.elementId)).toEqual(["#b"]);
@@ -789,7 +865,7 @@ describe("necessity on rules", () => {
         severity: "blocking",
         rule: 0,
         property: "--unused",
-        message: `--unused: 1px in rule \`.a\` of viewport v1 changes nothing at ${sweptAt(400)}`,
+        message: `--unused: 1px in rule \`.a\` of \`v1.css\` in viewport v1 changes nothing at ${sweptAt(400)}`,
       },
     ]);
   });
@@ -799,7 +875,7 @@ describe("necessity on rules", () => {
       makeDocument(FRAME, '<div class="a">hi</div>', "<!--\n.a { --unused: 1px; }\n-->"),
     );
     expect(findings.map((f) => f.message)).toEqual([
-      `--unused: 1px in rule \`.a\` of viewport v1 changes nothing at ${sweptAt(400)}`,
+      `--unused: 1px in rule \`.a\` of \`v1.css\` in viewport v1 changes nothing at ${sweptAt(400)}`,
     ]);
   });
 
@@ -829,7 +905,7 @@ describe("necessity on rules", () => {
         severity: "blocking",
         rule: 0,
         property: "color",
-        message: `color: red in rule \`.card::before\` of viewport v1 changes nothing at ${sweptAt(400)}`,
+        message: `color: red in rule \`.card::before\` of \`v1.css\` in viewport v1 changes nothing at ${sweptAt(400)}`,
       },
     ]);
   });
@@ -898,29 +974,69 @@ describe("necessity on rules", () => {
     ).toEqual([]);
   });
 
-  test("rule verdicts intersect across viewports by selector and conditions, never by index — dead in one, live in the other, stays alive overall", async () => {
-    const doc = makeDocument({ width: 360 }, '<div class="a"></div>', ".a { --unused: 1px; }");
-    doc.items.push(
-      makeDocument(
-        { width: 1280 },
-        '<div class="a" style="width: var(--unused); height: 10px"></div>',
-        ".a { --unused: 1px; }",
-        { id: "v2" },
-      ).items[0]!,
+  /** Viewport `id` showing its own page, which links the one shared
+   * sheet `shared.css` after the `<style>` blocks it holds (`blocks`). */
+  function sharing(
+    id: string,
+    frame: { width: number },
+    body: string,
+    shared: string,
+    blocks: string[] = [],
+  ): TestPage {
+    const sheets: PageSheet[] = [
+      ...blocks.map((text, style) => ({ source: { style }, text, readOnly: false })),
+      { source: { file: "shared.css" }, text: shared, readOnly: false },
+    ];
+    return withSheets(
+      shownPage(frame, body, "", {
+        id,
+        head: `${blocks.map((text) => `<style>${text}</style>`).join("")}<link rel="stylesheet" href="shared.css">`,
+      }),
+      sheets,
     );
+  }
+
+  test("a rule's verdicts intersect across the pages that link its sheet, by its selector and conditions in that sheet, never by index — dead in one, live in the other, stays alive overall", async () => {
     // The first page's element reads nothing from --unused (dead there);
-    // the second's `width: var(--unused)` does (live there). The SAME
-    // rule is dead only where dead EVERYWHERE it exists, so the
+    // the second's `width: var(--unused)` does (live there), and there
+    // the rule is the second of the page's. The SAME line of the one
+    // sheet is dead only where dead EVERYWHERE it exists, so the
     // intersection reports nothing.
+    const doc = testProject([
+      sharing("v1", { width: 360 }, '<div class="a"></div>', ".a { --unused: 1px; }"),
+      sharing(
+        "v2",
+        { width: 1280 },
+        '<div class="a" style="width: var(--unused)"></div>',
+        ".a { --unused: 1px; }",
+        [".a { height: 10px; }"],
+      ),
+    ]);
     expect(await necessityLint(doc)).toEqual([]);
   });
 
-  test("the same rule's declaration dead in every viewport it exists in is reported once", async () => {
-    const doc = makeDocument({ width: 360 }, '<div class="a"></div>', ".a { --unused: 1px; }");
-    doc.items.push(
-      makeDocument({ width: 1280 }, '<div class="a"></div>', ".a { --unused: 1px; }", { id: "v2" })
-        .items[0]!,
-    );
-    expect(properties(await necessityLint(doc))).toEqual(["--unused"]);
+  test("the same line of a shared sheet dead in every page that links it is reported once, named from the first viewport", async () => {
+    const doc = testProject([
+      sharing("v1", { width: 360 }, '<div class="a"></div>', ".a { --unused: 1px; }"),
+      sharing("v2", { width: 1280 }, '<div class="a"></div>', ".a { --unused: 1px; }"),
+    ]);
+    expect((await necessityLint(doc)).map((f) => [f.rule, f.message])).toEqual([
+      [0, `--unused: 1px in rule \`.a\` of \`shared.css\` in viewport v1 changes nothing at ${sweptAt(360)}`],
+    ]);
+  });
+
+  test("the same selector in two pages' own sheets is two lines: each is judged in its own page", async () => {
+    const doc = testProject([
+      shownPage({ width: 360 }, '<div class="a"></div>', ".a { --unused: 1px; }"),
+      shownPage(
+        { width: 1280 },
+        '<div class="a" style="width: var(--unused)"></div>',
+        ".a { --unused: 1px; }",
+        { id: "v2" },
+      ),
+    ]);
+    expect((await necessityLint(doc)).map((f) => f.message)).toEqual([
+      `--unused: 1px in rule \`.a\` of \`v1.css\` in viewport v1 changes nothing at ${sweptAt(360)}`,
+    ]);
   });
 });

@@ -6,7 +6,7 @@
 // `text/html`: no more than a single paragraph of phrasing content is
 // left for the Text plugin; anything with structure — two blocks, a
 // list, a card, a table, an image inside the paragraph — is a fragment
-// and lands as a viewport.
+// and is a page (paste.ts).
 
 /** Block-level by UA default (the HTML spec's rendering section). Every
  * other tag flows inside a line, an unknown one included (`<font>`,

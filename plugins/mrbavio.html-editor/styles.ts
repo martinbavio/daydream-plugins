@@ -23,9 +23,9 @@ export const css = (p: string): string => `
   --panel-amber: #a8842c;
   --panel-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  /* The dock section is the flex column this fills: the panel registers
-     with \`grow\`, so the section is its share of the dock's spare height
-     and this root, the editor box and CodeMirror fill it top to bottom. */
+  /* The panel's body is the flex column this fills: this root, the
+     editor box and CodeMirror fill it top to bottom. The width and the
+     length are the panel layer's (decision #79). */
   flex: 1 1 auto;
   min-height: 0;
   display: flex;

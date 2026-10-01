@@ -24,8 +24,8 @@ interface Typed {
 
 /** Text a save did not write, held on screen and kept per page, so a
  * refusal, a page that changed underneath, another page's selection or a
- * hidden dock never loses what was typed. Panel memory, never the
- * document. `kind` is what ⌘S goes by: a HELD draft was typed over a page
+ * panel minimized or hidden never loses what was typed. Panel memory, never the
+ * project. `kind` is what ⌘S goes by: a HELD draft was typed over a page
  * that moved — it changed where the text was typed, or it left the
  * canvas — and ⌘S saves it over the page as it is now; a REFUSED one is
  * text the kernel refused, kept until it is corrected or dropped. A held
@@ -37,7 +37,7 @@ export type Draft =
 
 /** What the entry (index.tsx) shares with the panel: the API, the live
  * editor handle its Escape command acts on, and the drafts that outlive a
- * panel mount (the dock unmounts its panels while hidden). */
+ * panel mount (the body is unmounted while minimized or hidden). */
 export interface PanelState {
   dd: DaydreamApi;
   /** The CodeMirror handle while a page is shown; written here, read by
@@ -60,19 +60,27 @@ export interface PanelState {
    * is saved over the page as it is now. Never handles the key (false),
    * so it goes on to core's save. Set by the panel once mounted. */
   saveOver: () => boolean;
-  /** The document is about to be swapped, or the plugin to stop (the
+  /** The project is about to be swapped, or the plugin to stop (the
    * entry's `leave` hook): what the editor holds is saved now,
    * synchronously, into the page it was typed in, or held as its draft;
    * it never throws. Set by the panel once mounted. */
   leave: () => void;
-  /** By viewport id, of the document loaded when they were held: a
-   * page id names a page of one document only, so another load (a page
-   * of the same id in it, the same document reopened) must never show
-   * them. `load` is `dd.loadVersion()` then. Read through `draftsNow`. */
+  /** By viewport id, of the project loaded when they were held: a
+   * viewport id names a viewport of one load only, so another load (a
+   * viewport of the same id in it, the same project reopened) must never
+   * show them. `load` is `dd.loadVersion()` then. Read through
+   * `draftsNow`.
+   *
+   * Several viewports may show one page (decision #78), and a draft is
+   * still kept by the viewport it was typed in, not by the page's path:
+   * it is that pane's typing, and another viewport of the page shows the
+   * file as it is. A save from one is, to the other's draft, a change
+   * made elsewhere — carried onto it (`rebase`) or held, as any other
+   * is. */
   drafts: { load: number; pages: Map<string, Draft> };
 }
 
-/** The drafts held for the document loaded now: those of an earlier load
+/** The drafts held for the project loaded now: those of an earlier load
  * are dropped on the first read after it. */
 export function draftsNow(state: PanelState): Map<string, Draft> {
   const load = untrack(state.dd.loadVersion);
@@ -84,15 +92,16 @@ export function draftsNow(state: PanelState): Map<string, Draft> {
 export const APPLY_DEBOUNCE_MS = 150;
 
 /** The sentence for text typed where the page changed on the canvas
- * meanwhile (an agent, the CSS editor, a draft finalizing): nothing is
- * written, and the typed text is kept as the page's draft. Typing
- * elsewhere in the page is carried onto the change and saved. */
+ * meanwhile (another viewport of the page, the CSS editor, an agent's
+ * finalize, the file changed on disk): nothing is written, and the typed
+ * text is kept as the page's draft. Typing elsewhere in the page is
+ * carried onto the change and saved. */
 export const CHANGED_UNDERNEATH =
-  "The page's HTML changed on the canvas where you were typing, so nothing was saved. Your text is kept here: ⌘S saves it over the page as it is now, and ⌘Z drops it.";
+  "The page's HTML changed where you were typing, on the canvas or in its file on disk, so nothing was saved. Your text is kept here: ⌘S saves it over the page as it is now, and ⌘Z drops it.";
 
 /** The sentence for a held draft whose page is back as the typing found
- * it: the page left the canvas mid-save and an undo or a redo brought it
- * back, or the change made under the typing was undone. */
+ * it: the viewport left the canvas mid-save and an undo or a redo brought
+ * it back, or the change made under the typing was undone. */
 export const PAGE_BACK =
   "The page left the canvas, or changed on it, while you were typing, so nothing was saved; it is back as your typing found it. Your text is kept here: ⌘S saves it over the page, and ⌘Z drops it.";
 
@@ -105,10 +114,10 @@ export function draftMessage(draft: Draft, current: string | null): string {
   return current === draft.base ? PAGE_BACK : CHANGED_UNDERNEATH;
 }
 
-/** What the selection points at: the page it is in, and the element
- * (null when the page itself is selected). */
+/** What the selection points at: the viewport showing the page it is
+ * in, and the element (null when the viewport itself is selected). */
 export interface Target {
-  pageId: string;
+  viewportId: string;
   elementId: string | null;
 }
 
@@ -119,24 +128,68 @@ export function targetOf(dd: DaydreamApi, id: string | null): Target | null {
   const item = dd.items().find((candidate) => candidate.id === id);
   if (item !== undefined) {
     return item.kind === dd.core.viewportKind
-      ? { pageId: id, elementId: null }
+      ? { viewportId: id, elementId: null }
       : null;
   }
   const element = dd.pageElement(id);
-  return element === null ? null : { pageId: element.viewportId, elementId: id };
+  return element === null ? null : { viewportId: element.viewportId, elementId: id };
 }
 
-/** A page's stored markup, or null when it is not on the canvas. */
-export function pageHtml(dd: DaydreamApi, pageId: string): string | null {
-  const page = dd.core
-    .viewportItems(dd.document())
-    .find((item) => item.id === pageId);
-  return page === undefined ? null : page.payload.html;
+/** The sentence the pane shows for a variant's viewport, in place of an
+ * editor: what it renders is not its page's file, and no text of it is
+ * the plugin's to read or write. */
+export const VARIANT_VIEWPORT =
+  "This viewport shows a variant. A variant changes through its draft, or through Accept in its title bar.";
+
+const viewportItem = (
+  dd: Pick<DaydreamApi, "core" | "document">,
+  viewportId: string,
+) =>
+  dd.core.viewportItems(dd.document()).find((item) => item.id === viewportId);
+
+/** Whether viewport `viewportId` shows a variant (its `payload.variant`):
+ * a copy of its page an agent made, rendered instead of the page's file. */
+export function isVariantViewport(
+  dd: Pick<DaydreamApi, "core" | "document">,
+  viewportId: string,
+): boolean {
+  return viewportItem(dd, viewportId)?.payload.variant !== undefined;
 }
 
-/** The kernel's refusal as the pane shows it: a sentence of its own. */
-const sentence = (problem: string): string =>
-  problem.charAt(0).toUpperCase() + problem.slice(1) + ".";
+/** The path of the page viewport `viewportId` shows (its `payload.page`,
+ * decision #78), or null when the viewport is not on the canvas — or
+ * shows a variant: `dd.page` of its path is the page's own file, never
+ * the text it renders, so the pane neither shows it there nor writes it,
+ * and a write keyed to such a viewport finds no page. */
+export function pagePath(
+  dd: Pick<DaydreamApi, "core" | "document">,
+  viewportId: string,
+): string | null {
+  const viewport = viewportItem(dd, viewportId);
+  return viewport === undefined || viewport.payload.variant !== undefined
+    ? null
+    : viewport.payload.page;
+}
+
+/** The stored markup of the page viewport `viewportId` shows, or null when
+ * the viewport is not on the canvas, shows a variant (`pagePath`), or the
+ * project holds no such page. */
+export function pageHtml(
+  dd: Pick<DaydreamApi, "core" | "document" | "page">,
+  viewportId: string,
+): string | null {
+  const path = pagePath(dd, viewportId);
+  return path === null ? null : (dd.page(path)?.html ?? null);
+}
+
+/** The kernel's refusal as the pane shows it: a sentence of its own. A
+ * guard's refusal is a clause ("the edit brings in …", "the page's
+ * markup changed since it was shown; …"); one that is a whole sentence
+ * already keeps its one period. */
+const sentence = (problem: string): string => {
+  const text = problem.charAt(0).toUpperCase() + problem.slice(1);
+  return text.endsWith(".") ? text : `${text}.`;
+};
 
 /** A save's verdict. Saved: `text` is what the page holds now — the
  * typed text, or the typing carried onto a page that changed elsewhere.
@@ -161,13 +214,21 @@ interface Resolution {
  * page into a model and back: what is typed is what is stored.
  *
  * Saved LIVE, after a short debounce, through `dd.writePage`'s `html`
- * edit, whose verdict is the kernel's: it refuses, by name, whatever a
- * landing would take out of the text (a `<script>`, an `on*`, a url a
- * page cannot reach through, a `<style>`), and refuses a save over a page
- * whose html is no longer the one the editor showed. Every save is an
- * undo step, and saves in quick succession join one — the kernel's edit
- * burst, so a typing session is one undo step for as long as no pause
- * outlasts the burst.
+ * edit, which writes the page's file, named by its path, as typed
+ * (decision #78) and whose verdict is the kernel's: it refuses, by name,
+ * whatever the edit brings in that the render walk takes out (a
+ * `<script>`, an `on*`, a url a page cannot reach through, a `<style>`),
+ * and refuses a save over a page whose html is no longer the one the
+ * editor showed. Every save is an undo step, and saves in quick
+ * succession join one — the kernel's edit burst, so a typing session is
+ * one undo step for as long as no pause outlasts the burst.
+ *
+ * The edit is on the canvas at once, and the host writes the file after.
+ * A file that changed on disk since the tab read it wins: the kernel
+ * drops the edit, reads the file again and says so on its status line,
+ * and the page's html changes under the pane as any change made
+ * elsewhere does — shown as it is now, or, with typing pending, the
+ * typing carried onto it or held.
  *
  * A REFUSED text is never lost: it stays on screen as the page's DRAFT
  * with the sentence under it, and comes back with the page when another
@@ -194,8 +255,15 @@ interface Resolution {
  * blur, and whenever the page's html changes while nothing typed is
  * pending or held — a minimal span change, so the caret maps through.
  *
+ * A VARIANT's viewport — or an element in one — shows no editor, only
+ * `VARIANT_VIEWPORT`: what it renders is the variant, not its page's
+ * file, the API reads no variant's text, and a variant changes through
+ * its draft or its Accept. Nothing is ever written through it:
+ * `pagePath` answers no page for it, so even a save keyed to it finds
+ * none (`write`).
+ *
  * A factory, not a `<Component>`: the panel's `render` (index.tsx) calls
- * it under the dock's owner, and `state` is a plain object shared with
+ * it under the panel's owner, and `state` is a plain object shared with
  * the entry — never a reactive props proxy.
  */
 export default function createHtmlPanel(state: PanelState) {
@@ -220,26 +288,32 @@ export default function createHtmlPanel(state: PanelState) {
     if (id !== null || !untrack(holdingCaret)) {
       return { target: read, last: read };
     }
-    if (last === null || untrack(() => pageHtml(dd, last.pageId)) === null) {
+    if (last === null || untrack(() => pageHtml(dd, last.viewportId)) === null) {
       return { target: null, last };
     }
     // The same object while nothing changes, so nothing that follows the
     // target re-runs.
     const kept =
-      last.elementId === null ? last : { pageId: last.pageId, elementId: null };
+      last.elementId === null ? last : { viewportId: last.viewportId, elementId: null };
     return { target: kept, last: kept };
   });
   const target = createMemo(() => resolution().target);
-  const pageId = createMemo(() => target()?.pageId ?? null);
+  const viewportId = createMemo(() => target()?.viewportId ?? null);
   // The page's stored markup; tracks the field, so an outside write
   // reaches the editor.
   const html = createMemo<string | null>(() => {
-    const id = pageId();
+    const id = viewportId();
     return id === null ? null : pageHtml(dd, id);
   });
   // The page the editor is open on: the selection's, while it is on the
   // canvas.
-  const openPage = createMemo(() => (html() === null ? null : pageId()));
+  const openPage = createMemo(() => (html() === null ? null : viewportId()));
+  // The selection is a variant's viewport, or in one: no editor, the
+  // sentence instead.
+  const onVariant = createMemo(() => {
+    const id = viewportId();
+    return id !== null && isVariantViewport(dd, id);
+  });
 
   // A draft's sentence, shown under the editor until the next save or
   // page.
@@ -322,12 +396,14 @@ export default function createHtmlPanel(state: PanelState) {
       synced = current;
       return { ok: true, text: current };
     }
+    const path = untrack(() => pagePath(dd, id));
+    if (path === null) return { ok: false, kind: "held" };
     let problem: string | null;
     writing = next;
     try {
       problem = dd.writePage({
         kind: "html",
-        viewportId: id,
+        path,
         expected: current,
         html: next,
       });
@@ -391,7 +467,7 @@ export default function createHtmlPanel(state: PanelState) {
 
   state.undo = (): boolean => {
     const ed = editor();
-    const id = untrack(pageId);
+    const id = untrack(viewportId);
     if (ed === undefined || id === null) return false;
     clearDebounce();
     saveEditor(id);
@@ -411,7 +487,7 @@ export default function createHtmlPanel(state: PanelState) {
 
   state.saveOver = (): boolean => {
     const ed = editor();
-    const id = untrack(pageId);
+    const id = untrack(viewportId);
     if (ed === undefined || id === null) return false;
     clearDebounce();
     saveEditor(id);
@@ -426,7 +502,7 @@ export default function createHtmlPanel(state: PanelState) {
 
   state.redo = (): boolean => {
     const ed = editor();
-    const id = untrack(pageId);
+    const id = untrack(viewportId);
     if (id === null) return false;
     leave(id);
     const back = dropped;
@@ -455,10 +531,10 @@ export default function createHtmlPanel(state: PanelState) {
     saveEditor(id);
   };
 
-  // The document is about to be swapped, or the plugin to stop: what the
+  // The project is about to be swapped, or the plugin to stop: what the
   // editor holds is saved into the page it was typed in, now, while that
-  // page is still the document's — the debounce would fire into another
-  // document, or never. Read from the editor itself: text other than
+  // page is still the project's — the debounce would fire into another
+  // project, or never. Read from the editor itself: text other than
   // what the page last showed or held as its draft is typing, whether or
   // not its report has reached the pane yet (a microtask after the
   // keystroke). A second call finds nothing typed and writes nothing. A
@@ -514,24 +590,24 @@ export default function createHtmlPanel(state: PanelState) {
     const range =
       t === null ||
       t.elementId === null ||
-      t.pageId !== shown ||
+      t.viewportId !== shown ||
       ed.text() !== synced
         ? null
         : dd.pageSource(t.elementId);
     ed.setMark(
-      range === null || range.viewportId !== t?.pageId
+      range === null || range.viewportId !== t?.viewportId
         ? null
         : { from: range.start, to: range.end },
       reveal && !ed.hasFocus(),
     );
   }
 
-  // The panel unmounting — the dock hidden (⌘\), the plugin unloading —
-  // mid-edit: save what is pending the way blur would, after the disposal
-  // has run (never a write inside it). Only into the state the typing
-  // belongs to: a load or an undo, a redo, before the save runs — the
-  // same document reopened, a page of the same id — drops it, as the
-  // restore drops what is pending while the panel is up.
+  // The panel's body unmounting — minimized, hidden (⌘\), the plugin
+  // unloading — mid-edit: save what is pending the way blur would, after
+  // the disposal has run (never a write inside it). Only into the state
+  // the typing belongs to: a load or an undo, a redo, before the save
+  // runs — the same project reopened, a viewport of the same id — drops
+  // it, as the restore drops what is pending while the panel is up.
   onSettled(() => () => {
     clearDebounce();
     const ed = editor();
@@ -636,12 +712,12 @@ export default function createHtmlPanel(state: PanelState) {
   const handleDocChanged = (): void => {
     dirty = true;
     dropped = null;
-    const id = untrack(pageId);
+    const id = untrack(viewportId);
     if (id === null) return;
     clearDebounce();
     debounce = setTimeout(() => {
       debounce = null;
-      if (untrack(pageId) !== id) return;
+      if (untrack(viewportId) !== id) return;
       saveEditor(id);
     }, APPLY_DEBOUNCE_MS);
   };
@@ -652,7 +728,7 @@ export default function createHtmlPanel(state: PanelState) {
   // which leaves the selection where it is.
   const handleCaret = (offset: number): void => {
     const ed = editor();
-    const id = untrack(pageId);
+    const id = untrack(viewportId);
     if (ed === undefined || id === null || dirty || !ed.hasFocus()) return;
     if (ed.text() !== synced || stored(id) !== synced) return;
     const element = dd.pageElementAt(id, offset);
@@ -667,7 +743,7 @@ export default function createHtmlPanel(state: PanelState) {
     // path and the disposal above already have it.
     if (host === undefined || !host.isConnected) return;
     const ed = editor();
-    const id = untrack(pageId);
+    const id = untrack(viewportId);
     if (ed === undefined || id === null) return;
     leave(id);
     if (!drafts().has(id)) {
@@ -702,7 +778,9 @@ export default function createHtmlPanel(state: PanelState) {
         when={html() !== null}
         fallback={
           <p class={`${p}-empty`}>
-            Select a page, or an element in one, to edit its HTML.
+            {onVariant()
+              ? VARIANT_VIEWPORT
+              : "Select a page, or an element in one, to edit its HTML."}
           </p>
         }
       >

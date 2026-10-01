@@ -1,26 +1,43 @@
 // The paste hook through the loader seam (decision #56): the real
-// shell with Media and this plugin enabled, synthetic paste events, and
-// what a user observes — the items, the selection, one undo step, one
-// console line, the page rendered in its shadow root (decision #76) —
-// never the registry. What Text does with a paste this plugin leaves is
-// Text's to test: here, leaving it is the event not being claimed.
+// shell with this plugin enabled (and Media, where the order matters),
+// synthetic paste events, and what a user observes — the items, the
+// selection, one undo step, the console lines, the page rendered in its
+// shadow root — never the registry. What Text does with a paste this
+// plugin leaves is Text's to test: here, leaving it is the event not
+// being claimed. A claimed paste is a new page of the project (decision
+// #78), made through `dd.createPage` over the kernel's fake project host
+// (`fakeProjectHost`), which names and records each page as the host
+// does, in memory. That the host downloads a page's media into `assets/`
+// and writes the bytes as sent is the kernel's to test on a real host.
+// What a pasted page is on the canvas — it renders, what would run never
+// does, and its text stays one an editor can save — is this plugin's
+// choice of what to write, so it is tested here; the fake host reads a
+// page's `<style>` blocks as its sheets where a test needs them
+// (`readingStyles`), as the real one does.
+//
+// Dropped for good with the cleaning and the folding (decision #78: the
+// file is the pasted text): the fixtures and tests of `<style>` folded
+// into the css (nesting, custom properties, `@font-face`, at-rules, a
+// class grid, an id hero, a whole document, a Chrome fragment), of what
+// the cleaning cut and said, and of `data:` images stored as assets —
+// the kernel downloads remote media only, and a `data:` url stays as
+// written.
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { DaydreamApi, PluginManifest } from "@daydream/plugin-api";
 import {
-  createEmptyDocument,
+  fakeProjectHost,
   flush,
   mountPlugin,
   mountShell,
-  pageNode,
   pageShadow,
+  testProject,
   viewportItems,
+  type FakeProjectHost,
   type Host,
-  type HostStorage,
   type MountedShell,
 } from "@daydream/plugin-testing";
 
-import dataImage from "./fixtures/data-image.html?raw";
 import form from "./fixtures/form.html?raw";
 import hero from "./fixtures/hero.html?raw";
 import hostile from "./fixtures/hostile.html?raw";
@@ -31,20 +48,18 @@ import svgIcon from "./fixtures/svg-icon.html?raw";
 import table from "./fixtures/table.html?raw";
 import activate from "./index";
 import manifest from "./manifest.json";
-import { htmlSource, looksLikeMarkup, MAX_ELEMENTS, MAX_SOURCE } from "./paste";
+import {
+  DOCTYPE,
+  hasElements,
+  htmlSource,
+  looksLikeMarkup,
+  MAX_ELEMENTS,
+  MAX_SOURCE,
+  parseHtml,
+} from "./paste";
 import { isSingleParagraph } from "./prose";
 
 const PLUGIN = "mrbavio.html-paste";
-const PLUGINS = ["daydream.media", PLUGIN];
-
-type InfoSpy = { mock: { calls: unknown[][] }; mockRestore(): void };
-
-/** The plugin's own console lines, from a spy installed per test. */
-function infoLines(spy: InfoSpy): string[] {
-  return spy.mock.calls
-    .map((call) => String(call[0]))
-    .filter((line) => line.startsWith(`[${PLUGIN}]`));
-}
 
 function transfer(data: Record<string, string>): DataTransfer {
   const out = new DataTransfer();
@@ -66,70 +81,73 @@ function paste(
   return event;
 }
 
-const mount = (host?: Host) =>
+/** The shell with Media and this plugin, in their compiled order. */
+const mountWithMedia = () =>
   mountShell({
-    document: createEmptyDocument(),
-    compiled: PLUGINS,
+    project: testProject([]),
+    compiled: ["daydream.media", PLUGIN],
     settled: true,
-    ...(host === undefined ? {} : { host }),
   });
 
-/** This plugin alone, activated with its `dd` in hand: for a test that
- * asks the kernel what the plugin asks it. */
-async function mountWithApi(): Promise<{
-  shell: MountedShell;
-  dd: DaydreamApi;
-}> {
+/** This plugin alone over an empty project whose pages are made by the
+ * fake project host (`host` to stand in for it), its `dd` in hand;
+ * `wrap` stands in for what the plugin is handed. */
+async function mountMade(
+  options: {
+    host?: Host;
+    open?: boolean;
+    wrap?: (dd: DaydreamApi) => DaydreamApi;
+  } = {},
+): Promise<{ shell: MountedShell; dd: DaydreamApi; fake: FakeProjectHost }> {
   let dd: DaydreamApi | null = null;
+  const fake = fakeProjectHost();
   const shell = await mountPlugin({
     entry: (api) => {
       dd = api;
-      activate(api);
+      activate(options.wrap?.(api) ?? api);
     },
     manifest: manifest as PluginManifest,
-    document: createEmptyDocument(),
+    project: testProject([], options.open === false ? { project: null } : {}),
+    host: options.host ?? fake.host,
   });
-  return { shell, dd: dd! };
+  return { shell, dd: dd!, fake };
 }
 
-/** The document's items once `count` have landed: a paste lands after
- * the kernel has cleaned it, not in the event. */
-async function landed(shell: MountedShell, count: number) {
+const items = (shell: MountedShell) => shell.store.document.canvases[0]!.items;
+
+/** The pages' viewports once `count` have been placed: a page is written
+ * by the host before it is placed, never in the paste event. */
+async function placed(shell: MountedShell, count: number) {
   await vi.waitFor(() =>
-    expect(shell.store.document.items).toHaveLength(count),
+    expect(viewportItems(shell.store.document)).toHaveLength(count),
   );
-  return shell.store.document.items;
+  return viewportItems(shell.store.document);
 }
 
-/** The one page on the canvas once it has landed, and its shadow root
- * once it has mounted. */
-async function landedPage(shell: MountedShell): Promise<{
-  id: string;
-  html: string;
-  css: string;
-  shadow: ShadowRoot;
-}> {
-  await landed(shell, 1);
-  const [page] = viewportItems(shell.store.document);
-  expect(page).toBeDefined();
-  let shadow: ShadowRoot | null = null;
-  await vi.waitFor(() => {
-    shadow = pageShadow(page!.id);
-    expect(shadow?.querySelector("body")).not.toBeNull();
-  });
-  return {
-    id: page!.id,
-    html: page!.payload.html,
-    css: page!.payload.css,
-    shadow: shadow!,
-  };
-}
+/** The plugin's own lines on the console's `level`, from a spy
+ * installed per test. */
+type Level = "info" | "warn" | "error";
+const spies: Partial<
+  Record<Level, { mock: { calls: unknown[][] }; mockRestore(): void }>
+> = {};
+const LEVELS: readonly Level[] = ["info", "warn", "error"];
+const lines = (level: Level): string[] =>
+  (spies[level]?.mock.calls ?? [])
+    .map((call) => String(call[0]))
+    .filter((line) => line.startsWith(`[${PLUGIN}]`));
 
-let info: InfoSpy | null = null;
 afterEach(() => {
-  info?.mockRestore();
-  info = null;
+  for (const level of LEVELS) {
+    spies[level]?.mockRestore();
+    delete spies[level];
+  }
 });
+
+const quiet = (): void => {
+  for (const level of LEVELS) {
+    spies[level] = vi.spyOn(console, level).mockImplementation(() => {});
+  }
+};
 
 describe("claiming", () => {
   test("htmlSource: files, text, and markup-free HTML are left; markup in either type is taken, with the text it was parsed from", () => {
@@ -258,72 +276,146 @@ describe("claiming", () => {
   });
 });
 
-const parse = (html: string) =>
-  new DOMParser().parseFromString(html, "text/html");
+const parse = parseHtml;
 
-describe("landing", () => {
-  test("an HTML paste lands one selected 960-wide page as one undo step and logs one line", async () => {
-    info = vi.spyOn(console, "info").mockImplementation(() => {});
-    const shell = await mount();
+describe("pasting a page", () => {
+  test("an HTML paste writes one new page of the pasted text, places it 960 wide and selected as one undo step, and says so in one line", async () => {
+    quiet();
+    const { shell, fake } = await mountMade();
     const event = paste(document.body, {
       "text/html": hero,
       "text/plain": "Ship layouts, not mockups",
     });
     expect(event.defaultPrevented).toBe(true);
-    const item = (await landed(shell, 1))[0]!;
-    expect(item.kind).toBe("daydream.viewport");
-    expect(item.frame).toEqual({ width: 960 });
-    // The page is the pasted text: nothing to gather, nothing rewritten.
-    expect(item.payload).toEqual({ html: hero, css: "" });
+    const [viewport] = await placed(shell, 1);
+    // The file is the pasted text, as it arrived — a fragment's after a
+    // doctype — named by the host: the first page of a project is its
+    // index.
+    expect(fake.made).toEqual([{ html: DOCTYPE + hero, title: null }]);
+    expect(viewport!.payload).toEqual({ page: "index.html" });
+    expect(shell.store.page("index.html")?.html).toBe(DOCTYPE + hero);
+    expect(viewport!.frame).toEqual({ width: 960 });
     // Selected as an item is: the envelope id is the primary and the set.
-    expect(shell.store.selectedId()).toBe(item.id);
-    expect(shell.store.selectedItemIds()).toEqual([item.id]);
+    await vi.waitFor(() =>
+      expect(shell.store.selectedId()).toBe(viewport!.id),
+    );
+    expect(shell.store.selectedItemIds()).toEqual([viewport!.id]);
     // The section renders on the canvas with its inline styles, in the
     // page's shadow root.
-    const { shadow } = await landedPage(shell);
-    const heading = shadow.querySelector("h1");
-    expect(heading?.textContent).toBe("Ship layouts, not mockups");
-    expect(getComputedStyle(heading!).fontSize).toBe("48px");
-    // An inline !important is CSS like any other now, and wins as one.
-    expect(getComputedStyle(shadow.querySelector("a")!).fontWeight).toBe("600");
-    // One undo step for the paste and the selection together.
+    const heading = await vi.waitFor(() => {
+      const found = pageShadow(viewport!.id)?.querySelector("h1");
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    expect(heading.textContent).toBe("Ship layouts, not mockups");
+    expect(getComputedStyle(heading).fontSize).toBe("48px");
+    // One undo step: an undo takes the viewport off, a redo puts it back.
     expect(shell.store.canUndo()).toBe(true);
     shell.store.undo();
     flush();
-    expect(shell.store.document.items).toHaveLength(0);
+    expect(viewportItems(shell.store.document)).toHaveLength(0);
     expect(shell.store.canUndo()).toBe(false);
     shell.store.redo();
     flush();
-    expect(shell.store.document.items).toHaveLength(1);
-    // One line, under the plugin id: nothing is lost from a page's text.
-    const lines = infoLines(info);
-    expect(lines).toEqual([`[${PLUGIN}] landed 6 elements, nothing lost`]);
-    // No panel, no toast: nothing of the plugin's in the page.
-    expect(shell.host.textContent).not.toContain("nothing lost");
+    expect(viewportItems(shell.store.document)).toHaveLength(1);
+    expect(lines("info")).toEqual([
+      `[${PLUGIN}] pasted a page: index.html, 960px wide`,
+    ]);
+    expect(lines("warn")).toEqual([]);
+    expect(lines("error")).toEqual([]);
+  });
+
+  test("a page after the first is named after its <title>, -2 while the name is taken", async () => {
+    quiet();
+    const { shell, fake } = await mountMade();
+    const titled =
+      "<!doctype html><html><head><title>Pricing &amp; plans</title></head><body><h1>Plans</h1><p>Two</p></body></html>";
+    paste(document.body, { "text/plain": "<h2>first</h2><p>page</p>" });
+    await placed(shell, 1);
+    paste(document.body, { "text/plain": titled });
+    await placed(shell, 2);
+    paste(document.body, { "text/plain": titled });
+    const pages = (await placed(shell, 3)).map((item) => item.payload.page);
+    expect(pages).toEqual([
+      "index.html",
+      "pricing-plans.html",
+      "pricing-plans-2.html",
+    ]);
+    expect(fake.made.map((made) => made.title)).toEqual([
+      null,
+      "Pricing & plans",
+      "Pricing & plans",
+    ]);
+  });
+
+  test("each remote file the host could not download is said on the console, left as written", async () => {
+    quiet();
+    const fake = fakeProjectHost();
+    const project = fake.host.project!;
+    const host: Host = {
+      ...fake.host,
+      project: {
+        ...project,
+        createPage: async (...args) => {
+          const made = await project.createPage!(...args);
+          return {
+            ...made,
+            unvendored: [
+              { url: "https://cdn.example/hero.png", reason: "HTTP 404" },
+            ],
+          };
+        },
+      },
+    };
+    const { shell } = await mountMade({ host });
+    paste(document.body, {
+      "text/plain":
+        '<section><img src="https://cdn.example/hero.png" alt="hero"><p>Copy</p></section>',
+    });
+    await placed(shell, 1);
+    await vi.waitFor(() => expect(lines("info")).toHaveLength(1));
+    expect(lines("warn")).toEqual([
+      `[${PLUGIN}] https://cdn.example/hero.png could not be downloaded into assets/ (HTTP 404): it stays as written`,
+    ]);
+  });
+
+  test("with no project open the paste is claimed, refused in the kernel's words, and nothing is written", async () => {
+    quiet();
+    const { shell, fake } = await mountMade({ open: false });
+    const event = paste(document.body, { "text/html": hero });
+    expect(event.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(lines("error")).toHaveLength(1));
+    expect(lines("error")[0]).toMatch(
+      new RegExp(`^\\[${PLUGIN}\\] paste refused: Making a page needs an open project`),
+    );
+    expect(fake.made).toEqual([]);
+    expect(items(shell)).toHaveLength(0);
+    expect(shell.store.canUndo()).toBe(false);
   });
 
   test("consecutive pastes cascade by 16px; another action resets the cascade", async () => {
-    const { shell, dd } = await mountWithApi();
+    quiet();
+    const { shell, dd } = await mountMade();
     paste(document.body, { "text/html": "<h2>one</h2><p>first</p>" });
     paste(document.body, { "text/html": "<h2>two</h2><p>second</p>" });
-    const [first, second] = await landed(shell, 2);
+    const [first, second] = await placed(shell, 2);
     expect(second!.position.x - first!.position.x).toBe(16);
     expect(second!.position.y - first!.position.y).toBe(16);
     shell.store.setSelectedId(null);
     flush();
-    // The shell may frame the canvas while the pastes are cleaned, so
-    // the start is read from the canvas as the paste reads it.
+    // The start is read from the canvas as the paste reads it.
     const center = dd.canvas.center();
     paste(document.body, { "text/html": "<h2>three</h2><p>third</p>" });
-    const third = (await landed(shell, 3))[2]!;
+    const third = (await placed(shell, 3))[2]!;
     expect(third.position).toEqual({
       x: center.x - 960 / 2,
       y: center.y - 960 / 4,
     });
   });
 
-  test("a paragraph copied from a website is left for Text; two paragraphs, a list or a paragraph with an image land as a page", async () => {
-    const shell = await mount();
+  test("a paragraph copied from a website is left for Text; two paragraphs, a list or a paragraph with an image are pages", async () => {
+    quiet();
+    const { shell } = await mountMade();
     const chrome = (fragment: string) => `<meta charset='utf-8'>${fragment}`;
     const claimed = [
       paste(document.body, {
@@ -352,134 +444,244 @@ describe("landing", () => {
       }),
     ].map((event) => event.defaultPrevented);
     expect(claimed).toEqual([false, false, true, true, true]);
-    expect((await landed(shell, 3)).map((item) => item.kind)).toEqual([
+    expect((await placed(shell, 3)).map((item) => item.kind)).toEqual([
       "daydream.viewport",
       "daydream.viewport",
       "daydream.viewport",
     ]);
   });
 
-  test("plain text is left for Text; plain text that is markup lands a page, as it was typed", async () => {
-    const shell = await mount();
+  test("plain text is left for Text; plain text that is markup is a page, as it was typed", async () => {
+    quiet();
+    const { shell, fake } = await mountMade();
     const claimed = [
       paste(document.body, { "text/plain": "just a note" }),
       paste(document.body, { "text/plain": "<3 you" }),
-      // Markup typed as plain text is deliberate: one paragraph still lands.
+      // Markup typed as plain text is deliberate: one paragraph is a page.
       paste(document.body, { "text/plain": '<p style="color: red">red</p>' }),
-      // A whitespace-only rich copy (an empty line) lands nothing.
+      // A whitespace-only rich copy (an empty line) is nothing.
       paste(document.body, {
         "text/html": "<meta charset='utf-8'><br>",
         "text/plain": "\n",
       }),
     ].map((event) => event.defaultPrevented);
     expect(claimed).toEqual([false, false, true, false]);
-    expect((await landed(shell, 1))[0]!.payload).toEqual({
-      html: '<p style="color: red">red</p>',
-      css: "",
+    await placed(shell, 1);
+    expect(fake.made.map((made) => made.html)).toEqual([
+      `${DOCTYPE}<p style="color: red">red</p>`,
+    ]);
+  });
+
+  test("a paste past the element cap or the source cap is refused with a console line before a page is made", async () => {
+    quiet();
+    const { shell, fake } = await mountMade();
+    const many = paste(document.body, {
+      "text/html": "<p>x</p>".repeat(MAX_ELEMENTS + 1),
+      "text/plain": "x",
     });
+    expect(many.defaultPrevented).toBe(true);
+    const novel = paste(document.body, {
+      "text/plain": "x".repeat(MAX_SOURCE + 1),
+    });
+    expect(novel.defaultPrevented).toBe(true);
+    expect(fake.made).toHaveLength(0);
+    expect(items(shell)).toHaveLength(0);
+    expect(lines("error")).toEqual([
+      `[${PLUGIN}] paste refused: ${MAX_ELEMENTS + 1} elements; a viewport holds at most ${MAX_ELEMENTS}`,
+      `[${PLUGIN}] paste refused: ${MAX_SOURCE + 1} characters; a paste carries at most ${MAX_SOURCE}`,
+    ]);
   });
 
-  test("a paste past the element cap or the source cap is refused with a console line and lands nothing", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const shell = await mount();
-      const many = paste(document.body, {
-        "text/html": "<p>x</p>".repeat(MAX_ELEMENTS + 1),
-        "text/plain": "x",
-      });
-      expect(many.defaultPrevented).toBe(true);
-      const novel = paste(document.body, {
-        "text/plain": "x".repeat(MAX_SOURCE + 1),
-      });
-      expect(novel.defaultPrevented).toBe(true);
-      expect(shell.store.document.items).toHaveLength(0);
-      expect(shell.store.canUndo()).toBe(false);
-      expect(error.mock.calls.map((call) => String(call[0]))).toEqual([
-        `[${PLUGIN}] paste refused: ${MAX_ELEMENTS + 1} elements; a viewport holds at most ${MAX_ELEMENTS}`,
-        `[${PLUGIN}] paste refused: ${MAX_SOURCE + 1} characters; a paste carries at most ${MAX_SOURCE}`,
-      ]);
-    } finally {
-      error.mockRestore();
-    }
-  });
-
-  test("the element cap counts every element the page would store: the head's, and each template's content", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const shell = await mount();
-      // A template's content is not in the tree, and is stored all the same.
-      const templated = paste(document.body, {
-        "text/html": `<template>${"<p>x</p>".repeat(MAX_ELEMENTS)}</template><h1>Title</h1><p>Copy</p>`,
-      });
-      expect(templated.defaultPrevented).toBe(true);
-      // What the parser puts in the head is the page's too.
-      const headed = paste(document.body, {
-        "text/html": `${"<meta name=\"a\">".repeat(MAX_ELEMENTS)}<h1>Title</h1><p>Copy</p>`,
-      });
-      expect(headed.defaultPrevented).toBe(true);
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      expect(shell.store.document.items).toHaveLength(0);
-      expect(error.mock.calls.map((call) => String(call[0]))).toEqual([
-        `[${PLUGIN}] paste refused: ${MAX_ELEMENTS + 3} elements; a viewport holds at most ${MAX_ELEMENTS}`,
-        `[${PLUGIN}] paste refused: ${MAX_ELEMENTS + 2} elements; a viewport holds at most ${MAX_ELEMENTS}`,
-      ]);
-    } finally {
-      error.mockRestore();
-    }
-  });
-
-  test("deep nesting lands as pasted and renders: the innermost words are on the canvas", async () => {
-    const shell = await mount();
-    const deep = 84;
-    const source = `${"<div>".repeat(deep)}deep words${"</div>".repeat(deep)}`;
-    // As markup typed in an editor: a chain of sole divs around words is
-    // one paragraph to the prose rule, which leaves a rich copy for Text.
-    paste(document.body, { "text/plain": source });
-    const page = await landedPage(shell);
-    expect(page.html).toBe(source);
-    await vi.waitFor(() =>
-      expect(page.shadow.textContent).toContain("deep words"),
-    );
+  test("the element cap counts every element the page would hold: the head's, and each template's content", async () => {
+    quiet();
+    const { fake } = await mountMade();
+    // A template's content is not in the tree, and is the page's all the same.
+    const templated = paste(document.body, {
+      "text/html": `<template>${"<p>x</p>".repeat(MAX_ELEMENTS)}</template><h1>Title</h1><p>Copy</p>`,
+    });
+    expect(templated.defaultPrevented).toBe(true);
+    // What the parser puts in the head is the page's too.
+    const headed = paste(document.body, {
+      "text/html": `${'<meta name="a">'.repeat(MAX_ELEMENTS)}<h1>Title</h1><p>Copy</p>`,
+    });
+    expect(headed.defaultPrevented).toBe(true);
+    expect(fake.made).toHaveLength(0);
+    expect(lines("error")).toEqual([
+      `[${PLUGIN}] paste refused: ${MAX_ELEMENTS + 3} elements; a viewport holds at most ${MAX_ELEMENTS}`,
+      `[${PLUGIN}] paste refused: ${MAX_ELEMENTS + 2} elements; a viewport holds at most ${MAX_ELEMENTS}`,
+    ]);
   });
 
   test("an image-only HTML paste still goes to Media", async () => {
-    const shell = await mount();
-    paste(document.body, {
-      "text/html": '<img src="assets/browser-paste.png">',
+    const shell = await mountWithMedia();
+    const event = paste(document.body, {
+      "text/html": '<img src="https://example.com/browser-paste.png">',
       "text/plain": "fallback",
     });
-    await vi.waitFor(() => expect(shell.store.document.items).toHaveLength(1), {
+    expect(event.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(items(shell)).toHaveLength(1), {
       timeout: 3000,
     });
-    expect(shell.store.document.items[0]).toMatchObject({
+    expect(items(shell)[0]).toMatchObject({
       kind: "daydream.image",
-      payload: { src: "assets/browser-paste.png" },
+      payload: { src: "https://example.com/browser-paste.png" },
     });
   });
 
   test("a paste into a text field is left alone", async () => {
-    const shell = await mount();
+    const { shell, fake } = await mountMade();
     const field = document.createElement("textarea");
     shell.host.appendChild(field);
     field.focus();
     const event = paste(field, { "text/html": hero, "text/plain": "hero" });
     expect(event.defaultPrevented).toBe(false);
-    expect(shell.store.document.items).toHaveLength(0);
+    expect(fake.made).toHaveLength(0);
+  });
+
+  test("hasElements tells markup from text that starts with <", () => {
+    expect(hasElements(parse("<3 you"))).toBe(false);
+    expect(hasElements(parse("<b>3</b> you"))).toBe(true);
+    expect(hasElements(parse("plain words"))).toBe(false);
+    // A lone stylesheet is hoisted to the head: nothing for the body.
+    expect(hasElements(parse("<style>p{}</style>"))).toBe(false);
   });
 });
 
-describe("the page renders what the tree could not hold", () => {
-  // Pasted as markup from an editor, which always lands: a fixture that
-  // is one paragraph (mixed inline runs, two links) would be prose as a
-  // rich copy.
-  const land = async (html: string) => {
-    const shell = await mount();
-    paste(document.body, { "text/plain": html });
-    return landedPage(shell);
+/** The fake host, its made page read as the host reads one: each
+ * `<style>` block of its markup a sheet, in document order. */
+function readingStyles(fake: FakeProjectHost): Host {
+  const project = fake.host.project!;
+  return {
+    ...fake.host,
+    project: {
+      ...project,
+      createPage: async (...args) => {
+        const made = await project.createPage!(...args);
+        const styles = Array.from(parseHtml(made.page.html).querySelectorAll("style"));
+        return {
+          ...made,
+          page: {
+            ...made.page,
+            sheets: styles.map((style, n) => ({
+              source: { style: n },
+              text: style.textContent ?? "",
+              readOnly: false,
+            })),
+          },
+        };
+      },
+    },
   };
+}
 
+/** Paste `html` as markup from an editor, which is always claimed (a
+ * fixture that is one paragraph would be prose as a rich copy), and wait
+ * for its page to render: its viewport id, its stored text and its
+ * shadow root. */
+async function pastedPage(
+  html: string,
+): Promise<{ shell: MountedShell; dd: DaydreamApi; id: string; path: string; html: string; shadow: ShadowRoot }> {
+  const fake = fakeProjectHost();
+  const { shell, dd } = await mountMade({ host: readingStyles(fake) });
+  paste(document.body, { "text/plain": html });
+  const [viewport] = await placed(shell, 1);
+  const path = viewport!.payload.page;
+  const shadow = await vi.waitFor(() => {
+    const root = pageShadow(viewport!.id);
+    expect(root?.querySelector("body")?.childElementCount ?? 0).toBeGreaterThan(0);
+    return root!;
+  });
+  return { shell, dd, id: viewport!.id, path, html: shell.store.page(path)!.html, shadow };
+}
+
+describe("the file a paste writes", () => {
+  test("a fragment is written after a doctype, so a browser renders the file as the canvas does; a document's own doctype is the author's", async () => {
+    quiet();
+    const { shell, fake } = await mountMade();
+    const legacy =
+      '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"><html><head><title>Old</title></head><body><h1>Old</h1><p>page</p></body></html>';
+    paste(document.body, { "text/plain": "<h2>a</h2><p>fragment</p>" });
+    await placed(shell, 1);
+    paste(document.body, { "text/plain": legacy });
+    await placed(shell, 2);
+    expect(fake.made.map((made) => made.html)).toEqual([
+      "<!doctype html>\n<h2>a</h2><p>fragment</p>",
+      legacy,
+    ]);
+  });
+
+  test("a byte order mark the pasted text begins with stays first: a document's doctype after it is its own, and a fragment's is written after it", async () => {
+    quiet();
+    const { shell, fake } = await mountMade();
+    const BOM = "\uFEFF";
+    const page =
+      "<!doctype html><html><head><title>Marked</title></head><body><h1>Marked</h1><p>page</p></body></html>";
+    paste(document.body, { "text/plain": BOM + page });
+    await placed(shell, 1);
+    paste(document.body, { "text/plain": `${BOM}<h2>a</h2><p>fragment</p>` });
+    await placed(shell, 2);
+    expect(fake.made.map((made) => made.html)).toEqual([
+      BOM + page,
+      `${BOM}<!doctype html>\n<h2>a</h2><p>fragment</p>`,
+    ]);
+  });
+
+  test("a viewport made that could not be selected is said as what it is, never a refused paste", async () => {
+    quiet();
+    const { shell } = await mountMade({
+      wrap: (dd) => ({
+        ...dd,
+        select: () => {
+          throw new Error("Plugin is disabled");
+        },
+      }),
+    });
+    paste(document.body, { "text/plain": "<h2>a</h2><p>page</p>" });
+    await placed(shell, 1);
+    await vi.waitFor(() => expect(lines("error")).toHaveLength(1));
+    expect(lines("error")).toEqual([
+      `[${PLUGIN}] pasted a page: index.html, but its viewport could not be selected: Plugin is disabled`,
+    ]);
+    expect(lines("info")).toEqual([]);
+  });
+
+  test("a pan while a page is being written starts the cascade over", async () => {
+    quiet();
+    const fake = fakeProjectHost();
+    const project = fake.host.project!;
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const host: Host = {
+      ...fake.host,
+      project: {
+        ...project,
+        createPage: async (...args) => {
+          await held;
+          return project.createPage!(...args);
+        },
+      },
+    };
+    const { shell, dd } = await mountMade({ host });
+    paste(document.body, { "text/html": "<h2>one</h2><p>first</p>" });
+    shell.store.setPanX((x) => x + 100);
+    flush();
+    release();
+    await placed(shell, 1);
+    const center = dd.canvas.center();
+    paste(document.body, { "text/html": "<h2>two</h2><p>second</p>" });
+    const second = (await placed(shell, 2))[1]!;
+    // Placed where the kernel rounds it: 16px from here were a cascade.
+    expect(second.position.x).toBeCloseTo(center.x - 960 / 2, 0);
+    expect(second.position.y).toBeCloseTo(center.y - 960 / 4, 0);
+  });
+});
+
+describe("a pasted page on the canvas", () => {
   test("a table is a table, every part itself, every cell's inline style kept", async () => {
-    const { shadow } = await land(table);
+    quiet();
+    const { shadow } = await pastedPage(table);
     expect(shadow.querySelectorAll("table > thead > tr > th")).toHaveLength(2);
     const cells = shadow.querySelectorAll("table > tbody > tr > td");
     expect(cells).toHaveLength(4);
@@ -487,7 +689,8 @@ describe("the page renders what the tree could not hold", () => {
   });
 
   test("a form keeps its controls and their attributes", async () => {
-    const { shadow } = await land(form);
+    quiet();
+    const { shadow } = await pastedPage(form);
     const input = shadow.querySelector("form input[type=email]");
     expect(input?.getAttribute("placeholder")).toBe("you@example.com");
     expect(shadow.querySelectorAll("select > option")).toHaveLength(2);
@@ -496,17 +699,17 @@ describe("the page renders what the tree could not hold", () => {
   });
 
   test("an inline svg is the drawing, at its own size", async () => {
-    const { shadow } = await land(svgIcon);
+    quiet();
+    const { shadow } = await pastedPage(svgIcon);
     const svg = shadow.querySelector("button > svg");
-    expect(svg?.querySelector("path")?.getAttribute("d")).toBe(
-      "M5 12l5 5L20 7",
-    );
+    expect(svg?.querySelector("path")?.getAttribute("d")).toBe("M5 12l5 5L20 7");
     expect(svg!.getBoundingClientRect().width).toBeGreaterThan(0);
     expect(getComputedStyle(svg!).width).toBe("20px");
   });
 
   test("mixed inline runs render as written: text beside elements, the br kept", async () => {
-    const { shadow } = await land(mixedInline);
+    quiet();
+    const { shadow } = await pastedPage(mixedInline);
     const p = shadow.querySelector("p")!;
     expect(p.querySelector("strong")?.textContent).toBe("bold");
     expect(p.querySelector("br")).not.toBeNull();
@@ -515,277 +718,56 @@ describe("the page renders what the tree could not hold", () => {
     );
   });
 
-  test("the gathered css applies: a @media rule against the 960 frame", async () => {
-    const { shadow, html } = await land(mediaInterleaved);
+  test("its `<style>` applies against the 960 frame: a @media rule, kept in the file as written", async () => {
+    quiet();
+    const { shadow, html } = await pastedPage(mediaInterleaved);
     const btn = shadow.querySelector(".btn")!;
     expect(getComputedStyle(btn).paddingLeft).toBe("24px");
-    expect(html).not.toContain("<style");
+    expect(html).toBe(DOCTYPE + mediaInterleaved);
   });
 
-  test("the gathered css applies: a ::before ornament", async () => {
-    const { shadow } = await land(ornaments);
+  test("its `<style>` applies: a ::before ornament", async () => {
+    quiet();
+    const { shadow } = await pastedPage(ornaments);
     const tag = shadow.querySelector(".tag")!;
     expect(getComputedStyle(tag, "::before").content).toBe('"★ "');
   });
 
-  test("a hostile paste lands inert: nothing that runs is stored or reaches the canvas, and the unfetched link is said", async () => {
-    info = vi.spyOn(console, "info").mockImplementation(() => {});
-    const { shadow, html } = await land(hostile);
-    // A `<template>`'s content included: the walk enters it.
-    const stored = html;
-    for (const gone of ["<script", "<object", "<embed", "<base", "onclick"])
-      expect(stored, gone).not.toContain(gone);
-    expect(stored).not.toMatch(/javascript:/i);
-    const everything = Array.from(shadow.querySelectorAll("*"));
-    for (const tag of ["script", "object", "embed", "base", "style", "link"])
+  test("deep nesting is written as pasted and renders: the innermost words are on the canvas", async () => {
+    quiet();
+    const deep = 84;
+    const source = `${"<div>".repeat(deep)}deep words${"</div>".repeat(deep)}`;
+    const { shadow, html } = await pastedPage(source);
+    expect(html).toBe(DOCTYPE + source);
+    await vi.waitFor(() => expect(shadow.textContent).toContain("deep words"));
+  });
+
+  test("a hostile paste is written as it arrived and renders inert: nothing that runs reaches the canvas", async () => {
+    quiet();
+    const { shadow, html } = await pastedPage(hostile);
+    // The file is the author's: nothing is cut from it.
+    expect(html).toBe(DOCTYPE + hostile);
+    for (const tag of ["script", "object", "embed", "base"])
       expect(shadow.querySelector(tag), tag).toBeNull();
     expect(shadow.querySelector("meta[http-equiv]")).toBeNull();
-    for (const element of everything) {
+    for (const element of Array.from(shadow.querySelectorAll("*"))) {
       for (const attr of Array.from(element.attributes)) {
         expect(attr.name.toLowerCase().startsWith("on"), attr.name).toBe(false);
         expect(attr.name).not.toBe("srcdoc");
         expect(/^\s*javascript:/i.test(attr.value), attr.value).toBe(false);
       }
     }
-    expect(shadow.querySelector("iframe")?.getAttribute("sandbox")).not.toBe(
-      null,
-    );
-    // Why it could not be fetched is the host's to say: the test's
-    // detected host asks a network that refuses.
-    expect(infoLines(info).at(-1)).toMatch(
-      /paste\.html: the stylesheet <link href="https:\/\/evil\.example\/site\.css"> could not be fetched \(.+\) — removed, and its rules are not in the css/,
-    );
-  });
-});
-
-describe("what could run is cut from the stored text, and said", () => {
-  test("a script, a handler, a root-relative link and a javascript: url are not in the stored page; the rest is the author's text", async () => {
-    info = vi.spyOn(console, "info").mockImplementation(() => {});
-    const shell = await mount();
-    const source =
-      '<nav>\n  <a href="/about">About</a>\n  <a href="javascript:alert(1)">Run</a>\n</nav>\n' +
-      '<script>steal()</script>\n<button onclick="steal()">Buy</button>\n<p>Kept</p>';
-    paste(document.body, { "text/plain": source });
-    const { html, shadow } = await landedPage(shell);
-    expect(html).toBe(
-      "<nav>\n  <a>About</a>\n  <a>Run</a>\n</nav>\n\n<button>Buy</button>\n<p>Kept</p>",
-    );
-    expect(shadow.querySelector("p")?.textContent).toBe("Kept");
-    expect(infoLines(info)).toEqual([
-      `[${PLUGIN}] landed 7 elements; paste.html: removed <script>, the attribute a[href] ×2 and the attribute button[onclick] — a page stores nothing that could run, no <base>, and no url that is not https, assets/… or a #fragment (a link may also go to http: or mailto:, and an image, a video, an audio or a track may be an inline data url); the rest landed as written`,
-    ]);
+    expect(shadow.querySelector("iframe")?.getAttribute("sandbox")).not.toBe(null);
   });
 
-  test("the stored page is one an editor of its text can save: dd.writePage accepts an ordinary edit on it", async () => {
-    const { shell, dd } = await mountWithApi();
-    paste(document.body, {
-      "text/plain": `<style>.card { padding: 16px }</style>\n<div class="card" onclick="steal()">\n  <h3>Title</h3>\n  <a href="/about">About</a>\n</div>\n<script>steal()</script>`,
-    });
-    const { id, html } = await landedPage(shell);
+  test("its file stays one an editor of its text can save: dd.writePage accepts an ordinary edit, the markup that would run kept", async () => {
+    quiet();
+    const { shell, dd, path, html } = await pastedPage(
+      '<style>.card { padding: 16px }</style>\n<div class="card" onclick="steal()">\n  <h3>Title</h3>\n  <a href="/about">About</a>\n</div>\n<script>steal()</script>',
+    );
     const edited = html.replace("<h3>Title</h3>", "<h3>A new title</h3>");
     expect(edited).not.toBe(html);
-    expect(
-      dd.writePage({
-        kind: "html",
-        viewportId: id,
-        expected: html,
-        html: edited,
-      }),
-    ).toBeNull();
-    expect(viewportItems(shell.store.document)[0]!.payload.html).toBe(edited);
-  });
-});
-
-describe("data: images", () => {
-  test("are vendored through the host before the page lands, once, as one undo step; the host's pageSrc is written where the data: url was", async () => {
-    info = vi.spyOn(console, "info").mockImplementation(() => {});
-    // The two names differ past their slash, so the page's is the host's
-    // pageSrc and not one the paste made from src.
-    const vendorFile = vi.fn(async (file: File) => ({
-      src: `assets/media-${file.name}`,
-      pageSrc: `assets/page-${file.name}`,
-    }));
-    const shell = await mount({
-      storage: { vendorFile } as unknown as HostStorage,
-    });
-    const event = paste(document.body, { "text/html": dataImage });
-    expect(event.defaultPrevented).toBe(true);
-    // Nothing lands until the file is stored.
-    expect(shell.store.document.items).toHaveLength(0);
-    await vi.waitFor(() => expect(shell.store.document.items).toHaveLength(1));
-    expect(vendorFile).toHaveBeenCalledTimes(1);
-    expect(vendorFile.mock.calls[0]![0].type).toBe("image/png");
-    const { id, html } = await landedPage(shell);
-    // A page stores no data: url and no root-absolute path; every other
-    // character is the author's.
-    const url = /src="(data:[^"]*)"/.exec(dataImage)![1]!;
-    expect(html).toBe(dataImage.replace(url, "assets/page-pasted-image.png"));
-    expect(pageNode(id, "img")?.getAttribute("alt")).toBe("One dot");
-    shell.store.undo();
-    flush();
-    expect(shell.store.document.items).toHaveLength(0);
-    expect(shell.store.canUndo()).toBe(false);
-    expect(infoLines(info)).toEqual([
-      `[${PLUGIN}] landed 5 elements, nothing lost`,
-    ]);
-  });
-
-  test("a data: image a css url() names is vendored too, its copy's name written inside the url(); a data: url in css that is no image is kept as written, as the cleaning keeps a data: url wherever it only loads a resource", async () => {
-    info = vi.spyOn(console, "info").mockImplementation(() => {});
-    const vendorFile = vi.fn(async (file: File) => ({
-      src: `assets/media-${file.name}`,
-      pageSrc: `assets/page-${file.name}`,
-    }));
-    const shell = await mount({
-      storage: { vendorFile } as unknown as HostStorage,
-    });
-    const png = /src="(data:[^"]*)"/.exec(dataImage)![1]!;
-    const font = "data:font/woff2;base64,d09G";
-    const source = [
-      `<div class="hero" style="border-image: url(${png}) 1">Hero</div>`,
-      `<style>.hero { background: url("${png}") } @font-face { font-family: F; src: url(${font}) }</style>`,
-      `<p>Copy</p>`,
-    ].join("\n");
-    paste(document.body, { "text/html": source });
-    const { html, css } = await landedPage(shell);
-    // One file for the one image, named in both places.
-    expect(vendorFile).toHaveBeenCalledTimes(1);
-    expect(html).toContain(
-      'style="border-image: url(assets/page-pasted-image.png) 1"',
-    );
-    expect(css).toBe(
-      `.hero { background: url("assets/page-pasted-image.png") } @font-face { font-family: F; src: url(${font}) }`,
-    );
-    expect(infoLines(info).at(-1)).not.toContain("emptied");
-  });
-
-  test("a data: image in a subtree the cleaning removes is never stored — a <script>'s, an SVG <script>'s, an <object>'s fallback — and one in a <noscript>, which the page keeps, is", async () => {
-    info = vi.spyOn(console, "info").mockImplementation(() => {});
-    const vendorFile = vi.fn(async (file: File) => ({
-      src: `assets/media-${file.name}`,
-      pageSrc: `assets/page-${file.name}`,
-    }));
-    const shell = await mount({
-      storage: { vendorFile } as unknown as HostStorage,
-    });
-    const png = /src="(data:[^"]*)"/.exec(dataImage)![1]!;
-    const gif = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
-    const source = [
-      `<p>Copy</p>`,
-      `<script>document.write('<img src="${png}">')</script>`,
-      `<svg><script><g style="fill: url(${png})"></g></script></svg>`,
-      `<object data="https://example.com/x.swf"><img src="${png}" alt="fallback"><div style="background: url(${png})">x</div></object>`,
-      `<noscript><img src="${gif}" alt="no script"></noscript>`,
-    ].join("\n");
-    paste(document.body, { "text/html": source });
-    const { html } = await landedPage(shell);
-    // Only the image the page keeps is stored: no orphan file.
-    expect(vendorFile).toHaveBeenCalledTimes(1);
-    expect(vendorFile.mock.calls[0]![0].type).toBe("image/gif");
-    expect(html).toContain(
-      '<noscript><img src="assets/page-pasted-image.gif" alt="no script"></noscript>',
-    );
-    expect(html).not.toContain("data:");
-    expect(html).not.toContain("daydream-paste-");
-    const line = infoLines(info).at(-1)!;
-    expect(line).toContain("removed <script> ×2 and <object> —");
-    expect(line).not.toContain("data:");
-  });
-
-  test("a document loaded while the paste is cleaned abandons it before any image is stored", async () => {
-    info = vi.spyOn(console, "info").mockImplementation(() => {});
-    const vendorFile = vi.fn(async (file: File) => ({
-      src: `assets/media-${file.name}`,
-      pageSrc: `assets/page-${file.name}`,
-    }));
-    const shell = await mount({
-      storage: { vendorFile } as unknown as HostStorage,
-    });
-    paste(document.body, { "text/html": dataImage });
-    shell.store.loadDocument(createEmptyDocument(), { slug: null });
-    flush();
-    await vi.waitFor(() =>
-      expect(infoLines(info!)).toEqual([
-        `[${PLUGIN}] paste abandoned: another document was loaded before it landed`,
-      ]),
-    );
-    expect(vendorFile).not.toHaveBeenCalled();
-    expect(shell.store.document.items).toHaveLength(0);
-  });
-
-  test("a landing refused after its images were stored says they are left unused", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      const vendorFile = vi.fn(async (file: File) => ({
-        src: `assets/media-${file.name}`,
-        pageSrc: `assets/page-${file.name}`,
-      }));
-      // The plugin's API with a mutateItems that refuses.
-      const shell = await mountPlugin({
-        entry: (dd) => {
-          const api = Object.create(dd) as DaydreamApi;
-          Object.defineProperty(api, "mutateItems", {
-            value: () => {
-              throw new Error("the canvas is read-only");
-            },
-          });
-          activate(api);
-        },
-        manifest: manifest as PluginManifest,
-        document: createEmptyDocument(),
-        host: { storage: { vendorFile } as unknown as HostStorage },
-      });
-      paste(document.body, { "text/html": dataImage });
-      await vi.waitFor(() =>
-        expect(error.mock.calls.map((call) => String(call[0]))).toEqual([
-          `[${PLUGIN}] paste refused: the canvas is read-only; the 1 image stored for it is left unused, since the host has no call to take a stored file back`,
-        ]),
-      );
-      expect(vendorFile).toHaveBeenCalledTimes(1);
-      expect(shell.store.document.items).toHaveLength(0);
-    } finally {
-      error.mockRestore();
-    }
-  });
-
-  test("a document loaded while vendoring abandons the paste; without storage the img lands with its alt and the removed src is said", async () => {
-    info = vi.spyOn(console, "info").mockImplementation(() => {});
-    type Stored = { src: string; pageSrc: string };
-    let release: (value: Stored) => void = () => {};
-    const vendorFile = vi.fn(
-      () =>
-        new Promise<Stored>((resolve) => {
-          release = resolve;
-        }),
-    );
-    const shell = await mount({
-      storage: { vendorFile } as unknown as HostStorage,
-    });
-    paste(document.body, { "text/html": dataImage });
-    await vi.waitFor(() => expect(vendorFile).toHaveBeenCalledTimes(1));
-    shell.store.loadDocument(createEmptyDocument(), { slug: null });
-    flush();
-    release({ src: "assets/late.png", pageSrc: "assets/late.png" });
-    await vi.waitFor(() =>
-      expect(infoLines(info!)).toEqual([
-        `[${PLUGIN}] paste abandoned: another document was loaded before it landed; the 1 image stored for it is left unused, since the host has no call to take a stored file back`,
-      ]),
-    );
-    expect(shell.store.document.items).toHaveLength(0);
-    shell.dispose();
-
-    const bare = await mount({});
-    paste(document.body, { "text/html": dataImage });
-    await vi.waitFor(() => expect(bare.store.document.items).toHaveLength(1));
-    const { id, html } = await landedPage(bare);
-    // The host could not store it, so the page keeps it inline, as written:
-    // an image's data url is one the page may keep.
-    const img = pageNode(id, "img");
-    expect(img?.getAttribute("src")).toMatch(/^data:image\//);
-    expect(html).toContain(`src="${img?.getAttribute("src")}"`);
-    expect(img?.getAttribute("alt")).toBe("One dot");
-    expect(infoLines(info).at(-1)).toBe(
-      `[${PLUGIN}] landed 5 elements; the host could not store a data: image (File import requires local storage)`,
-    );
+    expect(dd.writePage({ kind: "html", path, expected: html, html: edited })).toBeNull();
+    expect(shell.store.page(path)!.html).toBe(edited);
   });
 });

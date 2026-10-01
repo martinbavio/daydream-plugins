@@ -1,7 +1,7 @@
 # knowledge/
 
 The css-author plugin's corpus (docs/agent-css-knowledge-prd.md, "Corpus";
-decision #43, #48): what a GOOD .dream document looks like, served by
+decision #43, #48): what a GOOD page looks like, served by
 the core knowledge tools (`knowledge_bundle` / `knowledge_index` /
 `knowledge_read` / `knowledge_search`) while the plugin is enabled, under
 paths prefixed with the plugin id (`mrbavio.css-author/procedures.md`).
@@ -10,14 +10,15 @@ Markdown files with YAML frontmatter, in three of the four tiers:
 - `procedure` — `procedures.md`, the short decision procedures the
   `procedures` MCP resource carries verbatim and the knowledge tools
   serve. Hard budget ~1,200 tokens.
-- `example` — `examples/`, intent → minimal document: one page, its
-  markup and its css shown for reading and carried in the document's json
-  block, verified against the format gate and both of this plugin's gates
-  by a test.
+- `example` — `examples/`, intent → minimal project (decision #78): one
+  page, its markup and the stylesheet it links shown as the files they
+  are written as, and the project's `daydream.json` in the json block,
+  verified against core's reader and both of this plugin's gates by a
+  test.
 - `reference` — `reference/`, longer synthesis read on demand through
   `knowledge_search` / `knowledge_read`.
 
-The fourth tier, `format` — the .dream v7 rules — is CORE's
+The fourth tier, `format` — the project format's rules — is CORE's
 (`knowledge/format.md` at the repo root): the MCP server's own instructions
 carry it, and the bundle returns it as `format.md`. Nothing here restates
 it (tools/knowledge/singleSource.test.ts).

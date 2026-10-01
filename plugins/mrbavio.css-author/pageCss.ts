@@ -1,5 +1,5 @@
-// A PAGE'S CSS AS THE LINTS READ IT (decision #76). A page stores its
-// stylesheet as text, and every lint judges a DECLARATION as the author
+// A PAGE'S CSS AS THE LINTS READ IT (decision #76, #78). A page's
+// stylesheets are text, and every lint judges a DECLARATION as the author
 // wrote it: `margin: 0` is one line to keep or drop, not four longhands
 // the CSSOM expands it into, and `width: 100` is a line the author wrote
 // even though the browser's parser drops it and the CSSOM never shows it.
@@ -17,8 +17,10 @@
 // this file's own reading of what the scan found — so a test builds the
 // blocks it needs by hand.
 //
-// THE RULES a lint judges (`pageRules`) are the style rules, in source
-// order, each with its declarations: a top-level rule, a rule nested in
+// THE RULES a lint judges (`pageRules`) are the style rules of a sheet, in
+// source order, each with its declarations — and a page's are those of
+// each of its sheets in turn (decision #78: a page's css is its sheets,
+// in document order), numbered on across them (`sheetRules`): a top-level rule, a rule nested in
 // another (CSS nesting, its selector resolved against its parents the way
 // the browser desugars it, `&` → `:is(parent)`), and the declarations an
 // at-rule nested in a style rule holds for that rule's subject
@@ -43,11 +45,16 @@ import type { CssBlock, CssDeclaration } from "@daydream/plugin-api";
 
 /** One style rule of a page, as the lints judge it. */
 export interface PageRule {
-  /** Its position among the page's rules, in source order. What a
-   * finding's `rule` holds: the gate runner keys a declaration by it
-   * (a page has no sheet of rules to index, decision #76), and the static
-   * and necessity lints, reading the same text, agree on it. */
+  /** Its position in the list it was read into, in source order. In a
+   * page's rules (`sheetRules`) that is its position among the page's
+   * style rules across its sheets, in the page's order: what a finding's
+   * `rule` holds, the address the gate runner keys a declaration by —
+   * every lint reading the same page counts the same. */
   index: number;
+  /** The sheet it is written in, by its position in the list of sheets
+   * it was read from: the page's `sheets`, or a mounted copy's `<style>`s
+   * (pageMount.ts). Its declarations' ranges are in that sheet's text. */
+  sheet: number;
   /** The selector as written (`&:hover` for a nested rule). For an
    * at-rule's own declarations inside a style rule, that style rule's. */
   prelude: string;
@@ -105,12 +112,29 @@ export function atKeyword(prelude: string): string | null {
   return match === null ? null : (match[1] as string).toLowerCase();
 }
 
+/** Every style rule of each sheet's blocks, one sheet after another:
+ * each rule's `sheet` its sheet's position in `sheets`, and its `index`
+ * its position among them all. */
+export function sheetRules(
+  sheets: readonly (readonly CssBlock[])[],
+): PageRule[] {
+  const rules: PageRule[] = [];
+  sheets.forEach((blocks, sheet) => {
+    rules.push(...pageRules(blocks, { sheet, first: rules.length }));
+  });
+  return rules;
+}
+
 /** Every style rule of a css text's blocks (`dd.core.cssBlocks`), in
- * source order (see PageRule). The blocks are walked with an explicit
- * stack, as they were scanned, so no nesting exhausts the call stack; a
- * rule's lists of parents, conditions and scopes are built only for a
- * rule the walk keeps (`Chain`). */
-export function pageRules(blocks: readonly CssBlock[]): PageRule[] {
+ * source order (see PageRule), as sheet `sheet` of a list whose earlier
+ * sheets hold `first` rules: the first rule's index. The blocks are
+ * walked with an explicit stack, as they were scanned, so no nesting
+ * exhausts the call stack; a rule's lists of parents, conditions and
+ * scopes are built only for a rule the walk keeps (`Chain`). */
+export function pageRules(
+  blocks: readonly CssBlock[],
+  { sheet, first }: { sheet: number; first: number } = { sheet: 0, first: 0 },
+): PageRule[] {
   const rules: PageRule[] = [];
   /** A list of sibling blocks being walked, and what they sit inside. */
   interface Level {
@@ -150,7 +174,8 @@ export function pageRules(blocks: readonly CssBlock[]): PageRule[] {
             ? relativeToScope(block.prelude)
             : block.prelude;
       rules.push({
-        index: rules.length,
+        index: first + rules.length,
+        sheet,
         prelude: block.prelude,
         parents: listOf(parents),
         conditions: listOf(conditions),
@@ -184,7 +209,8 @@ export function pageRules(blocks: readonly CssBlock[]): PageRule[] {
     const own = block.declarations;
     if (own.length > 0 && (innerParent !== null || scoped)) {
       rules.push({
-        index: rules.length,
+        index: first + rules.length,
+        sheet,
         // A parent selector is a style rule's, so `parents` holds it.
         ...(innerParent !== null
           ? {

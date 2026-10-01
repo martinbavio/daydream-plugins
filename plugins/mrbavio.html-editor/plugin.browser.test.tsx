@@ -1,30 +1,46 @@
 // The plugin through the loader seam (decision #48, testing
 // decisions; docs/plugin-authoring.md, "Testing a plugin"): the real
-// shell, the plugin enabled by config, assertions from the DOM and the
-// API — what a person sees. The pane shows the page's html as its text
-// and marks the selected element in it, and the caret selects the element
-// it is in; typing saves live, verbatim, through the kernel's writePage,
-// and quick saves join one undo step; a save the kernel refuses says why
-// as you type; Delete on an inner element cuts it out of the text and
-// never removes the viewport. What a save cannot write is kept as a draft
-// (drafts.browser.test.tsx), and what is typed when the document goes is
-// saved into it first (leave.browser.test.tsx).
+// shell, the plugin enabled by config, a page of the project on the
+// canvas, assertions from the DOM and the API — what a person sees. The
+// pane shows the page's html as its text and marks the selected element
+// in it, and the caret selects the element it is in; typing saves live,
+// verbatim, through the kernel's writePage, into the page's file
+// (decision #78), and quick saves join one undo step; a save the kernel
+// refuses says why as you type; Delete on an inner element cuts it out of
+// the text and never removes the viewport, and one the kernel cannot cut
+// is said on the console. A variant's viewport shows no editor, and
+// nothing typed or deleted there writes its page. What a save cannot
+// write is kept as a draft (drafts.browser.test.tsx), and what is typed
+// when the project goes is saved into it first (leave.browser.test.tsx).
+//
+// With no host the edits live in the tab's memory, as a page's file
+// does until the host writes it; the tests of what reaches the disk put
+// the host's files routes in, faked at HTTP (`createFileHost`).
 import { EditorView } from "@codemirror/view";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, onTestFinished, test, vi } from "vitest";
 
-import type { DreamDocument, PluginManifest } from "@daydream/plugin-api";
+import type { DaydreamApi, PluginManifest } from "@daydream/plugin-api";
 import {
+  createFileHost,
   createPageItem,
   createTestKernel,
+  createTestRequestHandlers,
+  fixturePage,
   flush,
+  type Host,
+  type HostProject,
   type MountedPlugin,
   mountPlugin,
+  overrideHostForTests,
   pageElementId,
   pageNode,
+  testProject,
+  type TestProject,
+  unusedProjectFiles,
   viewportItems,
 } from "@daydream/plugin-testing";
 
-import { APPLY_DEBOUNCE_MS } from "./HtmlPanel";
+import { APPLY_DEBOUNCE_MS, VARIANT_VIEWPORT } from "./HtmlPanel";
 import activate, {
   BLUR_COMMAND,
   DELETE_COMMAND,
@@ -68,30 +84,32 @@ const edited = (from: string, to: string, html = HTML): string => {
   return html.replace(from, to);
 };
 
-/** The id of the first page of the document the test mounted. */
+/** The viewport of the page the test mounted first. */
 let itemId = "";
+/** The path of the page `itemId` shows. */
+let pagePath = "";
 
-/** Mount the plugin over a fresh one-page document (or `doc`) and wait for
- * the page to mount. `entry` stands in for the plugin's entry — its API
- * wrapped — and `slug` names the document as saved in a library. */
+/** A project of one page, `page.html` (its markup `html`), shown by the
+ * viewport `page`. */
+const onePage = (html = HTML): TestProject =>
+  testProject([
+    createPageItem({ html, css: CSS }, { id: "page", frame: { width: 960 } }),
+  ]);
+
+/** Mount the plugin over a fresh one-page project (or `project`) and wait
+ * for its first page to mount. `entry` stands in for the plugin's entry. */
 async function mountPage(
-  doc?: DreamDocument,
-  options: { entry?: typeof activate; slug?: string } = {},
+  project: TestProject = onePage(),
+  options: { entry?: typeof activate; host?: Host } = {},
 ): Promise<MountedPlugin> {
-  let document = doc;
-  if (document === undefined) {
-    const item = createPageItem(
-      { html: HTML, css: CSS },
-      { frame: { width: 960 } },
-    );
-    document = { version: 7, items: [item] };
-  }
-  itemId = document.items[0]!.id;
+  const viewport = fixturePage(project);
+  itemId = viewport.id;
+  pagePath = viewport.payload.page;
   mounted = await mountPlugin({
     entry: options.entry ?? activate,
     manifest,
-    document,
-    ...(options.slug === undefined ? {} : { slug: options.slug }),
+    project,
+    ...(options.host === undefined ? {} : { host: options.host }),
   });
   await waitMounted(itemId, "h1");
   return mounted;
@@ -183,21 +201,16 @@ function blur(): void {
 const message = (): string | null =>
   panel().querySelector('[role="status"]')?.textContent ?? null;
 
-/** The stored markup of the page `id`. */
-const stored = (id = itemId): string =>
-  viewportItems(mounted!.store.document).find((item) => item.id === id)!.payload
-    .html;
-
-/** A change made from outside the pane — an agent, another plugin —
- * through a second API instance over the same app store. */
-function outsideEdit(html: string, id = itemId): void {
-  const kernel = createTestKernel();
-  kernel.dd.updateItem(id, (item) => {
-    (item.payload as { html: string }).html = html;
-  });
-  kernel.dispose();
-  flush();
+/** The stored markup of the page viewport `id` shows. */
+function stored(id = itemId): string {
+  const viewport = viewportItems(mounted!.store.document).find(
+    (item) => item.id === id,
+  )!;
+  return mounted!.store.pages[viewport.payload.page]!.html;
 }
+
+/** The items on the shown canvas. */
+const items = () => mounted!.store.document.canvases[0]!.items;
 
 function select(id: string | null): void {
   mounted!.store.setSelectedId(id);
@@ -221,20 +234,37 @@ async function caret(offset: number): Promise<void> {
   await marks();
 }
 
+/** A change made from outside the pane — another plugin, another
+ * viewport's editor — through a second API instance over the same app
+ * store: the page's markup written whole, as an edit of its file. */
+function outsideEdit(html: string, id = itemId): void {
+  const kernel = createTestKernel();
+  const viewport = viewportItems(mounted!.store.document).find(
+    (item) => item.id === id,
+  )!;
+  const problem = kernel.dd.writePage({
+    kind: "html",
+    path: viewport.payload.page,
+    expected: stored(id),
+    html,
+  });
+  kernel.dispose();
+  if (problem !== null) throw new Error(problem);
+  flush();
+}
+
 /** Longer than the kernel's edit burst (decision #20, 500ms): the next
  * write starts an undo step of its own. */
 async function pause(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 700));
 }
 
-
-
 afterEach(disposeMounted);
 
 describe("mrbavio.html-editor", () => {
   test("the manifest declares everything the entry registers", () => {
     expect(manifest.id).toBe("mrbavio.html-editor");
-    expect(manifest.minCore).toBe("0.1.39");
+    expect(manifest.minCore).toBe("0.1.44");
     expect(manifest.contributes?.panels).toEqual(["html-editor"]);
     expect(manifest.contributes?.commands).toEqual([
       BLUR_COMMAND,
@@ -334,6 +364,49 @@ describe("mrbavio.html-editor", () => {
     expect(stored()).toBe(HTML);
     expect(store.canUndo()).toBe(false);
     expect(text()).toBe(HTML);
+  });
+
+  test("a save is written to the page's file, byte for byte, in the open project; its undo writes the file back", async () => {
+    const files = createFileHost({ [pagePath]: HTML, "page.css": CSS });
+    overrideHostForTests({ project: files.project });
+    onTestFinished(() => overrideHostForTests(null));
+    const m = await mountPage();
+    select(itemId);
+    content().focus();
+    const typed = edited("Old headline", "On disk");
+    await type(typed);
+    await vi.waitFor(() => expect(files.text(pagePath)).toBe(typed));
+    // One write of the page's file, over the bytes the tab read, and no
+    // other file touched.
+    expect(files.writes().map((write) => write.path)).toEqual([pagePath]);
+    expect(files.text("page.css")).toBe(CSS);
+
+    blur();
+    m.store.undo();
+    flush();
+    expect(stored()).toBe(HTML);
+    expect(text()).toBe(HTML);
+    await vi.waitFor(() => expect(files.text(pagePath)).toBe(HTML));
+  });
+
+  test("a save over a file changed on disk since it was read: the disk wins, and the pane shows the page as the disk holds it", async () => {
+    const files = createFileHost({ [pagePath]: HTML, "page.css": CSS });
+    overrideHostForTests({ project: files.project });
+    onTestFinished(() => overrideHostForTests(null));
+    const m = await mountPage();
+    select(itemId);
+    content().focus();
+    // Another editor wrote the file; the tab has not heard of it yet.
+    const theirs = edited("Body copy", "Written in another editor");
+    files.change(pagePath, theirs);
+    await type(edited("Old headline", "Mine"));
+    // The kernel drops the edit, reads the file again and forgets the
+    // undo step that would write over it; the pane follows the page.
+    await vi.waitFor(() => expect(stored()).toBe(theirs));
+    expect(files.text(pagePath)).toBe(theirs);
+    await vi.waitFor(() => expect(text()).toBe(theirs));
+    expect(message()).toBeNull();
+    expect(m.store.canUndo()).toBe(false);
   });
 
   test("a pause longer than the edit burst splits the typing into two undo steps", async () => {
@@ -504,6 +577,8 @@ describe("mrbavio.html-editor", () => {
     await type(edited("Body copy", "Hi <script>alert(1)</script>"));
     expect(message()).toContain("<script>");
     expect(message()).toContain("nothing was saved");
+    // The kernel's clause, as the pane's sentence: one capital, one period.
+    expect(message()).toMatch(/^The edit brings in .*[^.]\.$/);
     expect(stored()).toBe(HTML);
     expect(m.store.canUndo()).toBe(false);
 
@@ -586,7 +661,7 @@ describe("mrbavio.html-editor", () => {
     select(idOf("p"));
     const event = key(window, { key: "Delete" });
     expect(event.defaultPrevented).toBe(true);
-    expect(store.document.items).toHaveLength(1);
+    expect(items()).toHaveLength(1);
     // Its span cut; every other character as the author wrote it.
     expect(stored()).toBe(edited("<p>Body copy</p>", ""));
     await vi.waitFor(() => {
@@ -605,8 +680,29 @@ describe("mrbavio.html-editor", () => {
     await waitMounted(itemId, "h1");
     select(idOf("h1"));
     key(window, { key: "Backspace" });
-    expect(store.document.items).toHaveLength(1);
+    expect(items()).toHaveLength(1);
     expect(stored()).toBe(edited('<h1 class="headline">Old headline</h1>', ""));
+  });
+
+  test("Delete on an element the page's file has no tag for is refused: the selection is put back and the kernel's reason said on the console", async () => {
+    const said = vi.spyOn(console, "error").mockImplementation(() => {});
+    onTestFinished(() => said.mockRestore());
+    // The browser supplies the <tbody>: the file has no span to cut.
+    const table = edited(
+      "<p>Body copy</p>",
+      "<table><tr><td>Cell</td></tr></table>",
+    );
+    const m = await mountPage(onePage(table));
+    const tbody = idOf("tbody");
+    select(tbody);
+    key(window, { key: "Delete" });
+    expect(said).toHaveBeenCalledTimes(1);
+    expect(String(said.mock.calls[0]![0])).toBe(
+      "[mrbavio.html-editor] delete refused: the <tbody> has no tag of its own in the page's file — the browser supplied it — so there is nothing to cut; edit the markup instead",
+    );
+    expect(stored()).toBe(table);
+    expect(m.store.selectedId()).toBe(tbody);
+    expect(m.store.canUndo()).toBe(false);
   });
 
   test("Delete with the page selected stays core's: the item goes, not through this plugin", async () => {
@@ -614,7 +710,7 @@ describe("mrbavio.html-editor", () => {
     select(itemId);
     expect(m.store.selectedItemIds()).toHaveLength(1);
     key(window, { key: "Delete" });
-    expect(m.store.document.items).toHaveLength(0);
+    expect(items()).toHaveLength(0);
   });
 
   test("Delete while typing in the editor edits text, never the page", async () => {
@@ -634,7 +730,7 @@ describe("mrbavio.html-editor", () => {
     select(idOf("body"));
     const event = key(window, { key: "Delete" });
     expect(event.defaultPrevented).toBe(false);
-    expect(m.store.document.items).toHaveLength(1);
+    expect(items()).toHaveLength(1);
     expect(stored()).toBe(HTML);
     expect(m.store.canUndo()).toBe(false);
   });
@@ -656,7 +752,7 @@ describe("mrbavio.html-editor", () => {
     expect(stored()).toBe(edited("    <p>", "      <p>"));
   });
 
-  test("hiding the dock mid-edit saves what is pending", async () => {
+  test("focus mode (⌘\\, every panel hidden) mid-edit saves what is pending", async () => {
     const m = await mountPage();
     select(itemId);
     content().focus();
@@ -672,14 +768,258 @@ describe("mrbavio.html-editor", () => {
     expect(text()).toBe(edited("Old headline", "Kept"));
   });
 
+  test("minimizing the panel mid-edit saves what is pending, and it opens on what was saved", async () => {
+    const m = await mountPage();
+    // The header's icon, found by its name (decision #79: the kernel's
+    // chrome, not this plugin's). The layout is remembered per project,
+    // so the panel is opened again whatever happens.
+    const toggle = (name: "Minimize" | "Expand"): void => {
+      panel().querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!.click();
+      flush();
+    };
+    try {
+      select(itemId);
+      content().focus();
+      await typeAll(edited("Old headline", "Kept"));
+      toggle("Minimize");
+      // The body is unmounted, the section stays.
+      expect(panel().querySelector(".cm-content")).toBeNull();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flush();
+      expect(stored()).toBe(edited("Old headline", "Kept"));
+      expect(m.store.canUndo()).toBe(true);
+      toggle("Expand");
+      expect(text()).toBe(edited("Old headline", "Kept"));
+    } finally {
+      if (panel().querySelector('button[aria-label="Expand"]') !== null) {
+        toggle("Expand");
+      }
+    }
+  });
+
   test("a page changed on the canvas with nothing pending is shown as it is now", async () => {
     await mountPage();
     select(itemId);
     content().focus();
-    const theirs = edited("Body copy", "An agent's copy");
+    const theirs = edited("Body copy", "Another editor's copy");
     outsideEdit(theirs);
     expect(text()).toBe(theirs);
     expect(document.activeElement).toBe(content());
   });
+});
 
+// A VARIANT (a copy of the page an agent finalized into
+// `.daydream/variants/`) is shown by a viewport of its page, and what it
+// renders is not the page's file: the pane shows no editor there, only a
+// sentence, and nothing typed or deleted there writes the page — which
+// must stay the bytes the variant was copied from for it to be accepted.
+describe("mrbavio.html-editor: a variant's viewport", () => {
+  /** The sha-256 (hex) of `text`'s UTF-8 bytes: a variant's `base`. */
+  async function sha256(text: string): Promise<string> {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(text),
+    );
+    return Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+  }
+
+  test("a variant's viewport, or an element in it, shows a sentence and no editor; typing and Delete there leave the page's file as the variant was copied from, and it can still be accepted", async () => {
+    // The host's accept, faked: it refuses, as the host does, a page that
+    // is not the bytes the variant was copied from.
+    const project: HostProject = {
+      read: () => Promise.reject(new Error("this test reads no project")),
+      open: () => Promise.resolve({ cancelled: true }),
+      saveManifest: () => Promise.resolve({ hash: "unwritten" }),
+      ...unusedProjectFiles,
+      acceptVariant: async (request) => {
+        const page = mounted!.store.page(request.page)!.html;
+        if ((await sha256(page)) !== request.base) {
+          throw new Error(
+            `${request.page} is not the page the variant was copied from`,
+          );
+        }
+        return {
+          files: request.writes.map((write) => write.path),
+          removed: [request.file],
+          kept: [],
+        };
+      },
+      discardVariant: async (file) => ({ removed: [file], kept: [] }),
+    };
+    const host = { project } as Host;
+    overrideHostForTests(host);
+    onTestFinished(() => overrideHostForTests(null));
+    // The plugin's own API, for the accept the title bar's Accept takes.
+    let dd: DaydreamApi | undefined;
+    const m = await mountPage(onePage(), {
+      host,
+      entry: (api) => {
+        dd = api;
+        activate(api);
+      },
+    });
+
+    // An agent's variant of the page, finalized over the page as it is.
+    const base = await sha256(stored());
+    const handlers = await createTestRequestHandlers(m);
+    const opened = (await handlers.draftOpen({
+      copyOf: itemId,
+      position: { x: 1200, y: 0 },
+    })) as { draft: { id: string } };
+    const draft = opened.draft.id;
+    await handlers.draftReplace({
+      draft,
+      target: "h1",
+      html: '<h1 class="headline">Variant headline</h1>',
+    });
+    const plan = (await handlers.draftFinalize({
+      draft,
+      variant: { file: ".daydream/variants/page.1.html", base },
+    })) as { epoch: number };
+    const landed = (await handlers.draftCommit({
+      draft,
+      epoch: plan.epoch,
+    })) as { id: string };
+    flush();
+    const variant = viewportItems(m.store.document).find(
+      (item) => item.id === landed.id,
+    )!;
+    expect(variant.payload.variant?.base).toBe(base);
+    await waitMounted(variant.id, "h1");
+
+    /** No editor, the sentence; keys typed at the pane and on the canvas
+     * write nothing. */
+    const noEditorThere = (): void => {
+      expect(panel().querySelector(".cm-content")).toBeNull();
+      expect(panel().querySelector("[data-dd-editable]")).toBeNull();
+      expect(panel().textContent).toContain(VARIANT_VIEWPORT);
+      for (const target of [panel(), window]) {
+        for (const each of ["x", "Enter", "Delete", "Backspace"]) {
+          key(target, { key: each });
+        }
+      }
+    };
+
+    // The variant's viewport, as its title bar selects it.
+    select(variant.id);
+    await marks();
+    noEditorThere();
+    await settled();
+
+    // An element in it: the pane resolves it to the variant's viewport.
+    select(idOf("h1", variant.id));
+    await marks();
+    noEditorThere();
+    await settled();
+
+    // The page's file is the bytes the variant was copied from, the
+    // variant's viewport still on the canvas, and nothing to undo.
+    expect(stored()).toBe(HTML);
+    expect(await sha256(stored())).toBe(base);
+    expect(items().some((item) => item.id === variant.id)).toBe(true);
+    expect(m.store.canUndo()).toBe(false);
+
+    // The page's own viewport still shows the page's text, editable.
+    select(itemId);
+    await marks();
+    expect(text()).toBe(HTML);
+
+    // And the variant is accepted: its page is the one it was copied from.
+    await expect(dd!.acceptVariant(variant.id)).resolves.toMatchObject({
+      kept: [],
+    });
+  });
+});
+
+// A page file whose lines end in `\r\n` (decision #78: the file is the
+// author's, written as typed). CodeMirror holds every break as `\n`; the
+// editor keeps the file's own (lineBreaks.ts), so a save writes only
+// what was typed, and a mark and a caret land where the kernel's offsets
+// — the file's — say.
+describe("mrbavio.html-editor: a CRLF page", () => {
+  const CRLF = HTML.replaceAll("\n", "\r\n");
+  const BOM = "﻿";
+
+  test("one typed character writes the file with that character alone changed, its byte order mark and every \\r\\n kept", async () => {
+    const files = createFileHost({ "page.html": BOM + CRLF, "page.css": CSS });
+    overrideHostForTests({ project: files.project });
+    onTestFinished(() => overrideHostForTests(null));
+    await mountPage(onePage(CRLF));
+    select(itemId);
+    content().focus();
+    // The editor's text is the file's with `\n` for each break.
+    expect(text()).toBe(HTML);
+    const at = text().indexOf("Old headline") + "Old headline".length;
+    view().dispatch({ changes: { from: at, insert: "!" } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settled();
+    const typed = CRLF.replace("Old headline", "Old headline!");
+    expect(stored()).toBe(typed);
+    await vi.waitFor(() => expect(files.text("page.html")).toBe(BOM + typed));
+  });
+
+  test("a line typed is written with the file's break, and the lines around it keep theirs", async () => {
+    // Mixed: the file's breaks are \r\n but the comment's, a lone \n.
+    const mixed = CRLF.replace("<!-- the copy -->\r\n", "<!-- the copy -->\n");
+    await mountPage(onePage(mixed));
+    select(itemId);
+    content().focus();
+    const at = text().indexOf("<p>");
+    view().dispatch({ changes: { from: at, insert: "<p>New</p>\n    " } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settled();
+    expect(stored()).toBe(mixed.replace("<p>", "<p>New</p>\r\n    <p>"));
+  });
+
+  test("a break typed beside a lone \\r never fuses with it into one \\r\\n: the file holds the line typed, and reads back as the editor shows it", async () => {
+    // The comment's break is a lone \r; the file's others are \n, so a
+    // typed break is a \n — which, right after the \r, would read back
+    // as one \r\n and lose the line.
+    const lone = HTML.replace("<!-- the copy -->\n", "<!-- the copy -->\r");
+    const files = createFileHost({ "page.html": lone, "page.css": CSS });
+    overrideHostForTests({ project: files.project });
+    onTestFinished(() => overrideHostForTests(null));
+    await mountPage(onePage(lone));
+    select(itemId);
+    content().focus();
+    const shown = edited("<!-- the copy -->\n", "<!-- the copy -->\n\n");
+    view().dispatch({ changes: { from: text().indexOf("    <p>"), insert: "\n" } });
+    expect(text()).toBe(shown);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settled();
+    const written = lone.replace("<!-- the copy -->\r", "<!-- the copy -->\r\r\n");
+    expect(stored()).toBe(written);
+    await vi.waitFor(() => expect(files.text("page.html")).toBe(written));
+    // Read back from the file, the empty line is still there.
+    blur();
+    await vi.waitFor(() => expect(text()).toBe(shown));
+  });
+
+  test("focus and blur with nothing typed, and the plugin stopping, write nothing", async () => {
+    const m = await mountPage(onePage(CRLF));
+    select(itemId);
+    content().focus();
+    blur();
+    content().focus();
+    const history = m.store.historyVersion();
+    m.pluginHost.deactivate(manifest.id);
+    flush();
+    expect(stored()).toBe(CRLF);
+    expect(m.store.canUndo()).toBe(false);
+    expect(m.store.historyVersion()).toBe(history);
+  });
+
+  test("the selected element is marked on its own text, and the caret selects the element it is in", async () => {
+    const m = await mountPage(onePage(CRLF));
+    select(idOf("p"));
+    await marks();
+    expect(marked()).toBe("<p>Body copy</p>");
+    expect(view().state.selection.main.head).toBe(HTML.indexOf("<p>"));
+    content().focus();
+    await caret(HTML.indexOf("Old headline"));
+    expect(m.store.selectedId()).toBe(idOf("h1"));
+    expect(marked()).toBe('<h1 class="headline">Old headline</h1>');
+  });
 });

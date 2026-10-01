@@ -15,7 +15,7 @@ tags:
   ]
 tier: procedure
 status: v1 draft from general expertise — to be corrected against the maintainer's notes; hard budget about 1,200 tokens
-summary: Decision procedures against the three judgment failures — which formatting context, whether a declaration is needed at all, where in the cascade to set it — and the author → land → fix → land loop.
+summary: Decision procedures against the three judgment failures — which formatting context, whether a declaration is needed at all, where in the cascade to set it — and the author → finalize → fix loop.
 ---
 
 ## 1. Which formatting context
@@ -33,12 +33,12 @@ Never: absolute for columns; flex for a two-axis table of cards; grid for one ro
 
 Ask four questions; if any answers yes, do not write it.
 
-1. **Is it the initial value of a non-inherited property?** `position: static`, `flex-direction: row`, `width: auto`, `opacity: 1`. An initial in a base rule or a `style` changes nothing there — unless the UA stylesheet sets another value on that tag (an open `dialog` is `position: absolute`, a `[popover]` `position: fixed` with `inset: 0`), where restating the initial is the override; the static lint reports the common non-inherited ones where removing them changes nothing. An INHERITED property restated at its initial (`line-height: normal` under a parent's 1.5) is a real reset — judge it under question 2.
+1. **Is it the initial value of a non-inherited property?** `position: static`, `flex-direction: row`, `width: auto`, `opacity: 1`. An initial in a base rule or a `style` changes nothing there — unless the UA stylesheet sets another value on that tag (an open `dialog` is `position: absolute`, a `[popover]` `position: fixed` with `inset: 0`), where restating the initial is the override; the static lint reports those whose removal changes nothing. An INHERITED property restated at its initial (`line-height: normal` under a parent's 1.5) is a real reset — judge it under question 2.
 2. **Is it inherited from an ancestor already?** `color`, `font-*`, `line-height`, `text-align`, `letter-spacing` flow down; a child restating its parent's value is noise. Set them once, high.
 3. **Does the UA stylesheet already set it on this tag?** `h1` is bold and large; `p` and `h*` carry vertical margins; `ul` carries left padding; `body` carries 8px margin; `img` is inline; `button` has its own font, padding and border. Restate only to CHANGE it.
 4. **Is it implied or made inert by another declaration?** `align-items` on a box that is not flex or grid, `flex-wrap` without `display: flex`, `top` or `inset` on a static box, `width: 100%` on a block child, `justify-content` where `gap` already does the job, `min-width: 0` where nothing overflows. Drop it.
 
-Then: would the page change if this line went — at this width or at another? If at none, the necessity lint will report it dead; remove it before landing, not after.
+Then: would the page change if this line went — at this width or at another? If at none, the necessity lint will report it dead; leave it out when you write the page, not after the lint.
 
 ## 3. Cascade reasoning
 
@@ -47,14 +47,14 @@ Then: would the page change if this line went — at this width or at another? I
 - A conditional rule (`@media`, `@container`) overrides the base ONLY for what changes under that condition. One restating the base is dead weight; one per breakpoint nobody asked for is invented responsiveness. Write the widest-reaching state as the base.
 - No `!important`, ever. Shared styling is a rule, its selector naming who shares it; a one-off is a rule of its own (a tag or an `id` that says which box) or, rarely, the element's `style`, which beats every rule. Never restate in a `style` what a rule sets (the lint blocks it).
 - **When to write a rule.** Two or more elements carrying the same declarations are ONE rule plus a class saying what they are (`.card`; never `.card-1`, `.card-2`), and each element's own rule or `style` keeps only what is its alone. A tag selector where the tag already says it (`nav a`, `h2`); a class where the markup does not. Ask it before the second card, not after the third.
-- Dead weight the static lint blocks: a class no rule names, a rule no element matches, and a rule's line that repeats, for everything it reaches, what the rule beneath it already sets. Drop the hook, the rule, or the line.
-- A `;` after a rule's `}` (`.a { … };`) is no separator: where rules follow, the browser reads it into the next rule's selector and drops that rule. The static lint blocks it; delete the `;`.
+- Dead weight the static lint blocks: a class no rule names, a rule no element matches, and a rule's line that repeats, for everything it reaches, what the rule beneath it already sets. Drop the hook, rule or line — where pages it did not judge link the sheet too, it only advises: check them.
+- A `;` after a rule's `}` is no separator: the browser reads it into the next selector, dropping that rule. The static lint blocks it: delete it.
 - One reason per element. A wrapper that exists only to carry a declaration gives it to its child or parent and disappears.
 
 ## 4. The loop
 
 1. This file rides the `dream-author` prompt; `knowledge_bundle {query}` brings the format rules with the nearest example.
 2. Gather the source or the intent; decide each container's formatting context with §1.
-3. Author the smallest document; pass every declaration through §2 and §3.
-4. Land it (the server instructions name the tool) and let every gate run there — format, static, necessity; a refusal's findings say what to fix, then land again.
-5. Then read what came back: it names what still needs fixing, if anything, with the element to fix it on. Your reply comes from that, not from a second look; the track summaries are `measure`'s.
+3. Author the smallest page; pass every declaration through §2 and §3.
+4. `draft_finalize` it (the `dream-author` prompt says how): every enabled gate runs over the page first — static, necessity — and a blocking finding refuses the write. Each names the element, or the rule and its stylesheet; fix it where it says — in the draft, or in a stylesheet file the page already had, never during a variant round — and finalize again. A variant's finalize refuses only what the variant causes: its own css, the rules it writes or changes in `<style>` blocks, and the classes and inline declarations it adds — never what the page already has, wherever the variant moves it. A page line it leaves dead is advisory then; once the variant is accepted, remove it from its file when an in-place rework or `lint` names it. `lint` judges pages already written.
+5. Reply from what `draft_finalize` (its measure report) and `lint` answered, not from a second look.

@@ -5,33 +5,33 @@
 // markup itself in `text/plain`, so the plain face wins), or whose
 // `text/html` parses to at least one element and is more than a single
 // paragraph of prose (prose.ts) — a paragraph is text however a browser
-// wrapped it, and is left for Text. Lands ONE page (page.ts, decision
-// #76), cleaned by the kernel as every landing is, as one undo step, the
-// way the Text plugin does — `dd.mutateItems` then `dd.select` — and
-// reports what the cleaning said in one console line. No gates: a paste
-// is the user's own hand on the canvas, not an agent's landing.
+// wrapped it, and is left for Text. A claimed paste is a new PAGE, and a
+// page is a file of the project (decision #78): the pasted text is
+// written as a new html file through `dd.createPage`, which names it
+// (`index.html` in a project with no page yet, else after its `<title>`,
+// `page.html` with none), downloads the remote media it names into
+// `assets/`, and places a viewport of it as one undo step; the paste
+// selects it. The file is the pasted text as it arrived — nothing is
+// cleaned or folded: what would run is the render walk's to leave off
+// the mount, as for every page — save one line: a fragment, which has no
+// doctype, is written after `<!doctype html>`, so a browser opening the
+// file renders it in standards mode, as the canvas renders every page.
+// One console line says what was made, and one more names each file
+// that could not be downloaded, left as written; a refusal (no project
+// open, no host) is the paste's one console line, and a viewport made
+// that could not be selected says so. No gates: a paste is the user's
+// own hand on the canvas, not an agent's page.
 
 import type { DaydreamApi } from "@daydream/plugin-api";
 import { flush, untrack } from "solid-js";
 
-import {
-  cleanPaste,
-  describePaste,
-  hasElements,
-  parseHtml,
-  pastedElements,
-  storePaste,
-  VIEWPORT_WIDTH,
-  type CleanedPaste,
-  type PastedPage,
-} from "./page";
 import { hasContent, isSingleParagraph } from "./prose";
 
 export const PASTE_PRIORITY = 5;
 
-/** The most elements one paste may land. A copied section is hundreds;
- * a whole site's DOM is not a viewport, and every later edit would
- * clone it into history. Refused with a console line, nothing lands. */
+/** The most elements one paste may make a page of. A copied section is
+ * hundreds; a whole site's DOM is not a viewport. Refused with a console
+ * line before the kernel is asked. */
 export const MAX_ELEMENTS = 10_000;
 
 /** The most characters of source one paste may carry — a cap on bytes
@@ -39,13 +39,67 @@ export const MAX_ELEMENTS = 10_000;
  * style value a whole image. */
 export const MAX_SOURCE = 4_000_000;
 
-/** What a paste that did not land says of the image files it stored:
- * nothing when it stored none. They stay in the document's files — the
- * host has no call to take one back — so it is said. */
-function leftUnused(stored: number): string {
-  if (stored === 0) return "";
-  const one = stored === 1;
-  return `; the ${stored} image${one ? "" : "s"} stored for it ${one ? "is" : "are"} left unused, since the host has no call to take a stored file back`;
+/** Every pasted viewport's frame width: the frame rule (knowledge/
+ * format.md) wants a width and no height, and 960 is the desktop page a
+ * copied section was designed for. */
+export const VIEWPORT_WIDTH = 960;
+
+/** DOMParser over the whole clipboard text: a fragment gets a synthetic
+ * `html`/`body`, a Chrome copy (`<meta charset>` and StartFragment
+ * comments around the fragment) parses as the document it claims to be,
+ * and a real document keeps its own root, head, title and doctype. A
+ * leading byte order mark is left out of the parse, as a browser
+ * decoding the file takes it out: DOMParser would read it as text, and a
+ * doctype after it as no doctype at all. */
+export function parseHtml(html: string): Document {
+  return new DOMParser().parseFromString(withoutBom(html), "text/html");
+}
+
+/** A byte order mark: an encoding's mark at a file's start, never its
+ * text. */
+const BOM = "\uFEFF";
+
+function withoutBom(text: string): string {
+  return text.startsWith(BOM) ? text.slice(BOM.length) : text;
+}
+
+/** How many elements a page made of `doc` would hold, as the element cap
+ * counts them: every one in the head and the body — a `<meta>`, a
+ * `<style>` too — and every one in a `<template>`'s content, which is not
+ * in the tree and is stored all the same; not the `html`, `head` and
+ * `body` every page has. */
+export function pastedElements(doc: Document): number {
+  const count = (root: ParentNode): number => {
+    let n = 0;
+    for (const el of root.querySelectorAll("*")) {
+      n += 1;
+      if (el.localName === "template" && "content" in el) {
+        n += count((el as HTMLTemplateElement).content);
+      }
+    }
+    return n;
+  };
+  return count(doc.head) + count(doc.body);
+}
+
+/** Whether the parse produced any element in the body — the difference
+ * between markup and text that happens to start with `<`. */
+export function hasElements(doc: Document): boolean {
+  return doc.body.firstElementChild !== null;
+}
+
+/** The doctype a fragment's file is written after. */
+export const DOCTYPE = "<!doctype html>\n";
+
+/** The file a paste writes: the text as it arrived, after `DOCTYPE`
+ * when its parse has none — a fragment, which a browser would otherwise
+ * render in quirks mode. A document's own doctype, whatever it says, is
+ * the author's. A byte order mark the text begins with stays first, the
+ * doctype after it, as a file carries one. */
+export function pageFile(source: HtmlSource): string {
+  if (source.doc.doctype !== null) return source.text;
+  const rest = withoutBom(source.text);
+  return source.text.slice(0, source.text.length - rest.length) + DOCTYPE + rest;
 }
 
 /** Whether plain text is markup and not prose that happens to open with
@@ -58,9 +112,8 @@ export function looksLikeMarkup(text: string): boolean {
 
 /** What a transfer carries as markup: the text, and its parse. */
 export interface HtmlSource {
-  /** The face that was parsed, as it arrived: what the paste hands to
-   * the cleaning, and what the page stores when the cleaning has nothing
-   * to take out of it. */
+  /** The face that was parsed, as it arrived: the markup the paste
+   * writes as the new page's file (`pageFile`). */
   text: string;
   doc: Document;
 }
@@ -71,7 +124,7 @@ export interface HtmlSource {
 export function htmlSource(transfer: DataTransfer | null): HtmlSource | null {
   if (transfer === null || transfer.files.length > 0) return null;
   const text = transfer.getData("text/plain");
-  // Markup typed or copied as plain text is deliberate and always lands.
+  // Markup typed or copied as plain text is deliberate and always claimed.
   if (looksLikeMarkup(text)) {
     const doc = parseHtml(text);
     if (hasElements(doc) && hasContent(doc)) return { text, doc };
@@ -81,7 +134,7 @@ export function htmlSource(transfer: DataTransfer | null): HtmlSource | null {
   const doc = parseHtml(html);
   if (!hasElements(doc) || !hasContent(doc)) return null;
   // A browser copies prose as HTML: a paragraph is text however it was
-  // wrapped. Text lands the plain face; with none, nothing lands.
+  // wrapped. Text takes the plain face; with none, nothing is pasted.
   if (isSingleParagraph(doc)) return null;
   return { text: html, doc };
 }
@@ -94,12 +147,19 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
   // TODO(#56): a canvas-owned "where does the next paste land" is the
   // dedupe, when a third kind wants it.
   let consecutivePastes = 0;
-  let pasting = false;
+  // Pastes whose page is being written: while one is, a change of the
+  // document or the selection is the paste's own — its viewport placed,
+  // then selected — not an action in between. A gesture on the canvas
+  // and a pan or a zoom are the user's, and start over even then.
+  let pasting = 0;
   let camera = untrack(() => dd.geometry.camera());
-  const reset = () => {
-    if (!pasting) consecutivePastes = 0;
+  const startOver = () => {
+    consecutivePastes = 0;
   };
-  dd.canvas.onActivity(reset);
+  const reset = () => {
+    if (pasting === 0) startOver();
+  };
+  dd.canvas.onActivity(startOver);
   dd.on("document", reset);
   dd.on("selection", reset);
   dd.on("geometry", () => {
@@ -109,85 +169,57 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
       next.panY !== camera.panY ||
       next.zoom !== camera.zoom
     )
-      reset();
+      startOver();
     camera = next;
   });
 
-  const land = (pasted: PastedPage): void => {
-    const { item } = pasted;
-    pasting = true;
-    try {
-      dd.mutateItems((items) => {
-        items.push(item);
-      });
-      // A page is selected as an item is: by its envelope id.
-      dd.select(item.id);
-      // Flush the paste's own notifications while suppression is explicit.
-      flush();
-    } catch (error) {
-      // After the images were stored: a refusal here cannot unstore them.
-      console.error(
-        `[${dd.plugin.id}] paste refused: ${error instanceof Error ? error.message : String(error)}${leftUnused(pasted.stored)}`,
-      );
-      return;
-    } finally {
-      pasting = false;
-    }
-    // A write from a deactivated plugin is ignored, not thrown: say
-    // "landed" only when it did.
-    if (!untrack(() => dd.items().some((landed) => landed.id === item.id)))
-      return;
-    console.info(
-      `[${dd.plugin.id}] ${describePaste(pasted.elements, pasted.said)}`,
-    );
-  };
+  const why = (error: unknown): string =>
+    error instanceof Error ? error.message : String(error);
 
-  /** The text cleaned as a landing cleans it, the `data:` images the
-   * cleaning kept stored through the host (page.ts), and landed — unless
-   * another document was loaded meanwhile. Nothing is stored until the
-   * landing is going ahead: the host has no call to take a stored file
-   * back, so an image stored for a paste that does not land stays in the
-   * document's files unused. Storing is the host's time, though, and a
-   * load or a refusal can still come after it; then the line says so. */
-  const cleanThenLand = async (
-    source: HtmlSource,
+  /** Write `text` as a new page of the project, its viewport at
+   * `position`, and select it; say what was made. The kernel writes the
+   * file and places the viewport as one undo step, or refuses — no
+   * project open, no host — writing nothing. */
+  const land = async (
+    text: string,
     position: { x: number; y: number },
-    load: number,
   ): Promise<void> => {
-    const refused = (error: unknown, stored: number): void => {
-      console.error(
-        `[${dd.plugin.id}] paste refused: ${error instanceof Error ? error.message : String(error)}${leftUnused(stored)}`,
-      );
-    };
-    const abandoned = (stored: number): boolean => {
-      if (untrack(() => dd.loadVersion()) === load) return false;
+    pasting += 1;
+    try {
+      let made: Awaited<ReturnType<DaydreamApi["createPage"]>>;
+      try {
+        made = await dd.createPage(text, {
+          position,
+          frame: { width: VIEWPORT_WIDTH },
+        });
+      } catch (error) {
+        console.error(`[${dd.plugin.id}] paste refused: ${why(error)}`);
+        return;
+      }
+      try {
+        // A page is selected as an item is: by its envelope id. (One made
+        // while another project opened is refused, placed nowhere.)
+        dd.select(made.viewportId);
+        // Flush the paste's own notifications while suppression is
+        // explicit.
+        flush();
+      } catch (error) {
+        console.error(
+          `[${dd.plugin.id}] pasted a page: ${made.path}, but its viewport could not be selected: ${why(error)}`,
+        );
+        return;
+      }
       console.info(
-        `[${dd.plugin.id}] paste abandoned: another document was loaded before it landed${leftUnused(stored)}`,
+        `[${dd.plugin.id}] pasted a page: ${made.path}, ${VIEWPORT_WIDTH}px wide`,
       );
-      return true;
-    };
-    let cleaned: CleanedPaste;
-    try {
-      cleaned = await cleanPaste(dd, source.text, {
-        id: dd.core.generateId(),
-        position,
-        said: [],
-      });
-    } catch (error) {
-      refused(error, 0);
-      return;
+      for (const { url, reason } of made.unvendored) {
+        console.warn(
+          `[${dd.plugin.id}] ${url} could not be downloaded into assets/ (${reason}): it stays as written`,
+        );
+      }
+    } finally {
+      pasting -= 1;
     }
-    if (abandoned(0)) return;
-    const progress = { stored: 0 };
-    let pasted: PastedPage;
-    try {
-      pasted = await storePaste(dd, cleaned, progress);
-    } catch (error) {
-      refused(error, progress.stored);
-      return;
-    }
-    if (abandoned(pasted.stored)) return;
-    land(pasted);
   };
 
   dd.canvas.onPaste(
@@ -223,11 +255,7 @@ export function registerHtmlPaste(dd: DaydreamApi): void {
         x: center.x - VIEWPORT_WIDTH / 2 + cascade,
         y: center.y - VIEWPORT_WIDTH / 4 + cascade,
       };
-      void cleanThenLand(
-        source,
-        position,
-        untrack(() => dd.loadVersion()),
-      );
+      void land(pageFile(source), position);
     },
     { priority: PASTE_PRIORITY },
   );

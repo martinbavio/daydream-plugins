@@ -19,8 +19,6 @@ import { untrack } from "solid-js";
 
 import type { DaydreamApi, ElementId, OverlayRect } from "@daydream/plugin-api";
 
-import { isViewport } from "./adopt";
-
 export interface Target {
   viewportId: string;
   /** The element's unique selector in its page, or null: the whole page. */
@@ -40,7 +38,9 @@ export interface Targeting {
   read(): Target | null;
 }
 
-export function createTargeting(dd: DaydreamApi): Targeting {
+export function createTargeting(
+  dd: Pick<DaydreamApi, "core" | "items" | "pageElement" | "selection">,
+): Targeting {
   // The page an element belongs to, from `dd.pageElement(id).viewportId`:
   // read once per mounted element by the kernel, so asked again freely.
   const pageOf = (id: ElementId): string | null =>
@@ -52,7 +52,7 @@ export function createTargeting(dd: DaydreamApi): Targeting {
     if (selected === null) return null;
     const item = dd.items().find((i) => i.id === selected);
     if (item !== undefined) {
-      return isViewport(item) ? { viewportId: item.id, anchor: null } : null;
+      return item.kind === dd.core.viewportKind ? { viewportId: item.id, anchor: null } : null;
     }
     const viewportId = pageOf(selected);
     return viewportId === null ? null : { viewportId, anchor: selected };
@@ -88,7 +88,9 @@ export type TargetBox = (
  * page may still be mounting). A layout read: call it where
  * `dd.geometry.rect` may be called (an effect's apply phase, decision #33).
  */
-export function createTargetBox(dd: DaydreamApi): TargetBox {
+export function createTargetBox(
+  dd: Pick<DaydreamApi, "documentVersion" | "geometry" | "pageFind">,
+): TargetBox {
   let kept: {
     viewportId: string;
     element: string;

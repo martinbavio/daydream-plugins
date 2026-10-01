@@ -7,8 +7,10 @@ import { classPrefix } from "./styles";
 import { createTargetBox } from "./target";
 
 /** The one line the canvas says about a pick: `bolder · waiting for an
- * agent`, then `bolder · building` once an agent took it — `bolder · 1 of
- * 3` as a variant round lands — then nothing, once the round is complete.
+ * agent`, then `bolder · building` once an agent took it (`reviewing` for
+ * a report verb) — `bolder · 2 variants` as a variants round's variants
+ * land, however many the agent makes — then nothing, once the agent says
+ * the round is complete.
  * Drawn in the screen slot from the target's rect — above an element,
  * found again by its selector once its page has been remounted or
  * reloaded since the pick (target.ts), and inside the top-left corner of
@@ -19,7 +21,8 @@ export default function createCaption(
   dd: DaydreamApi,
   session: Session,
   /** What an agent is doing with the verb while the pick is taken:
-   * "building" for the verbs that land, "reviewing" for a report. */
+   * "building" for the verbs that make something, "reviewing" for a
+   * report. */
   working: (verb: string) => string = () => "building",
 ) {
   const [box, setBox] = createSignal<{ rect: OverlayRect; whole: boolean } | null>(null);
@@ -44,9 +47,9 @@ export default function createCaption(
     const phase = session.phase();
     if (phase.kind === "idle") return "";
     if (phase.kind === "waiting") return `${phase.pick.verb} · waiting for an agent`;
-    return phase.of === null
+    return phase.landed === 0
       ? `${phase.pick.verb} · ${working(phase.pick.verb)}`
-      : `${phase.pick.verb} · ${phase.landed} of ${phase.of}`;
+      : `${phase.pick.verb} · ${phase.landed} variant${phase.landed === 1 ? "" : "s"}`;
   };
 
   return (

@@ -3,20 +3,29 @@
 // is kept as the page's draft with its sentence; typing over a page that
 // changed elsewhere on the canvas is carried onto it, and where the two
 // meet it is held, with a note, until ⌘S saves it over the page; ⌘Z drops
-// a draft and ⇧⌘Z straight after brings it back; and a draft comes back
-// with its page — after another was selected, or an undo brought the
-// page back.
+// a draft and ⇧⌘Z straight after brings it back; a draft comes back with
+// its page — after another was selected, or an undo brought the page
+// back — and is the viewport's it was typed in, not every viewport's of
+// that page: a save from another viewport of the page is, to it, a change
+// made elsewhere.
 import { EditorView } from "@codemirror/view";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { DreamDocument, PluginManifest } from "@daydream/plugin-api";
+import type {
+  DaydreamApi,
+  PageEdit,
+  PluginManifest,
+} from "@daydream/plugin-api";
 import {
   createPageItem,
   createTestKernel,
+  fixturePage,
   flush,
   type MountedPlugin,
   mountPlugin,
   pageElementId,
+  testProject,
+  type TestProject,
   viewportItems,
 } from "@daydream/plugin-testing";
 
@@ -58,30 +67,29 @@ const edited = (from: string, to: string, html = HTML): string => {
   return html.replace(from, to);
 };
 
-/** The id of the first page of the document the test mounted. */
+/** The viewport of the page the test mounted first. */
 let itemId = "";
 
-/** Mount the plugin over a fresh one-page document (or `doc`) and wait for
- * the page to mount. `entry` stands in for the plugin's entry — its API
- * wrapped — and `slug` names the document as saved in a library. */
-async function mountPage(
-  doc?: DreamDocument,
-  options: { entry?: typeof activate; slug?: string } = {},
-): Promise<MountedPlugin> {
-  let document = doc;
-  if (document === undefined) {
-    const item = createPageItem(
+/** A project of one page, `page.html`, shown by the viewport `page`. */
+const onePage = (): TestProject =>
+  testProject([
+    createPageItem(
       { html: HTML, css: CSS },
-      { frame: { width: 960 } },
-    );
-    document = { version: 7, items: [item] };
-  }
-  itemId = document.items[0]!.id;
+      { id: "page", frame: { width: 960 } },
+    ),
+  ]);
+
+/** Mount the plugin over a fresh one-page project (or `project`) and wait
+ * for its first page to mount. `entry` stands in for the plugin's entry. */
+async function mountPage(
+  project: TestProject = onePage(),
+  options: { entry?: typeof activate } = {},
+): Promise<MountedPlugin> {
+  itemId = fixturePage(project).id;
   mounted = await mountPlugin({
     entry: options.entry ?? activate,
     manifest,
-    document,
-    ...(options.slug === undefined ? {} : { slug: options.slug }),
+    project,
   });
   await waitMounted(itemId, "h1");
   return mounted;
@@ -152,24 +160,38 @@ function blur(): void {
 const message = (): string | null =>
   panel().querySelector('[role="status"]')?.textContent ?? null;
 
-/** The stored markup of the page `id`. */
-const stored = (id = itemId): string =>
-  viewportItems(mounted!.store.document).find((item) => item.id === id)!.payload
-    .html;
-
-/** A change made from outside the pane — an agent, another plugin —
- * through a second API instance over the same app store. */
-function outsideEdit(html: string, id = itemId): void {
-  const kernel = createTestKernel();
-  kernel.dd.updateItem(id, (item) => {
-    (item.payload as { html: string }).html = html;
-  });
-  kernel.dispose();
-  flush();
+/** The stored markup of the page viewport `id` shows. */
+function stored(id = itemId): string {
+  const viewport = viewportItems(mounted!.store.document).find(
+    (item) => item.id === id,
+  )!;
+  return mounted!.store.pages[viewport.payload.page]!.html;
 }
+
+/** The items on the shown canvas. */
+const items = () => mounted!.store.document.canvases[0]!.items;
 
 function select(id: string | null): void {
   mounted!.store.setSelectedId(id);
+  flush();
+}
+
+/** A change made from outside the pane — another plugin, another
+ * viewport's editor — through a second API instance over the same app
+ * store: the page's markup written whole, as an edit of its file. */
+function outsideEdit(html: string, id = itemId): void {
+  const kernel = createTestKernel();
+  const viewport = viewportItems(mounted!.store.document).find(
+    (item) => item.id === id,
+  )!;
+  const problem = kernel.dd.writePage({
+    kind: "html",
+    path: viewport.payload.page,
+    expected: stored(id),
+    html,
+  });
+  kernel.dispose();
+  if (problem !== null) throw new Error(problem);
   flush();
 }
 
@@ -179,24 +201,34 @@ async function pause(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 700));
 }
 
-
-
 afterEach(disposeMounted);
+
+/** Two viewports, `one` and `two`, each of a page of its own. */
+function twoPages(): { project: TestProject; other: string } {
+  const other = "<!doctype html>\n<body>\n  <h1>Other</h1>\n</body>";
+  const one = createPageItem(
+    { html: HTML, css: CSS },
+    { id: "one", frame: { width: 600 } },
+  );
+  const two = createPageItem(
+    { html: other, css: "" },
+    { id: "two", frame: { width: 600 }, position: { x: 800, y: 0 } },
+  );
+  return { project: testProject([one, two]), other };
+}
 
 describe("mrbavio.html-editor: drafts", () => {
   test("a write that throws keeps the typing, as a draft with the reason, and the next save carries it", async () => {
     let failing = true;
     // The plugin's API with a writePage that throws while `failing`.
-    const entry: typeof activate = (dd) => {
-      const api = Object.create(dd) as typeof dd;
-      Object.defineProperty(api, "writePage", {
-        value: (edit: Parameters<typeof dd.writePage>[0]) => {
+    const entry = (dd: DaydreamApi): void =>
+      activate({
+        ...dd,
+        writePage: ((edit: PageEdit) => {
           if (failing) throw new Error("the disk is full");
           return dd.writePage(edit);
-        },
+        }) as DaydreamApi["writePage"],
       });
-      activate(api);
-    };
     await mountPage(undefined, { entry });
     select(itemId);
     content().focus();
@@ -204,7 +236,7 @@ describe("mrbavio.html-editor: drafts", () => {
     await type(typed);
     expect(text()).toBe(typed);
     expect(stored()).toBe(HTML);
-    expect(message()).toContain("the disk is full");
+    expect(message()).toBe("The page could not be saved: the disk is full.");
 
     failing = false;
     const more = edited("Old headline", "Not lost, saved");
@@ -213,14 +245,14 @@ describe("mrbavio.html-editor: drafts", () => {
     expect(stored()).toBe(more);
   });
 
-
   test("text typed over a page that changed elsewhere on the canvas is carried onto it and saved", async () => {
     await mountPage();
     select(itemId);
     content().focus();
     await typeAll(edited("Old headline", "Mine"));
-    // An agent writes another part of the page before the debounce saves.
-    const theirs = edited("Body copy", "An agent's copy");
+    // Another editor writes another part of the page before the debounce
+    // saves.
+    const theirs = edited("Body copy", "Another editor's copy");
     outsideEdit(theirs);
     await settled();
     // Both: the typing carried onto the page as it is now.
@@ -231,43 +263,34 @@ describe("mrbavio.html-editor: drafts", () => {
     expect(document.activeElement).toBe(content());
   });
 
-
   test("text typed where the page changed on the canvas is kept as its draft, with a note", async () => {
-    const one = createPageItem(
-      { html: HTML, css: CSS },
-      { frame: { width: 600 } },
-    );
-    const other = "<!doctype html>\n<body>\n  <h1>Other</h1>\n</body>";
-    const two = createPageItem(
-      { html: other, css: "" },
-      { frame: { width: 600 }, position: { x: 800, y: 0 } },
-    );
-    const m = await mountPage({ version: 7, items: [one, two] });
-    await waitMounted(two.id, "h1");
-    select(one.id);
+    const { project, other } = twoPages();
+    const m = await mountPage(project);
+    await waitMounted("two", "h1");
+    select("one");
     content().focus();
     const mine = edited("Old headline", "Mine");
     await typeAll(mine);
-    // An agent writes the same headline before the debounce saves.
+    // Another editor writes the same headline before the debounce saves.
     const theirs = edited("Old headline", "Their headline");
-    outsideEdit(theirs, one.id);
+    outsideEdit(theirs, "one");
     // Uncontrolled while typing: the typed text is still there.
     expect(text()).toBe(mine);
     await settled();
     // Nothing written over theirs, and nothing typed thrown away.
-    expect(stored(one.id)).toBe(theirs);
+    expect(stored("one")).toBe(theirs);
     expect(text()).toBe(mine);
     expect(message()).toBe(CHANGED_UNDERNEATH);
 
     // Held while the page is left: blur writes nothing, another page
     // shows clean, and the draft comes back with its note.
     blur();
-    expect(stored(one.id)).toBe(theirs);
+    expect(stored("one")).toBe(theirs);
     expect(text()).toBe(mine);
-    select(two.id);
+    select("two");
     expect(text()).toBe(other);
     expect(message()).toBeNull();
-    select(one.id);
+    select("one");
     expect(text()).toBe(mine);
     expect(message()).toBe(CHANGED_UNDERNEATH);
 
@@ -276,7 +299,7 @@ describe("mrbavio.html-editor: drafts", () => {
     content().focus();
     const more = edited("Mine", "Mine, kept", mine);
     await type(more);
-    expect(stored(one.id)).toBe(theirs);
+    expect(stored("one")).toBe(theirs);
     expect(text()).toBe(more);
     expect(message()).toBe(CHANGED_UNDERNEATH);
 
@@ -285,14 +308,13 @@ describe("mrbavio.html-editor: drafts", () => {
     await pause();
     const event = key(content(), { key: "s", metaKey: true });
     expect(event.defaultPrevented).toBe(true);
-    expect(stored(one.id)).toBe(more);
+    expect(stored("one")).toBe(more);
     expect(text()).toBe(more);
     expect(message()).toBeNull();
     m.store.undo();
     flush();
-    expect(stored(one.id)).toBe(theirs);
+    expect(stored("one")).toBe(theirs);
   });
-
 
   test("a draft typed back to the page's text goes, and the typing after it saves", async () => {
     await mountPage();
@@ -317,8 +339,7 @@ describe("mrbavio.html-editor: drafts", () => {
     expect(stored()).toBe(next);
   });
 
-
-  test("⌘S in the editor with nothing held saves what is pending and is the document's save", async () => {
+  test("⌘S in the editor with nothing held saves what is pending and is the project's save", async () => {
     await mountPage();
     select(itemId);
     content().focus();
@@ -331,7 +352,6 @@ describe("mrbavio.html-editor: drafts", () => {
     expect(message()).toBeNull();
   });
 
-
   test("⌘Z drops a draft the page never held and shows the page as it is", async () => {
     await mountPage();
     select(itemId);
@@ -343,12 +363,11 @@ describe("mrbavio.html-editor: drafts", () => {
     expect(message()).toBe(CHANGED_UNDERNEATH);
 
     key(content(), { key: "z", metaKey: true });
-    // The agent's edit is not undone: only the typed text goes.
+    // The other editor's change is not undone: only the typed text goes.
     expect(stored()).toBe(theirs);
     expect(text()).toBe(theirs);
     expect(message()).toBeNull();
   });
-
 
   test("⌘Z drops a refused draft, all of it, and ⇧⌘Z straight after brings it back", async () => {
     await mountPage();
@@ -380,7 +399,6 @@ describe("mrbavio.html-editor: drafts", () => {
     expect(message()).toBeNull();
   });
 
-
   test("a held draft whose page is back as the typing found it says so, and ⌘S saves it", async () => {
     const m = await mountPage();
     select(itemId);
@@ -404,47 +422,76 @@ describe("mrbavio.html-editor: drafts", () => {
     expect(message()).toBeNull();
   });
 
-
   test("a refused text is kept as its page's draft and comes back with the page", async () => {
-    const one = createPageItem(
-      { html: HTML, css: CSS },
-      { frame: { width: 600 } },
-    );
-    const other = "<!doctype html>\n<body>\n  <h1>Other</h1>\n</body>";
-    const two = createPageItem(
-      { html: other, css: "" },
-      { frame: { width: 600 }, position: { x: 800, y: 0 } },
-    );
-    await mountPage({ version: 7, items: [one, two] });
-    await waitMounted(two.id, "h1");
-    select(one.id);
+    const { project, other } = twoPages();
+    await mountPage(project);
+    await waitMounted("two", "h1");
+    select("one");
     content().focus();
     const refused = edited("<p>", '<p onclick="x()">');
     await type(refused);
     blur();
     expect(text()).toBe(refused);
     expect(message()).toContain("p[onclick]");
-    expect(stored(one.id)).toBe(HTML);
+    expect(stored("one")).toBe(HTML);
 
     // Away and back: the other page shows clean, this one's draft waits.
-    select(two.id);
+    select("two");
     expect(text()).toBe(other);
     expect(message()).toBeNull();
-    select(one.id);
+    select("one");
     expect(text()).toBe(refused);
     expect(message()).toContain("p[onclick]");
 
     // Corrected: saved, and the draft is gone.
     content().focus();
-    await type(edited("<p>", '<p class="x">'));
+    const corrected = edited("<p>", '<p class="x">');
+    await type(corrected);
     blur();
-    expect(stored(one.id)).toBe(edited("<p>", '<p class="x">'));
+    expect(stored("one")).toBe(corrected);
     expect(message()).toBeNull();
-    select(two.id);
-    select(one.id);
-    expect(text()).toBe(edited("<p>", '<p class="x">'));
+    select("two");
+    select("one");
+    expect(text()).toBe(corrected);
   });
 
+  test("a draft is the viewport's it was typed in: another viewport of the page shows the file, and a save from it is a change made elsewhere", async () => {
+    const one = createPageItem(
+      { html: HTML, css: CSS },
+      { id: "one", frame: { width: 600 } },
+    );
+    const twin = { ...one.item, id: "twin", position: { x: 800, y: 0 } };
+    await mountPage(testProject([one, twin]));
+    await waitMounted("twin", "h1");
+    select("one");
+    content().focus();
+    const refused = edited("<p>", '<p onclick="x()">');
+    await type(refused);
+    blur();
+    expect(message()).toContain("p[onclick]");
+
+    // The twin shows the file as it is, and its typing saves.
+    select("twin");
+    expect(text()).toBe(HTML);
+    expect(message()).toBeNull();
+    content().focus();
+    const theirs = edited("Old headline", "From the twin");
+    await type(theirs);
+    blur();
+    expect(stored("twin")).toBe(theirs);
+    expect(stored("one")).toBe(theirs);
+
+    // Back in `one`: its draft waits; corrected, it is carried onto the
+    // twin's save, made elsewhere in the page.
+    select("one");
+    expect(text()).toBe(refused);
+    expect(message()).toContain("p[onclick]");
+    content().focus();
+    await type(edited("<p>", '<p class="x">'));
+    blur();
+    expect(stored("one")).toBe(edited("<p>", '<p class="x">', theirs));
+    expect(message()).toBeNull();
+  });
 
   test("the page removed from outside while the pane is dirty: the pane empties without a write", async () => {
     const m = await mountPage();
@@ -459,9 +506,9 @@ describe("mrbavio.html-editor: drafts", () => {
     flush();
     expect(panel().querySelector(".cm-content")).toBeNull();
     expect(panel().textContent).toContain("Select a page");
-    expect(m.store.document.items).toHaveLength(0);
+    expect(items()).toHaveLength(0);
+    expect(m.store.pages["page.html"]!.html).toBe(HTML);
   });
-
 
   test("text held because its page left the canvas is told apart once an undo brings the page back", async () => {
     const m = await mountPage();

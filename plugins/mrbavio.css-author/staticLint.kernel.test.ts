@@ -18,12 +18,12 @@ const core = coreApi();
 
 function strays(css: string): string[] {
   const out: Finding[] = [];
-  lintStrayDelimiters(css, core.cssBlocks(css), "v1", out);
+  lintStrayDelimiters(css, core.cssBlocks(css), "`v1.css`", out);
   return out.map((finding) => finding.message);
 }
 
 const drops = (before: string, rule: string, where = "", line = 1): string =>
-  `the stray \`;\` before \`${before}\`${where} of viewport v1 (line ${line} of its css) makes the browser drop ${rule}; remove it`;
+  `the stray \`;\` before \`${before}\`${where} on line ${line} of \`v1.css\` makes the browser drop ${rule}; remove it`;
 
 describe("a stray `;` that drops a rule, over the kernel's scan", () => {
   test("at the sheet's top level", () => {
@@ -31,6 +31,18 @@ describe("a stray `;` that drops a rule, over the kernel's scan", () => {
       drops(".b", "the rule `.b`"),
     ]);
     expect(strays(".a {\n  color: red;\n};\n\n.b { color: blue }")).toEqual([
+      drops(".b", "the rule `.b`", "", 3),
+    ]);
+  });
+
+  test("its line counts every newline CSS has: `\\r\\n` as one, a lone `\\r` and `\\f` each one", () => {
+    expect(strays(".a {}\r\n\r\n; .b { color: blue }")).toEqual([
+      drops(".b", "the rule `.b`", "", 3),
+    ]);
+    expect(strays(".a {}\r\r; .b { color: blue }")).toEqual([
+      drops(".b", "the rule `.b`", "", 3),
+    ]);
+    expect(strays(".a {}\f\n; .b { color: blue }")).toEqual([
       drops(".b", "the rule `.b`", "", 3),
     ]);
   });
@@ -60,7 +72,7 @@ describe("a stray `;` that drops a rule, over the kernel's scan", () => {
       drops(".b", "the rule `.b`", " in `@supports (display: grid)`", 2),
       drops(".b", "the rule `.b`", " in `@container (width > 0px)`", 3).replace("stray `;`", "stray `;;`"),
       drops(".b", "the rule `.b`", " in `@starting-style`", 4),
-      "the stray `;` after `.a` in `@layer a › @media all` of viewport v1 (line 5 of its css) makes the browser drop the rule `.a;b` whole; remove the `;`, and `.a` too if it is a leftover",
+      "the stray `;` after `.a` in `@layer a › @media all` on line 5 of `v1.css` makes the browser drop the rule `.a;b` whole; remove the `;`, and `.a` too if it is a leftover",
     ]);
   });
 

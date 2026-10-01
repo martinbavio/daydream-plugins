@@ -10,34 +10,42 @@
 // container query with no container — is matchLint.ts's, which mounts the
 // page. The facts about CSS it reads
 // (family names) are core's, through `dd.core` (one implementation,
-// decision #48 P4); the OPINION that these are worth refusing a landing
-// for is this plugin's.
+// decision #48 P4); the OPINION that these are worth a blocking finding
+// is this plugin's.
 //
-// A page (decision #76) is two texts. The markup is parsed as the kernel
-// parses it (`dd.core.parsePage`, the browser's parser in standards mode;
-// pageDom.ts walks it): an element's own declarations are its `style`
-// attribute, and it is named in a finding by its unique selector
-// (`dd.core.uniqueSelector`), as `measure` names it. The css is read once
-// by the kernel's scan (`dd.core.cssBlocks`, walked by pageCss.ts) so
-// each declaration is judged as the author wrote it — the
-// CSSOM drops `width: 100` before anyone could read it, which is the
-// point of rule 1 — and a rule finding carries the rule's position among
-// the page's rules in `rule`, the address the gate runner keys a
-// declaration by. What only the browser can answer (a `font` shorthand's
-// family list) is asked of the CSSOM.
+// A page (decision #78) is its markup and its sheets. The markup is
+// parsed as the kernel parses it (`dd.core.parsePage`, the browser's
+// parser in standards mode; pageDom.ts walks it): an element's own
+// declarations are its `style` attribute, and it is named in a finding by
+// its unique selector (`dd.core.uniqueSelector`), as `measure` names it.
+// Each sheet is read once by the kernel's scan (`dd.core.cssBlocks`,
+// walked by pageCss.ts; pageSheets.ts reads a page's sheets) so each
+// declaration is judged as the author wrote it — the CSSOM drops `width:
+// 100` before anyone could read it, which is the point of rule 1 — and a
+// rule finding carries the rule's position among the page's rules in
+// `rule`, the address the gate runner keys a declaration by, and names
+// the sheet it is written in. A read-only sheet (a remote one, or an
+// unwritable file) is never a finding's subject; its rules still name
+// families and classes. What only the browser can answer (a `font`
+// shorthand's family list) is asked of the CSSOM.
+//
+// It reads TEXT alone, so it judges each page ONCE, however many
+// viewports show it, and names it by its path; a sheet several pages
+// link is one text, so what is said of its text alone — a unit-less
+// length in one of its rules, a face no page linking it names — is said
+// once.
 
 import type {
   CoreApi,
   CssBlock,
   CssDeclaration,
+  DeepReadonly,
   DreamDocument,
-  DreamPage,
   Finding,
 } from "@daydream/plugin-api";
 
 import {
   fontFaceBlocks,
-  pageRules,
   refused,
   ruleName,
   selectorPreludes,
@@ -45,21 +53,65 @@ import {
   type PageRule,
 } from "./pageCss";
 import { lintElements } from "./pageDom";
+import {
+  editable,
+  judgedPaths,
+  pagesText,
+  readSheets,
+  sheetKey,
+  sheetName,
+  shownPages,
+  unjudgedLinks,
+  type Page,
+  type PageOf,
+  type ProjectPaths,
+} from "./pageSheets";
+import {
+  inlineValue,
+  inRound,
+  markupClause,
+  siteClause,
+  type SiteHow,
+  type VariantRound,
+} from "./variantRound";
 
-/** Every static finding for the document: per page, the elements' own
- * unit-less lengths in tree order, then the page's unused font faces,
- * then its rules' unit-less lengths, then the classes no rule names, then
- * the stray `;`s that drop a rule. Empty when the document is clean.
- * Browser only: the markup is parsed by the browser. */
-export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
+/** Every static finding for the document: per page, in the order the
+ * viewports first show them, the elements' own unit-less lengths in tree
+ * order, then its unused font faces, then its rules' unit-less lengths,
+ * then the classes no rule names, then the stray `;`s that drop a rule;
+ * then, advisory, the viewports whose
+ * page the project does not hold, which no lint could read. Empty when
+ * the document is clean. At a variant's finalize (`round`,
+ * variantRound.ts) what it finds in the site's sheets, and in markup the
+ * page already has, is advisory. Browser only: the markup is parsed by
+ * the browser. */
+export function staticLint(
+  core: CoreApi,
+  doc: DeepReadonly<DreamDocument>,
+  pageOf: PageOf,
+  project: ProjectPaths = [],
+  round: VariantRound | null = null,
+): Finding[] {
   const findings: Finding[] = [];
-  for (const page of core.viewportItems(doc) as DreamPage[]) {
-    const { css } = page.payload;
-    const parsed = core.parsePage(page.payload.html);
-    // Read once: every walk below is over the same blocks.
-    const blocks = core.cssBlocks(css);
-    const rules = pageRules(blocks);
-    const elements = lintElements(parsed);
+  const { shown, missing } = shownPages(core, doc, pageOf);
+  const pages = [
+    ...new Map(shown.map(({ page }) => [page.path, page])).values(),
+  ].map((page) => readPage(core, page));
+  const faces = faceUses([
+    ...pages,
+    ...faceSharers(core, pages, doc, pageOf, project, judgedPaths(shown)),
+  ]);
+  /** The round's, for the page it judges: at most one page is shown at a
+   * finalize. */
+  const roundOf = (page: Page): VariantRound | null =>
+    shown.some(({ viewport, page: its }) => its === page && inRound(round, viewport))
+      ? round
+      : null;
+  /** A shared sheet's text is judged once (`sheetKey`). */
+  const judged = new Set<string>();
+  for (const read of pages) {
+    const { page, parsed, elements, rules, blocks } = read;
+    const variant = roundOf(page);
     const names = new Map<Element, string>();
     const nameOf = (el: Element): string => {
       let name = names.get(el);
@@ -72,20 +124,75 @@ export function staticLint(core: CoreApi, doc: DreamDocument): Finding[] {
     for (const el of elements) {
       const own = core.cssDeclarations(el.getAttribute("style") ?? "");
       if (own.length === 0) continue;
-      lintUnitlessLengths(own, nameOf(el), findings);
+      lintUnitlessLengths(own, nameOf(el), findings, variant);
     }
-    lintUnusedFontFaces(core, page, blocks, rules, elements, findings);
-    lintUnitlessLengthsOnRules(rules, page.id, findings);
+    lintUnusedFontFaces(read, faces, judged, findings, variant);
+    const fresh = page.sheets.flatMap((_, sheet) => {
+      if (!editable(page, sheet)) return [];
+      const key = sheetKey(page, sheet);
+      if (judged.has(`rules\u0000${key}`)) return [];
+      judged.add(`rules\u0000${key}`);
+      return [sheet];
+    });
+    /** The round's site clause for a rule of sheet `sheet` (`siteOf`)
+     * or a block of it (`siteBlock`), or null: the variant's. */
+    const clause = (
+      sheet: number,
+      how: SiteHow | null | undefined,
+    ): ((count?: number) => string) | null =>
+      variant === null || how === null || how === undefined
+        ? null
+        : (count) => siteClause(variant, sheetName(page, sheet), count, how);
+    lintUnitlessLengthsOnRules(
+      rules.filter((rule) => fresh.includes(rule.sheet)),
+      (sheet) => sheetName(page, sheet),
+      findings,
+      (rule) =>
+        clause(rule.sheet, variant?.siteOf(sheetKey(page, rule.sheet), rule.index)),
+    );
     lintUnreferencedClasses(
-      selectorPreludes(blocks),
+      blocks.flatMap(selectorPreludes),
       elements,
       nameOf,
-      page.id,
+      page.path,
       findings,
+      variant,
     );
-    lintStrayDelimiters(css, blocks, page.id, findings);
+    for (const sheet of fresh) {
+      lintStrayDelimiters(
+        page.sheets[sheet]!.text,
+        blocks[sheet]!,
+        sheetName(page, sheet),
+        findings,
+        (block) => clause(sheet, variant?.siteBlock(sheetKey(page, sheet), block)),
+      );
+    }
+  }
+  for (const viewport of missing) {
+    findings.push({
+      tier: "static",
+      severity: "advisory",
+      message: `viewport ${viewport.id} shows ${viewport.payload.page}, which the project holds no page for, so no lint read it`,
+    });
   }
   return findings;
+}
+
+/** One page as every rule here reads it. */
+interface ReadPage {
+  core: CoreApi;
+  page: Page;
+  parsed: Document;
+  elements: Element[];
+  blocks: CssBlock[][];
+  rules: PageRule[];
+}
+
+function readPage(core: CoreApi, page: Page): ReadPage {
+  const parsed = core.parsePage(page.html);
+  // Read once: every walk below is over the same blocks.
+  const { blocks, rules } = readSheets(core, page);
+  return { core, page, parsed, elements: lintElements(parsed), blocks, rules };
 }
 
 /** An element as a finding's sentence names it. */
@@ -195,18 +302,25 @@ function lintUnitlessLengths(
   own: readonly CssDeclaration[],
   selector: string,
   findings: Finding[],
+  round: VariantRound | null = null,
 ): void {
   for (const declaration of own) {
     if (!hasUnitlessLength(declaration)) continue;
+    const fact = `${declaration.property}: ${declaration.value} on ${named(selector)} has no unit`;
+    const had =
+      round?.hadStyle(selector, declaration.property, inlineValue(declaration)) === true;
     findings.push({
       tier: "static",
-      severity: "blocking",
+      severity: had ? "advisory" : "blocking",
       elementId: selector,
       property: declaration.property,
-      message: `${declaration.property}: ${declaration.value} on ${named(selector)} has no unit; a length needs one (px, rem, %, …)`,
+      message: had ? `${fact}${markupClause(round!)}` : `${fact}${UNIT_FIX}`,
     });
   }
 }
+
+/** What a unit-less length's finding says to do. */
+const UNIT_FIX = "; a length needs one (px, rem, %, …)";
 
 function isNonZeroBareNumber(token: string): boolean {
   return BARE_NUMBER.test(token) && parseFloat(token) !== 0;
@@ -242,21 +356,27 @@ function topLevelTokens(value: string): string[] {
 
 /** Rule 1 on the page's rules: a rule's declarations are the same grain
  * as an element's own, so the same check applies verbatim, under any
- * condition — a dropped declaration is dropped at every width. */
+ * condition — a dropped declaration is dropped at every width. Each
+ * finding names the sheet the rule is written in (`sheetOf`, from the
+ * rule's `sheet`); one of a rule `site` answers a clause for — the
+ * site's, at a variant's finalize — is advisory, with that clause. */
 export function lintUnitlessLengthsOnRules(
   rules: readonly PageRule[],
-  viewportId: string,
+  sheetOf: (sheet: number) => string,
   findings: Finding[],
+  site: (rule: PageRule) => ((count?: number) => string) | null = () => null,
 ): void {
   for (const rule of rules) {
     for (const declaration of rule.declarations) {
       if (!hasUnitlessLength(declaration)) continue;
+      const aside = site(rule);
+      const fact = `${declaration.property}: ${declaration.value} in rule ${ruleName(rule)} of ${sheetOf(rule.sheet)} has no unit`;
       findings.push({
         tier: "static",
-        severity: "blocking",
+        severity: aside === null ? "blocking" : "advisory",
         rule: rule.index,
         property: declaration.property,
-        message: `${declaration.property}: ${declaration.value} in rule ${ruleName(rule)} of viewport ${viewportId} has no unit; a length needs one (px, rem, %, …)`,
+        message: `${fact}${aside === null ? UNIT_FIX : aside()}`,
       });
     }
   }
@@ -269,9 +389,10 @@ export function lintUnitlessLengthsOnRules(
 // ---------------------------------------------------------------------------
 // Rule 3 — a @font-face nothing names.
 //
-// A face is a download the bridge vendored and a rule the page carries; one
-// whose family no `font-family` in the page lists — a rule's, under any
-// condition, or an element's own — is dead weight the browser never even
+// A face is a download and a rule a sheet carries; one whose family no
+// `font-family` in the page lists — a rule's, in any of its sheets and
+// under any condition, or an element's own — is dead weight the browser
+// never even
 // fetches, since a face loads only when text uses it. Family names compare
 // case-insensitively (css-fonts-4 §4.3). The `font` shorthand counts: the
 // browser parses it (the CSSOM's `font-family` longhand of the value), and
@@ -281,19 +402,91 @@ export function lintUnitlessLengthsOnRules(
 // indirection: a family reached through a custom property (`--stack:
 // "Noto Serif", serif` and `font-family: var(--stack)`) is named in the
 // custom property's value, so every `--*` value is searched the same way.
-// Necessity cannot see this either — a font face is not a rule's
-// declaration to remove — so it is static by nature.
+// A sheet several pages link is one text: its face is dead when no page
+// linking it names the family — every page of the project that links it,
+// read for this whether the document shows it or not (at a finalize it
+// holds the page about to be written alone), since text is all it takes. Necessity cannot see this either — a font
+// face is not a rule's declaration to remove — so it is static by nature.
 
-function lintUnusedFontFaces(
+/** The pages the document does not show that link a sheet with a face
+ * of the shown ones (`pages`) — at a finalize, every other page of the
+ * project (`project`; pageSheets.ts `unjudgedLinks`) — read for what they
+ * name: a face in a sheet they link is used when they use it, and their
+ * text alone says so. Each is read with every sheet a shown page carries
+ * as the shown page has it — at a finalize, the text about to be written,
+ * which is what that page will render too. */
+function faceSharers(
   core: CoreApi,
-  page: DreamPage,
-  blocks: readonly CssBlock[],
-  rules: readonly PageRule[],
-  elements: readonly Element[],
-  findings: Finding[],
-): void {
-  const faces = fontFaceBlocks(blocks).map(({ block }) => block);
-  if (faces.length === 0) return;
+  pages: readonly ReadPage[],
+  doc: DeepReadonly<DreamDocument>,
+  pageOf: PageOf,
+  project: ProjectPaths,
+  judged: ReadonlySet<string>,
+): ReadPage[] {
+  const outside = unjudgedLinks(doc, pageOf, project, judged);
+  const paths = new Set<string>();
+  const shared = new Map<string, Page["sheets"][number]>();
+  for (const read of pages) {
+    read.page.sheets.forEach((each, sheet) => {
+      const key = sheetKey(read.page, sheet);
+      if (!shared.has(key)) shared.set(key, each);
+    });
+    read.blocks.forEach((blocks, sheet) => {
+      if (!editable(read.page, sheet) || fontFaceBlocks(blocks).length === 0) return;
+      for (const path of outside.get(sheetKey(read.page, sheet)) ?? []) paths.add(path);
+    });
+  }
+  return [...paths].flatMap((path) => {
+    const page = pageOf(path);
+    if (page === undefined) return [];
+    const sheets = page.sheets.map(
+      (each, sheet) => shared.get(sheetKey(page, sheet)) ?? each,
+    );
+    return [readPage(core, { ...page, sheets })];
+  });
+}
+
+/** Every face of an editable sheet the pages hold (`faceKey`), with the
+ * pages carrying it and whether one of them names its family. A face in
+ * a sheet several pages link is used when any of them uses it. */
+interface FaceUse {
+  family: string;
+  pages: string[];
+  used: boolean;
+}
+
+function faceKey(page: Page, sheet: number, block: CssBlock): string {
+  return `${sheetKey(page, sheet)}\u0000${block.range[0]}`;
+}
+
+function faceUses(pages: readonly ReadPage[]): Map<string, FaceUse> {
+  const uses = new Map<string, FaceUse>();
+  for (const read of pages) {
+    let names: ((family: string) => boolean) | undefined;
+    read.blocks.forEach((blocks, sheet) => {
+      if (!editable(read.page, sheet)) return;
+      for (const { block } of fontFaceBlocks(blocks)) {
+        const declared = block.declarations.find((d) => d.property === "font-family");
+        const family = read.core.familyNames(declared?.value ?? "")[0];
+        if (family === undefined) continue;
+        const key = faceKey(read.page, sheet, block);
+        const use = uses.get(key) ?? { family, pages: [], used: false };
+        uses.set(key, use);
+        use.pages.push(read.page.path);
+        names ??= familyNamer(read);
+        use.used ||= names(family);
+      }
+    });
+  }
+  return uses;
+}
+
+/** Whether a family name is named in the page (see the header): by a
+ * `font-family` of a rule — any sheet's, under any condition — or of an
+ * element's own style, a `font` shorthand, or loosely in a custom
+ * property's value or a shorthand the browser could not resolve. */
+function familyNamer(read: ReadPage): (family: string) => boolean {
+  const { core, rules, elements } = read;
   const named = new Set<string>();
   /** Values searched by substring: `font` shorthands the browser could
    * not resolve, and custom properties. */
@@ -315,20 +508,44 @@ function lintUnusedFontFaces(
   for (const el of elements) {
     core.cssDeclarations(el.getAttribute("style") ?? "").forEach(use);
   }
-  for (const face of faces) {
-    const declared = face.declarations.find((d) => d.property === "font-family");
-    const family = core.familyNames(declared?.value ?? "")[0];
-    if (family === undefined) continue;
+  return (family) => {
     const lower = family.toLowerCase();
-    if (named.has(lower)) continue;
-    if (loose.some((value) => value.includes(lower))) continue;
-    findings.push({
-      tier: "static",
-      severity: "blocking",
-      elementId: "html",
-      message: `@font-face ${family} in viewport ${page.id} is named by no font-family in the page — remove the face or use it`,
-    });
-  }
+    return named.has(lower) || loose.some((value) => value.includes(lower));
+  };
+}
+
+/** Rule 3 for one page: each face of its editable sheets that no page
+ * carrying it names, reported once — at the first page that carries it;
+ * one the site keeps at a variant's finalize (`round`, `siteBlock`) is
+ * advisory. */
+function lintUnusedFontFaces(
+  read: ReadPage,
+  uses: ReadonlyMap<string, FaceUse>,
+  judged: Set<string>,
+  findings: Finding[],
+  round: VariantRound | null = null,
+): void {
+  read.blocks.forEach((blocks, sheet) => {
+    if (!editable(read.page, sheet)) return;
+    for (const { block } of fontFaceBlocks(blocks)) {
+      const key = faceKey(read.page, sheet, block);
+      const use = uses.get(key);
+      if (use === undefined || use.used || judged.has(`face\u0000${key}`)) continue;
+      judged.add(`face\u0000${key}`);
+      const name = sheetName(read.page, sheet);
+      const how = round?.siteBlock(sheetKey(read.page, sheet), block) ?? null;
+      const fact = `@font-face ${use.family} in ${name} is named by no font-family in ${pagesText(use.pages)}`;
+      findings.push({
+        tier: "static",
+        severity: how !== null ? "advisory" : "blocking",
+        elementId: "html",
+        message:
+          how !== null
+            ? `${fact}${siteClause(round!, name, 1, how)}`
+            : `${fact} — remove the face or use it`,
+      });
+    }
+  });
 }
 
 /** The family list the browser reads out of a `font` shorthand, or ""
@@ -343,7 +560,7 @@ function shorthandFamily(scratch: HTMLElement | undefined, value: string): strin
 // ---------------------------------------------------------------------------
 // Rule 4 — a class no rule names (decision #71's `class` hook). The mirror
 // of the dead-rule finding (matchLint.ts): a class on an element that no
-// selector in the page's css mentions is a hook nothing hangs on — the
+// selector in the page's sheets mentions is a hook nothing hangs on — the
 // element carries it for nobody. Static by nature: whether a selector
 // NAMES a class is read from its text, never from a match (a `.card` rule
 // names `card` whether or not it matches this element right now). Named
@@ -354,7 +571,7 @@ function shorthandFamily(scratch: HTMLElement | undefined, value: string): strin
 // and `|=` match the attribute STRING by prefix, suffix or substring, so a
 // class counts as named by one of those when the token itself satisfies
 // the test (`[class*="i-"]` names `i-home`) — approximate, erring toward
-// named, since a false "unreferenced" would refuse a valid landing. Only
+// named, since a false "unreferenced" would block a valid page. Only
 // `class` is judged: an `id` may be a fragment link's target and a
 // `data-*` a state hook, neither of which a rule has to name.
 
@@ -417,25 +634,34 @@ function classAttributeSelectors(
   return out;
 }
 
-/** Rule 4 over a page's elements, given every selector its css writes
- * (`selectorPreludes`) and how an element is named. */
+/** Rule 4 over a page's elements, given every selector its sheets write
+ * (`selectorPreludes`, a read-only sheet's included) and how an element
+ * is named. At a variant's finalize (`round`), a class the page already
+ * has on the element — a JavaScript hook, say, outside what the variant
+ * changes — is advisory. */
 export function lintUnreferencedClasses(
   selectors: readonly string[],
   elements: readonly Element[],
   nameOf: (el: Element) => string,
-  viewportId: string,
+  pagePath: string,
   findings: Finding[],
+  round: VariantRound | null = null,
 ): void {
   const names = classNamer(selectors);
   for (const el of elements) {
     const classes = (el.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
     for (const name of classes) {
       if (names(name)) continue;
+      const selector = nameOf(el);
+      const fact = `class "${name}" on ${named(selector)} in page \`${pagePath}\` is named by no rule`;
+      const had = round?.hadClass(selector, name) === true;
       findings.push({
         tier: "static",
-        severity: "blocking",
-        elementId: nameOf(el),
-        message: `class "${name}" on ${named(nameOf(el))} in viewport ${viewportId} is named by no rule; drop it, or write the rule that uses it`,
+        severity: had ? "advisory" : "blocking",
+        elementId: selector,
+        message: had
+          ? `${fact}${markupClause(round!)}`
+          : `${fact}; drop it, or write the rule that uses it`,
       });
     }
   }
@@ -457,14 +683,21 @@ export function lintUnreferencedClasses(
 // a rule that matches nothing, a dead declaration, or an unused face.
 // Blocking, as every static finding is: a rule silently gone is a defect,
 // and the fix is one character. A `Finding` carries no text range, so the
-// sentence names the line of the css the `;` is on.
+// sentence names the sheet the `;` is written in and its line there. It
+// reads a sheet's text alone, so a sheet several pages link is judged
+// once, and a read-only sheet never (staticLint above).
 
-/** Rule 5 over a page's blocks, read from `css`. */
+/** Rule 5 over one sheet's blocks, read from its text `css`; `sheet` is
+ * what the findings call it (pageSheets.ts `sheetName`). Where `site`
+ * answers a clause for the refused block — one the site keeps at a
+ * variant's finalize — its finding is advisory, its fix that clause
+ * instead. */
 export function lintStrayDelimiters(
   css: string,
   blocks: readonly CssBlock[],
-  viewportId: string,
+  sheet: string,
   findings: Finding[],
+  site: (block: CssBlock) => ((count?: number) => string) | null = () => null,
 ): void {
   const levels: { blocks: readonly CssBlock[]; at: number; within: string[] }[] = [
     { blocks, at: 0, within: [] },
@@ -477,7 +710,7 @@ export function lintStrayDelimiters(
       continue;
     }
     const label = refused(block)
-      ? strayFinding(css, block, level.within, viewportId, findings)
+      ? strayFinding(css, block, level.within, sheet, findings, site(block))
       : block.prelude;
     if (block.children.length > 0) {
       levels.push({ blocks: block.children, at: 0, within: [...level.within, label] });
@@ -492,9 +725,17 @@ function strayFinding(
   css: string,
   block: CssBlock,
   within: readonly string[],
-  viewportId: string,
+  sheet: string,
   findings: Finding[],
+  site: ((count?: number) => string) | null,
 ): string {
+  const push = (fact: string, fix: string): void => {
+    findings.push({
+      tier: "static",
+      severity: site === null ? "blocking" : "advisory",
+      message: `${fact}${site === null ? fix : site()}`,
+    });
+  };
   // Named on one line, however the text breaks it.
   const prelude = block.prelude.replace(/\s+/g, " ");
   const at = strayDelimiter(prelude);
@@ -504,24 +745,19 @@ function strayFinding(
   const where = within.length === 0 ? "" : ` in \`${within.join(" › ")}\``;
   const inKeyframes = /^@(?:-\w+-)?keyframes\b/i.test(within.at(-1) ?? "");
   const line = lineOf(css, block);
-  const place = `${where} of viewport ${viewportId} (line ${line} of its css)`;
+  const place = `${where} on line ${line} of ${sheet}`;
   if (head !== "") {
-    findings.push({
-      tier: "static",
-      severity: "blocking",
-      message: `the stray \`;\` after \`${head}\`${place} makes the browser drop the rule \`${prelude}\` whole; remove the \`;\`, and \`${head}\` too if it is a leftover`,
-    });
+    push(
+      `the stray \`;\` after \`${head}\`${place} makes the browser drop the rule \`${prelude}\` whole`,
+      `; remove the \`;\`, and \`${head}\` too if it is a leftover`,
+    );
     return prelude;
   }
   // The run of `;` itself, however many (`;;`).
   const stray = /^[;\s]*/.exec(prelude)![0].replace(/\s+/g, "");
   const rule = after.at(-1);
   if (rule === undefined) {
-    findings.push({
-      tier: "static",
-      severity: "blocking",
-      message: `the stray \`${stray}\`${place} makes the browser drop the block after it; remove it`,
-    });
+    push(`the stray \`${stray}\`${place} makes the browser drop the block after it`, "; remove it");
     return prelude;
   }
   const noun = inKeyframes ? "the keyframe" : "the rule";
@@ -529,11 +765,10 @@ function strayFinding(
     ...after.slice(0, -1).map((part) => `\`${part}\``),
     `${noun} \`${rule}\``,
   ]);
-  findings.push({
-    tier: "static",
-    severity: "blocking",
-    message: `the stray \`${stray}\` before \`${after.join("; ")}\`${place} makes the browser drop ${dropped}; remove it`,
-  });
+  push(
+    `the stray \`${stray}\` before \`${after.join("; ")}\`${place} makes the browser drop ${dropped}`,
+    "; remove it",
+  );
   return rule;
 }
 
@@ -559,12 +794,17 @@ function listed(items: readonly string[]): string {
 
 /** The line of `css` the block's stray `;` is on, counted from 1: where
  * the scan's range starts, or, for a prelude with text before its `;`
- * (`.a;b`), that `;` found in the text. */
+ * (`.a;b`), that `;` found in the text. A newline is CSS's: `\n`, `\f`,
+ * `\r`, or `\r\n` as one. */
 function lineOf(css: string, block: CssBlock): number {
   const [start, end] = block.range;
   const found = strayDelimiter(css, start, end);
   const at = found === -1 ? start : found;
   let line = 1;
-  for (let i = 0; i < at && i < css.length; i++) if (css[i] === "\n") line++;
+  for (let i = 0; i < at && i < css.length; i++) {
+    const c = css[i];
+    if (c === "\r" && css[i + 1] === "\n") continue;
+    if (c === "\n" || c === "\r" || c === "\f") line++;
+  }
   return line;
 }

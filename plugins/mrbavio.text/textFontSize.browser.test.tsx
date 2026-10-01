@@ -4,8 +4,8 @@ import {
   type AppStore,
   type MountPluginOptions,
   type MountedPlugin,
-  createEmptyDocument,
   documentFrom,
+  testProject,
 } from "@daydream/plugin-testing";
 import {
   beforeEach,
@@ -24,7 +24,7 @@ import { measureNaturalTextItem } from "./measurement";
 
 let appStore: AppStore;
 beforeEach(() => {
-  const kernel = createTestKernel({ document: createEmptyDocument() });
+  const kernel = createTestKernel({ project: testProject([]) });
   appStore = kernel.store;
   onTestFinished(() => kernel.dispose());
 });
@@ -35,16 +35,15 @@ function mountShell(
   return mountPlugin({ ...options, entry: activate, manifest });
 }
 
-afterEach(() => appStore.loadDocument(createEmptyDocument(), { slug: null }));
+afterEach(() => appStore.loadProject(testProject([])));
 
 test.each([undefined, { width: 240 }])(
   "auto-height text shrinks with the font, including below the old 16px floor (%j)",
   async (frame) => {
     const { host } = await mountShell({
-      document: {
-        version: 7,
-        items: [{ ...textItem(frame), payload: { text: "Hello" } }],
-      },
+      project: testProject([
+        { ...textItem(frame), payload: { text: "Hello" } },
+      ]),
     });
     appStore.setItemSelection(["text"]);
     flush();
@@ -61,9 +60,11 @@ test.each([undefined, { width: 240 }])(
       10 / 24,
       2,
     );
-    expect(appStore.document.items[0]!.frame?.height).toBeUndefined();
+    expect(
+      appStore.document.canvases[0]!.items[0]!.frame?.height,
+    ).toBeUndefined();
     if (frame === undefined)
-      expect(appStore.document.items[0]!.frame).toBeUndefined();
+      expect(appStore.document.canvases[0]!.items[0]!.frame).toBeUndefined();
   },
 );
 
@@ -96,7 +97,7 @@ function textItem(frame?: { width: number; height?: number }): DreamItem {
 
 test("plus/minus adjust white text and proportional width, preserving lines, position and explicit height with undo", async () => {
   const { host } = await mountShell({
-    document: { version: 7, items: [textItem({ width: 300, height: 100 })] },
+    project: testProject([textItem({ width: 300, height: 100 })]),
   });
   appStore.setItemSelection(["text"]);
   flush();
@@ -108,7 +109,7 @@ test("plus/minus adjust white text and proportional width, preserving lines, pos
   );
   expect(parseFloat(getComputedStyle(node).lineHeight)).toBeCloseTo(24 * 1.4);
   expect(chord("+", document.body, true).defaultPrevented).toBe(true);
-  const item = appStore.document.items[0]!;
+  const item = appStore.document.canvases[0]!.items[0]!;
   expect(item.payload).toMatchObject({ fontSize: 26 });
   expect(item.frame).toEqual({ width: 325, height: 100 });
   expect(item.position).toEqual({ x: 40, y: 60 });
@@ -120,34 +121,33 @@ test("plus/minus adjust white text and proportional width, preserving lines, pos
   expect(item.frame!.width).toBeCloseTo(300, 8);
   expect(getComputedStyle(node).fontSize).toBe("24px");
   appStore.undo();
-  expect(appStore.document.items[0]!.frame!.width).toBe(325);
+  expect(appStore.document.canvases[0]!.items[0]!.frame!.width).toBe(325);
   appStore.undo();
-  expect(appStore.document.items[0]!.payload).not.toHaveProperty("fontSize");
+  expect(appStore.document.canvases[0]!.items[0]!.payload).not.toHaveProperty(
+    "fontSize",
+  );
 });
 
 test("equals shortcut handles mixed selections but leaves other editors and non-text items alone", async () => {
   const { host } = await mountShell({
-    document: {
-      version: 7,
-      items: [
-        textItem(),
-        {
-          id: "other",
-          kind: "example.box",
-          position: { x: 0, y: 0 },
-          payload: {},
-        },
-      ],
-    },
+    project: testProject([
+      textItem(),
+      {
+        id: "other",
+        kind: "example.box",
+        position: { x: 0, y: 0 },
+        payload: {},
+      },
+    ]),
   });
   appStore.setItemSelection(["text", "other"]);
   flush();
   expect(chord("=").defaultPrevented).toBe(true);
-  expect(appStore.document.items[0]!.frame).toBeUndefined();
-  expect(appStore.document.items[1]!.payload).toEqual({});
+  expect(appStore.document.canvases[0]!.items[0]!.frame).toBeUndefined();
+  expect(appStore.document.canvases[0]!.items[1]!.payload).toEqual({});
   const node = host.querySelector<HTMLElement>("[data-text-item]")!;
   const measured = measureNaturalTextItem(
-    (appStore.document.items[0]!.payload as { text: string }).text,
+    (appStore.document.canvases[0]!.items[0]!.payload as { text: string }).text,
     undefined,
     26,
   )!;
@@ -167,15 +167,12 @@ test("equals shortcut handles mixed selections but leaves other editors and non-
 
 test("font sizing during native editing keeps the caret, persists through typing, and commits as one session", async () => {
   const { host } = await mountShell({
-    document: {
-      version: 7,
-      items: [
-        {
-          ...textItem({ width: 240 }),
-          payload: { text: "Hello", fontSize: 24 },
-        },
-      ],
-    },
+    project: testProject([
+      {
+        ...textItem({ width: 240 }),
+        payload: { text: "Hello", fontSize: 24 },
+      },
+    ]),
   });
   appStore.setItemSelection(["text"]);
   flush();
@@ -199,29 +196,29 @@ test("font sizing during native editing keeps the caret, persists through typing
   expect(document.activeElement).toBe(editor);
   expect(host.querySelector("[data-text-editor]")).toBe(editor);
   await userEvent.keyboard("!");
-  expect(appStore.document.items[0]!.payload).toEqual({
+  expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
     text: "Hello world!",
     fontSize: 26,
   });
-  expect(appStore.document.items[0]!.frame!.width).toBe(260);
+  expect(appStore.document.canvases[0]!.items[0]!.frame!.width).toBe(260);
   await userEvent.keyboard("{Escape}");
-  expect(appStore.document.items[0]!.payload).toEqual({
+  expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
     text: "Hello world!",
     fontSize: 26,
   });
-  expect(appStore.document.items[0]!.frame!.width).toBe(260);
+  expect(appStore.document.canvases[0]!.items[0]!.frame!.width).toBe(260);
   appStore.undo();
   flush();
-  expect(appStore.document.items[0]!.payload).toEqual({
+  expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
     text: "Hello",
     fontSize: 24,
   });
-  expect(appStore.document.items[0]!.frame!.width).toBe(240);
+  expect(appStore.document.canvases[0]!.items[0]!.frame!.width).toBe(240);
   expect(appStore.canUndo()).toBe(false);
 });
 
 test("empty draft sizing takes effect before the first character, without creating a blank item", async () => {
-  const { host } = await mountShell({ document: createEmptyDocument() });
+  const { host } = await mountShell({ project: testProject([]) });
   const canvas = Array.from(host.querySelectorAll<HTMLElement>("div")).find(
     (node) =>
       Array.from(node.classList).some((name) => /^_?canvas_/.test(name)),
@@ -234,9 +231,9 @@ test("empty draft sizing takes effect before the first character, without creati
   );
   const editor = host.querySelector<HTMLElement>("[data-text-editor]")!;
   chord("+", editor);
-  expect(appStore.document.items).toHaveLength(0);
+  expect(appStore.document.canvases[0]!.items).toHaveLength(0);
   await userEvent.keyboard("Hi");
-  expect(appStore.document.items[0]!.payload).toEqual({
+  expect(appStore.document.canvases[0]!.items[0]!.payload).toEqual({
     text: "Hi",
     fontSize: 26,
   });
@@ -246,11 +243,11 @@ test("empty draft sizing takes effect before the first character, without creati
   ).toBe("26px");
   chord("Enter", editor);
   appStore.undo();
-  expect(appStore.document.items).toHaveLength(0);
+  expect(appStore.document.canvases[0]!.items).toHaveLength(0);
 });
 
 test("adjusted size survives duplication and document serialization, and never decreases below 2px", async () => {
-  await mountShell({ document: { version: 7, items: [textItem()] } });
+  await mountShell({ project: testProject([textItem()]) });
   appStore.setItemSelection(["text"]);
   flush();
   chord("+");
@@ -261,14 +258,18 @@ test("adjusted size survives duplication and document serialization, and never d
   const parsed = documentFrom(saved);
   expect(parsed.ok).toBe(true);
   if (!parsed.ok) throw new Error(parsed.error);
-  appStore.loadDocument(parsed.doc, { slug: "saved-text" });
-  expect(appStore.document.items).toHaveLength(2);
-  expect(appStore.document.items.map((item) => item.payload)).toEqual([
+  appStore.loadProject({ ...testProject([]), document: parsed.doc });
+  expect(appStore.document.canvases[0]!.items).toHaveLength(2);
+  expect(
+    appStore.document.canvases[0]!.items.map((item) => item.payload),
+  ).toEqual([
     expect.objectContaining({ fontSize: 26 }),
     expect.objectContaining({ fontSize: 26 }),
   ]);
   appStore.setItemSelection(["text"]);
   flush();
   for (let index = 0; index < 20; index++) chord("-");
-  expect(appStore.document.items[0]!.payload).toMatchObject({ fontSize: 2 });
+  expect(appStore.document.canvases[0]!.items[0]!.payload).toMatchObject({
+    fontSize: 2,
+  });
 });

@@ -12,7 +12,7 @@ import {
   flush,
   mountPlugin,
   pageElementId,
-  pageFixtureDocument,
+  pageFixtureProject,
   type MountedPlugin,
 } from "@daydream/plugin-testing";
 
@@ -35,9 +35,9 @@ afterEach(() => {
 async function mountOnPage(
   ...selectors: string[]
 ): Promise<Record<string, string>> {
-  const doc = pageFixtureDocument();
-  const itemId = fixturePage(doc).id;
-  mounted = await mountPlugin({ entry: activate, manifest, document: doc });
+  const project = pageFixtureProject();
+  const itemId = fixturePage(project).id;
+  mounted = await mountPlugin({ entry: activate, manifest, project });
   const ids: Record<string, string> = {};
   await vi.waitFor(() => {
     for (const selector of selectors) {
