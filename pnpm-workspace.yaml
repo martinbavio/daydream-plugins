@@ -6,5 +6,5 @@ packages:
 # pins the API the same way, so a bump is this commit hash and nothing else
 # (README.md, "The kernel pin").
 catalog:
-  "@daydream/plugin-api": github:mbavio-phota/daydream#d50417cd448c6a829f8b90a70068f5ba33eb5118&path:packages/plugin-api
-  "@daydream/plugin-testing": github:mbavio-phota/daydream#d50417cd448c6a829f8b90a70068f5ba33eb5118&path:packages/plugin-testing
+  "@daydream/plugin-api": github:mbavio-phota/daydream#db2ba33f24310d2f1bfbd77fe963bf555c09f48a&path:packages/plugin-api
+  "@daydream/plugin-testing": github:mbavio-phota/daydream#db2ba33f24310d2f1bfbd77fe963bf555c09f48a&path:packages/plugin-testing
