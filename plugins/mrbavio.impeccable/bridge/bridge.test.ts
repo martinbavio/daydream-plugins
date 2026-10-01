@@ -209,11 +209,15 @@ describe("impeccable host part", () => {
     expect(text).toContain("the copy is the source's text, so it names the same element");
     expect(text).toContain("draft_replace {draft, token, target: <the target's selector");
     expect(text).toContain("html: <the target's markup rewritten for that direction>");
-    // A copy's css starts empty and applies after the page's sheets: a
-    // rule is overridden there, or edited in a `<style>` block of the
-    // markup — never edited in the draft's css, which holds none of the
-    // page's.
-    expect(text).toContain("The draft's css starts empty and applies after the page's own sheets");
+    // A copy's css starts empty and applies where the variant's accept
+    // will append it (decision #81), so a later `<style>` block still
+    // wins over it: a rule is overridden there, or edited in a `<style>`
+    // block of the markup — never edited in the draft's css, which holds
+    // none of the page's.
+    expect(text).toContain(
+      "The draft's css starts empty and applies where the variant's accept will append it: right after the page's last own stylesheet that applies wherever it is shown (for a page with none, a `<page>.css` linked at the end of its head), so a `<style>` block or a remote sheet the page applies after that one still wins over it.",
+    );
+    expect(text).not.toContain("applies after the page's");
     expect(text).toContain("draft_append {draft, token, css}");
     expect(text).toContain("draft_edit {draft, token, html: {old, new}}");
     expect(text).not.toContain("css: {old, new}");
@@ -295,7 +299,7 @@ describe("impeccable host part", () => {
     // A rework's css holds only the rules to add (the kernel's draft
     // guide); a rule of a linked sheet is changed in its file.
     expect(text).toContain("The draft's css starts empty and holds only the rules to ADD");
-    expect(text).not.toContain("applies after the page's own sheets");
+    expect(text).not.toContain("where the variant's accept will append it");
     expect(text).toContain("draft_edit {draft, token, html: {old, new}}");
     expect(text).toContain("never the whole page resent");
     // Then finalized into the page's own files after the gates (decision
@@ -342,6 +346,11 @@ describe("impeccable host part", () => {
     // sheets are the site's, overridden and never edited in their files.
     expect(polish).toContain("draft_edit {draft, token, css: {old, new}}");
     expect(polish).toContain("never in their files");
+    // Applied where its accept appends it (decision #81), not last.
+    expect(polish).toContain(
+      "the variant's own sheet as its css, which applies where the variant's accept will append it: right after the page's last own stylesheet",
+    );
+    expect(polish).not.toContain("applied after the page's sheets");
     expect(polish).toContain("it writes the variant's files (`.daydream/variants/pricing.1.html` and its sheet), nothing of the site");
     expect(polish).not.toContain("4. Each rule of a linked sheet");
     expect(polish).not.toContain("lint {viewportIds");

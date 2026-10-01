@@ -280,18 +280,26 @@ function targetSection(input: PromptInput): string {
     : `TARGET: the element \`${target.selector}\` (a CSS selector naming it alone) inside ${where}. Read it with get_viewport {id: "${target.viewport.id}", element: ${JSON.stringify(target.selector)}} — that element's markup and the selector of each ancestor, not the page; it is the section the playbook calls "the target". The rules that style it are in the page's sheets: get_viewport {id: "${target.viewport.id}"} answers them (and the markup) when you need them. Everything outside the target is the given — it stays as it is.`;
 }
 
-/** How a draft seeded from a page styles (the kernel's DraftViewport):
- * its markup is the page's, its own css starts empty, and that css
- * applies after every sheet of the page. Said once, for both verbs that
- * open one. */
-const DRAFT_CSS = `The draft's css starts empty and applies after the page's own sheets: restyle with draft_append {draft, token, css}, the rules that change — at equal specificity they win over the page's — and change a rule in one of the markup's \`<style>\` blocks in place with draft_edit {draft, token, html: {old, new}} (old: the exact stored text, found once).`;
+/** Where a copy's css, and a variant's own sheet, apply (decision #81):
+ * where the variant's accept appends them, which the canvas previews and
+ * the gates judge — right after the page's last own stylesheet that
+ * applies wherever it is shown, or a `<page>.css` the accept links at the
+ * end of the head — so a `<style>` block or a remote sheet after that one
+ * wins over them. Said once, for both. */
+const WHERE_CSS = `where the variant's accept will append it: right after the page's last own stylesheet that applies wherever it is shown (for a page with none, a \`<page>.css\` linked at the end of its head), so a \`<style>\` block or a remote sheet the page applies after that one still wins over it`;
+
+/** How a COPY of a page styles (the kernel's DraftViewport): its markup
+ * is the page's, its own css starts empty, and that css applies where
+ * the variant's accept will append it (`WHERE_CSS`). */
+const DRAFT_CSS = `The draft's css starts empty and applies ${WHERE_CSS}. Restyle with draft_append {draft, token, css}, the rules that change — at equal specificity they win over the sheets before them — and change a rule in one of the markup's \`<style>\` blocks in place with draft_edit {draft, token, html: {old, new}} (old: the exact stored text, found once).`;
 
 /** How a draft seeded from a VARIANT's viewport styles (kernel Phase 9,
  * decision #80): its markup is the variant's and its css the variant's
- * own sheet, which applies after the page's; what it finalizes is
- * written into `.daydream/variants/`, never the site — so a rule of the
- * page's sheets is overridden, never edited in its file. */
-const VARIANT_CSS = `The draft starts from the VARIANT: its markup, and the variant's own sheet as its css, applied after the page's sheets. Change a rule of it in place with draft_edit {draft, token, css: {old, new}} (old: the exact stored text, found once), add rules with draft_append {draft, token, css}, and change a rule in one of the markup's \`<style>\` blocks with draft_edit {draft, token, html: {old, new}}. The page's own sheets are the site's: override a rule of theirs in the draft's css, never in their files.`;
+ * own sheet, which applies where its accept will append it
+ * (`WHERE_CSS`); what it finalizes is written into `.daydream/variants/`,
+ * never the site — so a rule of the page's sheets is overridden, never
+ * edited in its file. */
+const VARIANT_CSS = `The draft starts from the VARIANT: its markup, and the variant's own sheet as its css, which applies ${WHERE_CSS}. Change a rule of it in place with draft_edit {draft, token, css: {old, new}} (old: the exact stored text, found once), add rules with draft_append {draft, token, css}, and change a rule in one of the markup's \`<style>\` blocks with draft_edit {draft, token, html: {old, new}}. The page's own sheets are the site's: override a rule of theirs in the draft's css, never in their files.`;
 
 /** What a rework's css is (the kernel's draft guide): the rules to ADD,
  * which its finalize appends where the format rules say; a rule already
