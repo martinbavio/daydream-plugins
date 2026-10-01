@@ -20,6 +20,7 @@ import {
   pageElementId,
   pageFixtureProject,
   pageShadow,
+  TEST_PROJECT,
   testProject,
   unusedProjectFiles,
   viewportItems,
@@ -73,7 +74,11 @@ function variantHost() {
   };
   const host = {
     storage: {
-      loadPluginData: vi.fn(async (id: string) => (data[id] as Record<string, unknown>) ?? {}),
+      // A read answers the project it was read from: the fixture's.
+      loadPluginData: vi.fn(async (id: string) => ({
+        data: (data[id] as Record<string, unknown>) ?? {},
+        root: TEST_PROJECT.root,
+      })),
       savePluginData: vi.fn(async (id: string, value: unknown) => {
         data[id] = structuredClone(value);
       }),

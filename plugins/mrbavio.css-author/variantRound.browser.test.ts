@@ -19,6 +19,7 @@ import {
   mountPlugin,
   overrideHostForTests,
   pageElementId,
+  TEST_PROJECT,
   testProject,
   unusedProjectFiles,
   type Host,
@@ -77,7 +78,8 @@ async function setup(specs: Spec[]): Promise<Handlers> {
   };
   const host = {
     storage: {
-      loadPluginData: vi.fn(async () => ({})),
+      // A read answers the project it was read from: the fixture's.
+      loadPluginData: vi.fn(async () => ({ data: {}, root: TEST_PROJECT.root })),
       savePluginData: vi.fn(async () => {}),
     },
     project,

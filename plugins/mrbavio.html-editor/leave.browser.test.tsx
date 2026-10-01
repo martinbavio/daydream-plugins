@@ -213,7 +213,10 @@ const pageIn = (project: TestProject["project"]): TestProject =>
 /** A host over the page's files whose open project is `open.current` —
  * each read a fresh copy of the one-page project under it — so
  * `loadOpenProject()` swaps the project as Open… does. Put in after the
- * mount, so the shell's own start reads nothing from it. */
+ * mount, so the shell's own start reads nothing from it. It holds one
+ * project and then another under the same tab, so it serves a request
+ * naming either (`root: null`): which one each write named is what the
+ * tests read. */
 function projects(): {
   open: { current: TestProject["project"] };
   files: FileHost;
@@ -221,7 +224,7 @@ function projects(): {
   const open = { current: OTHER as TestProject["project"] };
   const files = createFileHost(
     { "page.html": HTML, "page.css": CSS },
-    { project: () => pageIn(open.current) },
+    { project: () => pageIn(open.current), root: null },
   );
   overrideHostForTests({ project: files.project });
   onTestFinished(() => overrideHostForTests(null));

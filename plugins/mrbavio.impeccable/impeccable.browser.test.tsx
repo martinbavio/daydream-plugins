@@ -20,6 +20,7 @@ import {
   pageFixtureProject,
   pageNode,
   pageShadow,
+  TEST_PROJECT,
   testProject,
   type Host,
   type MountedPlugin,
@@ -39,11 +40,15 @@ afterEach(() => {
 });
 
 /** A host whose storage knows plugin data alone, over an in-memory map —
- * what `.daydream/plugin-data/` is to the bridge. */
+ * what `.daydream/plugin-data/` is to the bridge. A read answers the
+ * project it was read from: the one the fixture opens. */
 function fakeHost(files: Record<string, Record<string, unknown>> = {}) {
   const host = {
     storage: {
-      loadPluginData: vi.fn(async (id: string) => files[id] ?? {}),
+      loadPluginData: vi.fn(async (id: string) => ({
+        data: files[id] ?? {},
+        root: TEST_PROJECT.root,
+      })),
       savePluginData: vi.fn(async (id: string, data: unknown) => {
         files[id] = structuredClone(data) as Record<string, unknown>;
       }),
