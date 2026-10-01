@@ -53,7 +53,7 @@ it, so the two are reviewed together. That pin is for review only: before
 a change here merges, the pin must name a kernel tag, or a commit on the
 kernel's main, never a branch commit — a branch may be squash-merged and
 its commits gone. A plugin's manifest declares `api`, the plugin API
-version it was built against (Daydream's decision #84): the version at
+version it was built against (Daydream's decision #85): the version at
 that commit, `PLUGIN_API_VERSION` in its `src/plugin-host/version.ts`,
 or the minor of the newest addition the plugin uses. It moves when the
 plugin starts using something new, not with every kernel release.
