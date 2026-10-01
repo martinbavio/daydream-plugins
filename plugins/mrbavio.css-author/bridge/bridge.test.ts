@@ -38,7 +38,7 @@ function fakeHost(dir: string): { host: DaydreamHostApi; got: Recorded } {
         id: "mrbavio.css-author",
         name: "CSS author",
         version: "0",
-        minCore: "0.1.0",
+        api: "1.0",
       },
     },
     registerTool: (t) => void got.tools.push(t as HostToolRegistration),

@@ -35,7 +35,7 @@ const manifest: PluginManifest = {
   id: "mrbavio.css-author",
   name: "CSS author",
   version: "0.1.0",
-  minCore: "0.1.0",
+  api: "1.0",
   contributes: { gates: [STATIC_GATE, NECESSITY_GATE] },
 };
 

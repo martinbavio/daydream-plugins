@@ -56,7 +56,7 @@ const labels = (overlay: HTMLElement): string[] =>
 describe("mrbavio.grid", () => {
   test("the manifest is first-party and declares the grid overlay", () => {
     expect(manifest.id).toBe("mrbavio.grid");
-    expect(manifest.minCore).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(manifest.api).toMatch(/^\d+\.\d+$/);
     expect(manifest.contributes?.overlays).toEqual(["grid"]);
     expect(manifest.contributes?.panels).toBeUndefined();
     expect(manifest.unstable).toBeUndefined();

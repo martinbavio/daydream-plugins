@@ -264,7 +264,7 @@ afterEach(disposeMounted);
 describe("mrbavio.html-editor", () => {
   test("the manifest declares everything the entry registers", () => {
     expect(manifest.id).toBe("mrbavio.html-editor");
-    expect(manifest.minCore).toBe("0.1.44");
+    expect(manifest.api).toBe("1.0");
     expect(manifest.contributes?.panels).toEqual(["html-editor"]);
     expect(manifest.contributes?.commands).toEqual([
       BLUR_COMMAND,

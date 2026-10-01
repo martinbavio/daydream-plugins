@@ -2,7 +2,7 @@
   "id": "mrbavio.html-editor",
   "name": "HTML editor",
   "version": "0.2.2",
-  "minCore": "0.1.44",
+  "api": "1.0",
   "contributes": {
     "panels": [
       "html-editor"
