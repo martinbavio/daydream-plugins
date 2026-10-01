@@ -4,9 +4,17 @@
 // is the variant's markup (`.daydream/variants/<stem>.<n>.html`), and
 // `ctx.page` answers for that path a page AT ITS PAGE'S PATH (the
 // kernel's variantPageOf: the candidate renders as if it sat there): the
-// variant's markup, every sheet it links as the project holds it, then
-// its own sheet, last and read-only. So a variant round is told by the
-// page answering another path than the viewport names (`variantRound`);
+// variant's markup, every sheet it links as the project holds it, and its
+// own sheet, read-only and marked `variant: true`, listed once where its
+// accept will append its rules (decision #81) — right after the page's
+// last local sheet that applies wherever it is shown, so a `<style>`
+// block or a remote sheet after that one comes after it; for a page with
+// no such sheet, where the accept links `<page>.css` (after that file,
+// listed read-only, when the project holds one the markup does not link);
+// last only where its css lands nowhere. It is found by its mark, never
+// by its place. So a variant round is told by the page answering another
+// path than the viewport names, and holding a sheet so marked
+// (`variantRound`);
 // the judged viewport carries no `payload.variant` — `lint` never judges
 // a variant's viewport (the kernel skips them) — but one that did would
 // be told the same way.
@@ -17,10 +25,11 @@
 // page's file. So at its finalize:
 //
 // - Its OWN SHEET is judged as the page will read it after the accept:
-//   a subject like any editable sheet, its rules last in the cascade
-//   (`asEditable`), so a rule restating the initial or the page's rule
-//   beneath it, a dead line or a unit-less length in it is refused — the
-//   draft's css is that sheet, and the draft is where it is fixed.
+//   a subject like any editable sheet, its rules where the kernel lists
+//   them (`asEditable`), so a rule restating the initial or the page's
+//   rule beneath it, a dead line — one a later `<style>` block overrides
+//   included — or a unit-less length in it is refused — the draft's css
+//   is that sheet, and the draft is where it is fixed.
 // - Its `<STYLE>` BLOCKS are its markup's, which the accept splices into
 //   the page: each is a subject too, judged RULE BY RULE against the
 //   page's blocks (`blockRules`). Every rule — a style rule's own
@@ -34,8 +43,10 @@
 //   writes it (`kept`) or moved among the page's rules (`moved`), said
 //   so. A block every rule of which is kept, its text the page's, is the
 //   site's whole, as it stands.
-// - The SITE'S SHEETS (the page's files, and what of its `<style>`
-//   blocks the variant keeps) are advisory at most (`siteClause`): what
+// - The SITE'S SHEETS (the page's files — and a file the accept links
+//   that the page does not yet, `<page>.css` or one the variant's markup
+//   links — and what of its `<style>` blocks the variant keeps) are
+//   advisory at most (`siteClause`): what
 //   the lints find there is said, but the round leaves them as they are,
 //   so no fix is named. A site's line the variant leaves dead once it is
 //   accepted is said as such: one its css — or what it writes or moves in
@@ -99,11 +110,20 @@ export interface VariantRound {
   /** Of those, the `<style>` blocks, as the findings name them
    * (`sheetName`). */
   blocks: ReadonlySet<string>;
+  /** Of the site's sheets, the project files the page lists nowhere, as
+   * the findings name them (`sheetName`): the `<page>.css` the accept
+   * links, which the kernel lists read-only before the variant's own
+   * sheet when the project holds it, judged here as the page's files are
+   * (`asEditable`). */
+  unlinked: ReadonlySet<string>;
   /** The variant's own sheet (`sheetKey`). */
   own: string;
   /** The sheet the accept appends the variant's css to (`sheetKey`):
-   * the page's last project file, or null for a page with none, where
-   * the accept makes one. */
+   * the project file the kernel lists the variant's own sheet right
+   * after — the page's last local sheet that applies wherever it is
+   * shown, or the `<page>.css` the accept links — or null where the
+   * candidate lists none (a `<page>.css` the accept makes, css that lands
+   * nowhere). */
   target: string | null;
   /** That sheet as a finding names it, or null. */
   targetName: string | null;
@@ -140,9 +160,8 @@ export function inlineValue(declaration: CssDeclaration): string {
 /**
  * The variant round the gate judges, or null for any other judging (a
  * rework's or a new page's finalize, `lint`): the one viewport whose
- * page (`pageOf`) sits at another path than the viewport names — the
- * variant's own sheet is then the candidate's last sheet named after its
- * markup. Its markup is paired with the page's file as the project
+ * page (`pageOf`) sits at another path than the viewport names and lists
+ * the variant's own sheet (`variant: true`). Its markup is paired with the page's file as the project
  * holds it (`pageOf(page)`, which at a finalize is the project's for
  * every path but the one judged); a page gone pairs nothing, so every
  * element and rule counts as the variant's.
@@ -156,10 +175,11 @@ export function variantRound(
     const judged = pageOf(viewport.payload.page);
     if (judged === undefined || judged.path === viewport.payload.page) continue;
     const file = viewport.payload.page;
-    const own = ownSheet(judged, file);
+    const own = ownSheet(judged);
     if (own < 0) continue;
-    const candidate = asEditable(judged, own);
     const source = pageOf(judged.path);
+    const unlinked = unlinkedSheets(judged, own, source);
+    const candidate = asEditable(judged, own, unlinked);
     const parsed = source === undefined ? null : core.parsePage(source.html);
     const rules = blockRules(core, candidate, own, pageSheetsOf(source, parsed));
     const site = new Set(
@@ -170,7 +190,7 @@ export function variantRound(
       ),
     );
     const kept = keptMarkup(core, parsed, judged.html);
-    const target = acceptTarget(candidate, own, source);
+    const target = acceptTarget(candidate, own);
     const key = (sheet: string, at: number): string => `${sheet}\u0000${at}`;
     return {
       viewport: viewport.id,
@@ -180,6 +200,9 @@ export function variantRound(
       site,
       blocks: new Set(
         [...rules.whole].map((index) => sheetName(candidate, index)),
+      ),
+      unlinked: new Set(
+        [...unlinked].map((index) => sheetName(candidate, index)),
       ),
       own: sheetKey(candidate, own),
       target: target < 0 ? null : sheetKey(candidate, target),
@@ -253,6 +276,9 @@ export function siteClause(
   if (round.blocks.has(sheet)) {
     return `; ${sheet} is the page's own, which this variant leaves as it is, so ${it} not refused`;
   }
+  if (round.unlinked.has(sheet)) {
+    return `; ${sheet} is a sheet of the project that \`${round.page}\` does not link yet — this variant's accept links it — which a variant round never writes, so ${it} not refused`;
+  }
   return `; ${sheet} is a sheet of \`${round.page}\`, the page this variant is of, which a variant round never writes, so ${it} not refused`;
 }
 
@@ -306,46 +332,75 @@ export function markupClause(round: VariantRound): string {
   return `; \`${round.page}\` already has it, and this variant keeps it rather than adding it, so it is not refused`;
 }
 
-/** The candidate's own sheet: the last one, a project file named after
- * the variant's markup (`<stem>.<n>.css` beside it), or -1. */
-function ownSheet(page: Page, file: string): number {
-  const own = `${file.slice(0, -".html".length)}.css`;
-  const last = page.sheets.length - 1;
-  const source = page.sheets[last]?.source;
-  return source !== undefined && "file" in source && source.file === own
-    ? last
-    : -1;
+/** The candidate's own sheet: the one the kernel marks `variant: true`,
+ * wherever it lists it (decision #81), or -1. */
+function ownSheet(page: Page): number {
+  return page.sheets.findIndex((sheet) => sheet.variant === true);
 }
 
-/** The page with sheet `own` and every `<style>` block subjects of the
- * lints: the kernel lists a variant's own sheet and its blocks
- * read-only, since only a draft of the variant writes them — which is
- * what a finalize's findings are fixed in. */
-function asEditable(page: Page, own: number): Page {
+/** The page with sheet `own`, every `<style>` block and the sheets
+ * `unlinked` subjects of the lints: the kernel lists a variant's own
+ * sheet and its blocks read-only, since only a draft of the variant
+ * writes them — which is what a finalize's findings are fixed in — and a
+ * `<page>.css` its accept links read-only, since the page does not link
+ * it yet; once accepted it is the page's, so it is judged as the page's
+ * other files are, its findings advisory (`siteClause`). */
+function asEditable(
+  page: Page,
+  own: number,
+  unlinked: ReadonlySet<number>,
+): Page {
   const sheets = page.sheets.map((sheet, index): DeepReadonly<PageSheet> => {
-    if (index !== own && !("style" in sheet.source)) return sheet;
-    // Its text and source alone: no `unwritable` sentence, no `error`.
-    return { source: sheet.source, text: sheet.text, readOnly: false };
+    if (index !== own && !unlinked.has(index) && !("style" in sheet.source)) {
+      return sheet;
+    }
+    // Its text and source alone: no `unwritable` sentence, no `error` —
+    // and the variant's own still marked as the kernel marks it.
+    return {
+      source: sheet.source,
+      text: sheet.text,
+      readOnly: false,
+      ...(index === own ? { variant: true as const } : {}),
+    };
   });
   return { ...page, sheets };
 }
 
 /** The candidate's sheet (by index) the accept appends the variant's
- * css to — the page's last project file that the candidate links too
- * (the kernel's appliedFileSheets, a `media` aside) — or -1. */
-function acceptTarget(
+ * css to, or -1: the kernel lists the variant's own sheet (`own`) right
+ * after it (core/sheetLanding.ts landedSheets) — after the listing of the
+ * page's last local sheet that applies wherever it is shown, or after the
+ * `<page>.css` the accept links when the project holds it — so it is the
+ * listing before `own` when that is a project file. None for css that
+ * lands nowhere (its own sheet is then last, after whatever the page
+ * lists), and none when the sheet before it is a `<style>` block or a
+ * remote sheet: the accept links a `<page>.css` the project does not
+ * hold yet. */
+function acceptTarget(candidate: Page, own: number): number {
+  if (own <= 0 || candidate.sheets[own]!.text.trim() === "") return -1;
+  return "file" in candidate.sheets[own - 1]!.source ? own - 1 : -1;
+}
+
+/** The candidate's project files (by index) but its own sheet that the
+ * page (`source`) lists nowhere: the `<page>.css` its accept links. None
+ * with no page. */
+function unlinkedSheets(
   candidate: Page,
   own: number,
   source: Page | undefined,
-): number {
-  const files = (source?.sheets ?? []).flatMap((sheet) =>
-    "file" in sheet.source ? [sheet.source.file] : [],
+): Set<number> {
+  if (source === undefined) return new Set();
+  const listed = new Set(
+    source.sheets.flatMap((sheet) =>
+      "file" in sheet.source ? [sheet.source.file] : [],
+    ),
   );
-  const last = files.at(-1);
-  if (last === undefined) return -1;
-  return candidate.sheets.findIndex(
-    (sheet, index) =>
-      index !== own && "file" in sheet.source && sheet.source.file === last,
+  return new Set(
+    candidate.sheets.flatMap((sheet, index) =>
+      index !== own && "file" in sheet.source && !listed.has(sheet.source.file)
+        ? [index]
+        : [],
+    ),
   );
 }
 

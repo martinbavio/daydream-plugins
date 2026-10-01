@@ -3,7 +3,8 @@
 // {copyOf}`), written, then finalized twice — the host's `variant` on
 // the second ask, as the host names it — so the gates judge the
 // candidate the kernel builds (its markup at its page's path, its own
-// sheet last). What they may refuse is what the variant caused: its own
+// sheet marked `variant: true` where its accept writes its rules, decision
+// #81). What they may refuse is what the variant caused: its own
 // css and the rules it wrote or changed in `<style>` blocks, judged as
 // the page will read them after the accept, and the classes and inline
 // declarations it added. The site's sheets, the rules of its blocks the
@@ -1031,5 +1032,75 @@ describe("a line of the site's the variant leaves dead once it is accepted", () 
     ]);
     h = await shared([["site.css", TITLE], ["page.css", ".title { color: blue; }\n"]]);
     expect(await lintAll(h)).toEqual([]);
+  });
+});
+
+describe("the variant's own sheet where its accept writes its rules (decision #81)", () => {
+  test("listed before a `<style>` block the page applies after its sheet, found by its mark: its line the block overrides is refused as dead, as it will be once accepted", async () => {
+    const round = await variantRound(
+      ".lead { color: green; }\n",
+      async (h, draft) => {
+        await h.draftAppend({ draft, css: ".title { color: blue; }" });
+      },
+      '<h1 class="title">Hi</h1><p class="lead">x</p>',
+      { head: "<style>.title { color: red; }</style>" },
+    );
+    // The accept appends `.title { color: blue }` to `page.css`, which
+    // the head's block follows: the block's red wins, on the canvas as in
+    // the site, so the variant's line is its to fix in the draft.
+    expect(round.landed).toBe(false);
+    expect(said(round)).toEqual([
+      [
+        "blocking",
+        expect.stringMatching(
+          /^color: blue in rule `\.title` of the draft's css \(`\.daydream\/variants\/page\.1\.css`\) in viewport \S+ changes nothing at [\d, ]+ or \d+px$/,
+        ),
+      ],
+    ]);
+  });
+
+  test("on a page with no sheet of its own, after the `<page>.css` its accept links: that file judged as the site's, said as not linked yet, and an override in it said as `lint`'s when another page links it", async () => {
+    const h = await setup([
+      {
+        id: "page",
+        body: '<h1 class="title">Hi</h1>',
+        head: "<style>.lead { color: green; }</style>",
+        files: [],
+      },
+      {
+        id: "about",
+        body: '<h1 class="title">About</h1><p class="about">x</p>',
+        files: [["page.css", ".title { color: red; }\n.about { margin: 0px; }\n"]],
+      },
+    ]);
+    const round = await copy(h, async (h, draft) => {
+      await h.draftAppend({ draft, css: ".title { color: blue; }" });
+    });
+    expect(round.landed).toBe(true);
+    const ofSheet = round.findings.filter((f) => f.message.includes("of `page.css`"));
+    expect(ofSheet.map((f) => [f.severity, f.message])).toEqual([
+      [
+        "advisory",
+        expect.stringMatching(
+          /^rule `\.about` of `page\.css` matches no element in viewport \S+; `page\.css` is a sheet of the project that `page\.html` does not link yet — this variant's accept links it — which a variant round never writes, so it is not refused$/,
+        ),
+      ],
+      [
+        "advisory",
+        expect.stringMatching(
+          /^color: red in rule `\.title` of `page\.css` in viewport \S+ changes nothing at [^;]+; this variant's css overrides it, and the accept appends that css to `page\.css`, which `about\.html` links too, so once the variant is accepted it can be dead in `page\.css` on every page that links it, which `lint` refuses until it is removed — it is not refused here$/,
+        ),
+      ],
+      [
+        "advisory",
+        expect.stringMatching(
+          /^declaration `margin: 0px` in `\.about` of `page\.css` changes nothing in viewport \S+; `page\.css` is a sheet of the project that `page\.html` does not link yet/,
+        ),
+      ],
+    ]);
+    for (const finding of round.findings) {
+      expect(finding.severity).toBe("advisory");
+      expect(finding.message).not.toMatch(FIX);
+    }
   });
 });
