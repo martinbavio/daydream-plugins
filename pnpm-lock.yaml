@@ -64,7 +64,7 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
 
-  plugins/mrbavio.grid:
+  plugins/mrbavio.grid-editor:
     dependencies:
       '@daydream/plugin-api':
         specifier: github:mbavio-phota/daydream#c6ab8eee63be310eb0921276cedf501470cc754d&path:packages/plugin-api

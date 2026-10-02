@@ -23,6 +23,13 @@ const manifest = rawManifest as PluginManifest;
 
 let mounted: MountedPlugin | null = null;
 
+/** The plugin's overlay in one slot: it registers two, the guides in
+ * `overlay.screen` and the handles in `overlay.interactive`. */
+const overlayIn = (slot: string): HTMLElement | null =>
+  document.querySelector<HTMLElement>(
+    `[data-plugin-overlay-slot="${slot}"] [data-plugin-overlay="${manifest.id}"]`,
+  );
+
 afterEach(() => {
   mounted?.dispose();
   mounted = null;
@@ -53,18 +60,18 @@ async function mountOnPage(
 const labels = (overlay: HTMLElement): string[] =>
   Array.from(overlay.querySelectorAll("text"), (t) => t.textContent ?? "");
 
-describe("mrbavio.grid", () => {
-  test("the manifest is first-party and declares the grid overlay", () => {
-    expect(manifest.id).toBe("mrbavio.grid");
+describe("mrbavio.grid-editor guides", () => {
+  test("the manifest declares both overlays", () => {
+    expect(manifest.id).toBe("mrbavio.grid-editor");
     expect(manifest.api).toMatch(/^\d+\.\d+$/);
-    expect(manifest.contributes?.overlays).toEqual(["grid"]);
+    expect(manifest.contributes?.overlays).toEqual(["grid", "grid-handles"]);
     expect(manifest.contributes?.panels).toBeUndefined();
     expect(manifest.unstable).toBeUndefined();
   });
 
   test("draws in the screen slot, for the selected grid only", async () => {
     const ids = await mountOnPage(".grid");
-    const overlay = mounted!.overlay();
+    const overlay = overlayIn("overlay.screen");
     expect(overlay).not.toBeNull();
     expect(
       overlay!
@@ -77,23 +84,26 @@ describe("mrbavio.grid", () => {
     const styles = overlay!.querySelectorAll("style");
     expect(styles).toHaveLength(1);
     expect(styles[0]!.textContent).toMatch(/^@layer dream-plugin \{/);
-    expect(styles[0]!.textContent).toContain(".mrbavio-grid-line");
+    expect(styles[0]!.textContent).toContain(".mrbavio-grid-editor-line");
     expect(overlay!.querySelectorAll("line")).toHaveLength(0);
 
     mounted!.store.setSelectedId(ids[".grid"]!);
     flush();
     // Class names and the hatch pattern id derive from the plugin id
-    // (`mrbavio.grid` → `mrbavio-grid-…`), so a copy under another id
+    // (`mrbavio.grid-editor` → `mrbavio-grid-editor-…`), so a copy under another id
     // collides with neither; the gap bands reference THIS pattern.
     expect(
-      overlay!.querySelectorAll("line.mrbavio-grid-line").length,
+      overlay!.querySelectorAll("line.mrbavio-grid-editor-line").length,
     ).toBeGreaterThan(0);
-    expect(overlay!.querySelector("#mrbavio-grid-gap-hatch")).not.toBeNull();
+    expect(
+      overlay!.querySelector("#mrbavio-grid-editor-gap-hatch"),
+    ).not.toBeNull();
     expect(overlay!.querySelector("[id^='dd-grid']")).toBeNull();
     expect(
-      getComputedStyle(overlay!.querySelector("rect.mrbavio-grid-gap-band")!)
-        .fill,
-    ).toContain("mrbavio-grid-gap-hatch");
+      getComputedStyle(
+        overlay!.querySelector("rect.mrbavio-grid-editor-gap-band")!,
+      ).fill,
+    ).toContain("mrbavio-grid-editor-gap-hatch");
     // Three columns → column lines 1..4 badged; positive numbers only.
     expect(labels(overlay!)).toEqual(
       expect.arrayContaining(["1", "2", "3", "4"]),
@@ -107,7 +117,7 @@ describe("mrbavio.grid", () => {
 
   test("a selected grid item shows its parent's grid; an element with no grid above it shows none", async () => {
     const ids = await mountOnPage(".grid", ".header", "body");
-    const overlay = mounted!.overlay()!;
+    const overlay = overlayIn("overlay.screen")!;
     const drawn = (id: string): string[] => {
       mounted!.store.setSelectedId(id);
       flush();
