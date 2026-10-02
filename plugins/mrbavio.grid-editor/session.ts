@@ -118,10 +118,22 @@ function openTracks(
   return { target, list, property };
 }
 
-/** Whether a child's line number reaches before the first explicit line
- * (`grid-column: -5` on three tracks): Chromium then resolves implicit
- * tracks BEFORE the explicit ones, and the resolved sizes no longer pair
- * with the authored list from the start. Read at the press. */
+/** A child's start or end line as the explicit grid numbers it, or null
+ * when it is `auto`, a `span` or a name: an integer, positive from the
+ * start, negative from the end (`-1` is the line after the last of
+ * `explicit` tracks). */
+function lineNumber(value: string, explicit: number): number | null {
+  const match = /^(-?\d+)$/.exec(value.trim());
+  if (match === null) return null;
+  const n = Number(match[1]);
+  return n < 0 ? explicit + 2 + n : n;
+}
+
+/** Whether a child can start before the first explicit line
+ * (`grid-column: -5` on three tracks, or `span 2 / 1`): Chromium then
+ * resolves implicit tracks BEFORE the explicit ones, and the resolved
+ * sizes no longer pair with the authored list from the start. Read at the
+ * press, from the computed start and end of every child. */
 function startsBeforeFirst(
   dd: DaydreamApi,
   gridId: ElementId,
@@ -130,16 +142,23 @@ function startsBeforeFirst(
 ): boolean {
   const node = dd.geometry.node(gridId);
   if (node === undefined) return false;
-  const properties =
+  const [startProperty, endProperty] =
     axis === "cols"
       ? ["grid-column-start", "grid-column-end"]
       : ["grid-row-start", "grid-row-end"];
   for (const child of node.children) {
     const style = getComputedStyle(child);
-    for (const property of properties) {
-      const negative = /^-(\d+)$/.exec(style.getPropertyValue(property).trim());
-      if (negative !== null && Number(negative[1]) > explicit + 1) return true;
-    }
+    const startText = style.getPropertyValue(startProperty).trim();
+    const endText = style.getPropertyValue(endProperty).trim();
+    const start = lineNumber(startText, explicit);
+    const end = lineNumber(endText, explicit);
+    // Where the item starts: the lower of two numbered lines; else the
+    // numbered end less the span the start asks for (one when it is auto).
+    const span = /^span\s+(\d+)$/.exec(startText);
+    let first: number | null = null;
+    if (start !== null) first = end === null ? start : Math.min(start, end);
+    else if (end !== null) first = end - (span === null ? 1 : Number(span[1]));
+    if (first !== null && first < 1) return true;
   }
   return false;
 }

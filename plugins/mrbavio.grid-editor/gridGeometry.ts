@@ -84,35 +84,68 @@ export interface Placement {
   between: number;
 }
 
+/** How an axis' free space is placed, beyond the keyword. */
+export interface PlaceOptions {
+  /** The columns of an rtl grid: physical `left` / `right` name the
+   * opposite ends of the logical axis. */
+  rtl?: boolean;
+  /** A scroll container: free space below zero never moves the tracks
+   * before the start, where they could not be scrolled to. */
+  scrolls?: boolean;
+}
+
 /** `justify-content` / `align-content` over `free` layout px and `count`
  * tracks. `stretch` has already grown the `auto` tracks in the used
- * sizes, so it is `start` here; `safe`/`unsafe` prefixes are ignored. */
+ * sizes, so it is `start` here. Overflowing (`free` below zero), the
+ * `space-*` keywords fall back as the spec says (`space-between` to
+ * start, `space-around` and `space-evenly` to a safe center); `center`
+ * and `end` keep their negative offset, as the tracks overflow both
+ * sides or the start — unless `safe` was written or the grid scrolls,
+ * which hold them at the start. */
 export function distribute(
   keyword: string,
   free: number,
   count: number,
+  options: PlaceOptions = {},
 ): Placement {
-  const word = keyword.replace(/^(safe|unsafe)\s+/, "");
-  if (free <= 0 || count === 0) return { offset: 0, between: 0 };
+  const none = { offset: 0, between: 0 };
+  if (count === 0) return none;
+  const safe = /^safe\s/.test(keyword) || options.scrolls === true;
+  let word = keyword.replace(/^(safe|unsafe)\s+/, "");
+  // `left` and `right` are physical; the axis' end is the right in ltr
+  // and the left in rtl.
+  if (word === "left") word = options.rtl === true ? "end" : "start";
+  else if (word === "right") word = options.rtl === true ? "start" : "end";
+  const held = (offset: number): Placement => ({
+    offset: safe ? Math.max(0, offset) : offset,
+    between: 0,
+  });
   switch (word) {
     case "center":
-      return { offset: free / 2, between: 0 };
+      return held(free / 2);
     case "end":
     case "flex-end":
-    case "right":
-      return { offset: free, between: 0 };
+      return held(free);
     case "space-between":
-      return count > 1
+      return free > 0 && count > 1
         ? { offset: 0, between: free / (count - 1) }
-        : { offset: 0, between: 0 };
+        : none;
     case "space-around":
-      return { offset: free / count / 2, between: free / count };
+      return free > 0
+        ? { offset: free / count / 2, between: free / count }
+        : none;
     case "space-evenly":
-      return { offset: free / (count + 1), between: free / (count + 1) };
+      return free > 0
+        ? { offset: free / (count + 1), between: free / (count + 1) }
+        : none;
     default:
-      return { offset: 0, between: 0 };
+      return none;
   }
 }
+
+/** Whether an `overflow` value makes a scroll container (`clip` does not). */
+const scrolls = (overflow: string): boolean =>
+  overflow !== "visible" && overflow !== "clip";
 
 /** The tracks laid along an axis: from `origin` (overlay px, the content
  * box's start) over `extent` layout px, with the placement's offset
@@ -189,11 +222,13 @@ export function readGridGeometry(
     style.justifyContent,
     contentWidth - used(colSizes, colGap),
     colSizes.length,
+    { rtl: style.direction === "rtl", scrolls: scrolls(style.overflowX) },
   );
   const rows = distribute(
     style.alignContent,
     contentHeight - used(rowSizes, rowGap),
     rowSizes.length,
+    { scrolls: scrolls(style.overflowY) },
   );
   const rtl = style.direction === "rtl";
   return {

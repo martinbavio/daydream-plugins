@@ -652,29 +652,38 @@ describe("mrbavio.grid-editor", () => {
     expect(files.writes()).toHaveLength(0);
   });
 
-  test("a grid with tracks before its first is left to the panel", async () => {
-    // `-5` on three tracks names the line before the first: Chromium
-    // resolves an implicit track ahead of the explicit ones.
-    const { path, files, grid } = await mountOnPage(
-      PAGE_FIXTURE_CSS.replace("grid-column: span 2;", "grid-column: -5 / -4;"),
-    );
-    mounted!.store.setSelectedId(grid);
-    flush();
-    await vi.waitFor(() => expect(bands("cols")).toHaveLength(3));
-    const before = css(path);
-    await drag(
-      bands("cols")[1]!,
-      { x: 20 * mounted!.store.zoom(), y: 0 },
-      {
-        held: () =>
-          expect(noteText()).toBe(
-            "columns start before the first — the CSS panel edits that",
-          ),
-      },
-    );
-    expect(css(path)).toBe(before);
-    expect(files.writes()).toHaveLength(0);
-  });
+  test.each([
+    ["a negative line before the first", "grid-column: -5 / -4;"],
+    ["a span that ends on line 1", "grid-column: span 2 / 1;"],
+    ["an auto start before line 1", "grid-column: auto / 1;"],
+  ])(
+    "a grid with tracks before its first (%s) is left to the panel",
+    async (_name, placement) => {
+      // Each names a line before the first: Chromium resolves an implicit
+      // track ahead of the explicit ones.
+      const { path, files, grid } = await mountOnPage(
+        PAGE_FIXTURE_CSS.replace("grid-column: span 2;", placement),
+      );
+      mounted!.store.setSelectedId(grid);
+      flush();
+      await vi.waitFor(() =>
+        expect(bands("cols").length).toBeGreaterThanOrEqual(3),
+      );
+      const before = css(path);
+      await drag(
+        bands("cols")[1]!,
+        { x: 20 * mounted!.store.zoom(), y: 0 },
+        {
+          held: () =>
+            expect(noteText()).toBe(
+              "columns start before the first — the CSS panel edits that",
+            ),
+        },
+      );
+      expect(css(path)).toBe(before);
+      expect(files.writes()).toHaveLength(0);
+    },
+  );
 
   test("a plain drag on an implicit row boundary writes nothing", async () => {
     const { path, files, grid } = await mountOnPage();

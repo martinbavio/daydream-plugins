@@ -45,6 +45,42 @@ describe("distribute", () => {
     // No free space (fr tracks, or stretch already applied): nothing moves.
     expect(distribute("center", 0, 3)).toEqual({ offset: 0, between: 0 });
   });
+
+  test("physical left and right name opposite ends under rtl", () => {
+    expect(distribute("right", 100, 3)).toEqual({ offset: 100, between: 0 });
+    expect(distribute("left", 100, 3)).toEqual({ offset: 0, between: 0 });
+    // The rtl axis' end is the left: `left` is where the free space goes.
+    expect(distribute("left", 100, 3, { rtl: true })).toEqual({
+      offset: 100,
+      between: 0,
+    });
+    expect(distribute("right", 100, 3, { rtl: true })).toEqual({
+      offset: 0,
+      between: 0,
+    });
+  });
+
+  test("overflowing tracks keep center and end's negative offset", () => {
+    expect(distribute("center", -100, 3)).toEqual({ offset: -50, between: 0 });
+    expect(distribute("end", -100, 3)).toEqual({ offset: -100, between: 0 });
+    expect(distribute("unsafe center", -100, 3)).toEqual({
+      offset: -50,
+      between: 0,
+    });
+    // `safe`, and a scroll container, hold them at the start.
+    expect(distribute("safe center", -100, 3)).toEqual({
+      offset: 0,
+      between: 0,
+    });
+    expect(distribute("end", -100, 3, { scrolls: true })).toEqual({
+      offset: 0,
+      between: 0,
+    });
+    // The space-* keywords fall back, never to a negative offset.
+    for (const keyword of ["space-between", "space-around", "space-evenly"]) {
+      expect(distribute(keyword, -100, 3)).toEqual({ offset: 0, between: 0 });
+    }
+  });
 });
 
 describe("layOutBands", () => {

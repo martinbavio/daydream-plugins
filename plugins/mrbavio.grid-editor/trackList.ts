@@ -98,13 +98,20 @@ function item(text: string): Item {
 /**
  * Read an authored track list, or null for one the drag leaves alone: a
  * keyword list (`none`, `subgrid`, `masonry`), a `var()` anywhere in it,
- * or a `repeat()` whose count is not an integer (`auto-fill`,
+ * a CSS-wide keyword (`inherit`, `initial`, … — it is no track, and a
+ * list built around it is invalid), or a `repeat()` whose count is not an integer (`auto-fill`,
  * `auto-fit`) — none of which map one authored track onto one resolved
  * size the way the drag needs.
  */
 export function parseTrackList(value: string): TrackList | null {
   const text = value.trim();
-  if (text === "" || /^(none|subgrid|masonry)$/i.test(text)) return null;
+  if (
+    text === "" ||
+    /^(none|subgrid|masonry|inherit|initial|unset|revert|revert-layer)$/i.test(
+      text,
+    )
+  )
+    return null;
   if (/var\(/i.test(text)) return null;
   const segments: Segment[] = [];
   const tracks: AuthoredTrack[] = [];

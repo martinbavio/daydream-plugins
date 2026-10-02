@@ -58,6 +58,15 @@ describe("parseTrackList", () => {
   test("leaves alone what one drag cannot map onto resolved sizes", () => {
     expect(parseTrackList("none")).toBeNull();
     expect(parseTrackList("subgrid")).toBeNull();
+    for (const keyword of [
+      "inherit",
+      "initial",
+      "unset",
+      "revert",
+      "revert-layer",
+    ]) {
+      expect(parseTrackList(keyword)).toBeNull();
+    }
     expect(parseTrackList("repeat(auto-fill, minmax(12rem, 1fr))")).toBeNull();
     expect(parseTrackList("var(--cols)")).toBeNull();
     expect(parseTrackList("1fr var(--w)")).toBeNull();
