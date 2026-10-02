@@ -142,13 +142,15 @@ export async function readWithoutReloading<T>(
   styles: readonly HTMLStyleElement[],
   css: readonly SheetRange[],
   inline: ReadonlyMap<Element, readonly TextRange[]>,
-  read: () => T,
+  read: () => T | Promise<T>,
 ): Promise<T> {
   const restore = cut(styles, css, inline);
   try {
     doc.documentElement.getBoundingClientRect();
     if (doc.fonts.status === "loading") await doc.fonts.ready;
-    return read();
+    // Awaited, so a read that yields to the event loop (necessity.ts
+    // `slicer`) is put back after it ends, not when it first yields.
+    return await read();
   } finally {
     restore();
   }

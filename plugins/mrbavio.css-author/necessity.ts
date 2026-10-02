@@ -165,6 +165,7 @@ import {
   type SheetRange,
   type TextRange,
 } from "./pageMount";
+import { slicer } from "./slices";
 import {
   judgedPaths,
   listText,
@@ -454,7 +455,7 @@ async function lintViewport(
     const began = Date.now();
     await withMount(ctx, viewport, width, async (m) => {
       const prepared = await prepare(core, page, authored, m);
-      const probe = baseline(prepared);
+      const probe = await baseline(prepared);
       for (const c of pending) {
         c.applies ||= appliesIn(prepared, c.removal[0]!);
         c.dead = await isDead(prepared, probe, c.removal);
@@ -609,7 +610,7 @@ async function judgeAll(
   own: number,
   nameOf: (node: Element) => string,
 ): Promise<Candidate[]> {
-  const probe = baseline(prepared);
+  const probe = await baseline(prepared);
   const { rules, nodes } = prepared;
   const nameAt = (node: number): string => nameOf(nodes[node]!);
   const unloaded = nodes.map(isUnloadedImage);
@@ -1209,22 +1210,28 @@ interface Probe {
 /** The page as it stands, before any removal. The node list and the
  * property list are fixed here: removals never add or drop elements, and
  * the set of standard longhands the engine enumerates is the same for every
- * element, so both are read once. */
-function baseline(prepared: Prepared): Probe {
+ * element, so both are read once. The read yields to the event loop between
+ * elements (`slicer`): the page copy is private to the lint, so nothing
+ * else changes it meanwhile. */
+async function baseline(prepared: Prepared): Promise<Probe> {
   const { nodes } = prepared;
   const first = nodes[0];
   const properties =
     first === undefined ? [] : snapshotProperties(computedStyleOf(first));
   const pseudoElements = pseudoElementsIn(prepared.rules);
-  return {
-    nodes,
-    properties,
-    pseudoElements,
-    baseline: nodes.map((node) => observe(node, properties, pseudoElements)),
-  };
+  const pause = slicer();
+  const t0 = performance.now();
+  const observed: Observation[] = [];
+  for (const node of nodes) {
+    observed.push(observe(node, properties, pseudoElements));
+    await pause();
+  }
+  (globalThis as Record<string, unknown>)['__nb'] = { n: nodes.length, props: properties.length, pseudo: pseudoElements.length, ms: Math.round(performance.now() - t0) };
+  return { nodes, properties, pseudoElements, baseline: observed };
 }
 
-function unchanged(probe: Probe): boolean {
+async function unchanged(probe: Probe): Promise<boolean> {
+  const pause = slicer();
   for (let i = 0; i < probe.nodes.length; i++) {
     if (
       observe(probe.nodes[i] as Element, probe.properties, probe.pseudoElements) !==
@@ -1232,6 +1239,7 @@ function unchanged(probe: Probe): boolean {
     ) {
       return false;
     }
+    await pause();
   }
   return true;
 }
