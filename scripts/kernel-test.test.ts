@@ -77,20 +77,20 @@ describe("kernel-test --clean", () => {
     const k = scratchKernel();
     // What `--keep` leaves: a copy carrying the script's mark, and the
     // lockfile its install changed.
-    mkdirSync(path.join(k, "plugins", "mrbavio.notes"));
+    mkdirSync(path.join(k, "plugins", "mrbavio.text"));
     writeFileSync(
-      path.join(k, "plugins", "mrbavio.notes", "manifest.json"),
+      path.join(k, "plugins", "mrbavio.text", "manifest.json"),
       "{}\n",
     );
     writeFileSync(
-      path.join(k, "plugins", "mrbavio.notes", ".kernel-test-copy"),
+      path.join(k, "plugins", "mrbavio.text", ".kernel-test-copy"),
       "",
     );
     writeFileSync(path.join(k, "pnpm-lock.yaml"), LOCK + "# changed\n");
 
     const r = run(k, "--clean");
     expect(r.status, r.stderr).toBe(0);
-    expect(existsSync(path.join(k, "plugins", "mrbavio.notes"))).toBe(false);
+    expect(existsSync(path.join(k, "plugins", "mrbavio.text"))).toBe(false);
     expect(existsSync(path.join(k, "plugins", "daydream.own"))).toBe(true);
     expect(readFileSync(path.join(k, "pnpm-lock.yaml"), "utf8")).toBe(LOCK);
   });
@@ -111,7 +111,7 @@ describe("kernel-test --clean", () => {
     const k = scratchKernel();
     // The --keep run records the lockfile it left in its marks.
     const kept = LOCK + "# changed by the install\n";
-    const copy = path.join(k, "plugins", "mrbavio.notes");
+    const copy = path.join(k, "plugins", "mrbavio.text");
     mkdirSync(copy);
     writeFileSync(
       path.join(copy, ".kernel-test-copy"),
@@ -133,7 +133,7 @@ describe("kernel-test --clean", () => {
   test("a reinstall that fails is reported, with a failing exit", () => {
     const k = scratchKernel();
     const pnpm = fakePnpm({ failReinstall: true });
-    const copy = path.join(k, "plugins", "mrbavio.notes");
+    const copy = path.join(k, "plugins", "mrbavio.text");
     mkdirSync(copy);
     writeFileSync(path.join(copy, ".kernel-test-copy"), "");
     const r = spawnSync("node", [script, k, "--clean"], { encoding: "utf8", env: pnpm.env });
@@ -162,16 +162,16 @@ describe("kernel-test --clean", () => {
 
   test("a run over a --keep run's copies stops and names --clean", () => {
     const k = scratchKernel();
-    mkdirSync(path.join(k, "plugins", "mrbavio.notes"));
+    mkdirSync(path.join(k, "plugins", "mrbavio.text"));
     writeFileSync(
-      path.join(k, "plugins", "mrbavio.notes", ".kernel-test-copy"),
+      path.join(k, "plugins", "mrbavio.text", ".kernel-test-copy"),
       "",
     );
     const notes = path.join(
       path.dirname(script),
       "..",
       "plugins",
-      "mrbavio.notes",
+      "mrbavio.text",
     );
     const r = run(k, notes);
     expect(r.status).toBe(2);
@@ -217,7 +217,7 @@ describe("kernel-test stopped by a signal", () => {
   ] as const)("%s stops the step running, runs no step after it, and still cleans up", async (signal, code) => {
     const k = scratchKernel();
     const pnpm = fakePnpm();
-    const child = spawn("node", [script, k, path.join(repo, "plugins", "mrbavio.notes")], {
+    const child = spawn("node", [script, k, path.join(repo, "plugins", "mrbavio.text")], {
       env: pnpm.env,
       stdio: "pipe",
     });
@@ -236,7 +236,7 @@ describe("kernel-test stopped by a signal", () => {
     const calls = pnpm.calls();
     expect(calls.some((c) => c.startsWith("exec eslint") || c.startsWith("exec tsc"))).toBe(false);
     expect(calls.at(-1)).toBe("install --frozen-lockfile --silent");
-    expect(existsSync(path.join(k, "plugins", "mrbavio.notes"))).toBe(false);
+    expect(existsSync(path.join(k, "plugins", "mrbavio.text"))).toBe(false);
     expect(readFileSync(path.join(k, "pnpm-lock.yaml"), "utf8")).toBe(LOCK);
   }, 15000);
 });
@@ -248,7 +248,7 @@ describe("kernel-test's Solid warnings", () => {
     const pnpm = fakePnpm({
       vitest: [warning, warning, `[${code}] repair guide: node_modules/solid-js/skills/…`, " Tests  3 passed (3)", ""].join("\n"),
     });
-    const r = spawnSync("node", [script, k, path.join(repo, "plugins", "mrbavio.notes")], {
+    const r = spawnSync("node", [script, k, path.join(repo, "plugins", "mrbavio.text")], {
       encoding: "utf8",
       env: pnpm.env,
     });
@@ -262,11 +262,11 @@ describe("kernel-test's plugin paths", () => {
   test("a path with no manifest.json stops the run before anything is installed, and names the path", () => {
     const k = scratchKernel();
     const mistyped = path.join(repo, "plugins", "mrbavio.htmleditor");
-    const r = run(k, mistyped, path.join(repo, "plugins", "mrbavio.notes"));
+    const r = run(k, mistyped, path.join(repo, "plugins", "mrbavio.text"));
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("mrbavio.htmleditor");
     expect(r.stdout).not.toContain("pnpm install");
-    expect(existsSync(path.join(k, "plugins", "mrbavio.notes"))).toBe(false);
+    expect(existsSync(path.join(k, "plugins", "mrbavio.text"))).toBe(false);
   });
 });
 
@@ -274,7 +274,7 @@ describe("kernel-test's command line", () => {
   test("an unknown flag stops the run before anything is touched", () => {
     const k = scratchKernel();
     const pnpm = fakePnpm();
-    const r = spawnSync("node", [script, k, path.join(repo, "plugins", "mrbavio.notes"), "--kepe"], {
+    const r = spawnSync("node", [script, k, path.join(repo, "plugins", "mrbavio.text"), "--kepe"], {
       encoding: "utf8",
       env: pnpm.env,
     });
@@ -286,10 +286,10 @@ describe("kernel-test's command line", () => {
 
   test("--clean with a plugin folder is refused, and nothing is removed", () => {
     const k = scratchKernel();
-    const copy = path.join(k, "plugins", "mrbavio.notes");
+    const copy = path.join(k, "plugins", "mrbavio.text");
     mkdirSync(copy);
     writeFileSync(path.join(copy, ".kernel-test-copy"), "");
-    const r = run(k, "--clean", path.join(repo, "plugins", "mrbavio.notes"));
+    const r = run(k, "--clean", path.join(repo, "plugins", "mrbavio.text"));
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("--clean takes the kernel checkout alone");
     expect(existsSync(copy)).toBe(true);
@@ -307,12 +307,12 @@ describe("kernel-test's lock", () => {
   test("a run in progress is named as one, never as leftovers, and --clean leaves its copies alone", () => {
     const k = scratchKernel();
     // The running run's copy, marked as every copy is.
-    const copy = path.join(k, "plugins", "mrbavio.notes");
+    const copy = path.join(k, "plugins", "mrbavio.text");
     mkdirSync(copy);
     writeFileSync(path.join(copy, ".kernel-test-copy"), "");
     const lock = writeLock(k, process.pid);
 
-    const r = run(k, path.join(repo, "plugins", "mrbavio.notes"));
+    const r = run(k, path.join(repo, "plugins", "mrbavio.text"));
     expect(r.status).toBe(2);
     expect(r.stderr).toContain(`another kernel-test run (pid ${process.pid}`);
     expect(r.stderr).toContain("in progress");
@@ -330,11 +330,11 @@ describe("kernel-test's lock", () => {
     const pnpm = fakePnpm();
     const dead = spawnSync("node", ["-e", ""]).pid;
     const lock = writeLock(k, dead, Date.now() - 60_000);
-    const copy = path.join(k, "plugins", "mrbavio.notes");
+    const copy = path.join(k, "plugins", "mrbavio.text");
     mkdirSync(copy);
     writeFileSync(path.join(copy, ".kernel-test-copy"), "");
 
-    const r = spawnSync("node", [script, k, path.join(repo, "plugins", "mrbavio.notes")], {
+    const r = spawnSync("node", [script, k, path.join(repo, "plugins", "mrbavio.text")], {
       encoding: "utf8",
       env: pnpm.env,
     });
