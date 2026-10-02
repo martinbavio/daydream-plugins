@@ -1,0 +1,10 @@
+{
+  "id": "mrbavio.grid-editor",
+  "name": "Grid editor",
+  "version": "0.2.0",
+  "api": "1.0",
+  "contributes": {
+    "overlays": ["grid", "grid-handles"]
+  },
+  "built": "dist/index.js"
+}
