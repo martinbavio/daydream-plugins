@@ -59,7 +59,7 @@
 //
 // Motion is neutralised in the LINT copy only (`still: true` on the
 // mount): a `transition: all 200ms` would otherwise make every
-// remove→read→restore (synchronous, so the computed value is still the
+// remove→read→restore (one frame, so the computed value is still the
 // start value) read dead for colours, paddings, gaps, radii.
 //
 // Three rules keep a CORRECT responsive page landable (the PRD's "dead
@@ -165,7 +165,7 @@ import {
   type SheetRange,
   type TextRange,
 } from "./pageMount";
-import { slicer } from "./slices";
+import { pause } from "./slices";
 import {
   judgedPaths,
   listText,
@@ -967,12 +967,16 @@ function refused(doc: Document, selector: string): boolean {
  * single sweep that stops at the first element whose observation left
  * the baseline. `also`, when given, is cut in the same write: a whole
  * sheet and some rules' declarations (`markOverridden`). */
-function isDead(
+async function isDead(
   prepared: Prepared,
   probe: Probe,
   removal: readonly At[],
   also?: Cut,
 ): Promise<boolean> {
+  // A line that reads live stops at its first element, far inside a
+  // slice: the turn is due between candidates too, and here the page is
+  // not cut.
+  await pause();
   const cssRanges: SheetRange[] = [...(also?.ranges ?? [])];
   const cut = new Set(cssRanges.map(({ sheet, range }) => `${sheet}:${range[0]}`));
   const inline = new Map<Element, TextRange[]>();
@@ -1210,28 +1214,29 @@ interface Probe {
 /** The page as it stands, before any removal. The node list and the
  * property list are fixed here: removals never add or drop elements, and
  * the set of standard longhands the engine enumerates is the same for every
- * element, so both are read once. The read yields to the event loop between
- * elements (`slicer`): the page copy is private to the lint, so nothing
- * else changes it meanwhile. */
+ * element, so both are read once. The read gives the event loop a turn now
+ * and then (`pause`), so what arrives by itself between two elements could
+ * change the page under it: SVG animation, which the mount's `still` does
+ * not stop, is paused first, and an image the mount did not wait for is
+ * bounded by the mount's own wait. */
 async function baseline(prepared: Prepared): Promise<Probe> {
   const { nodes } = prepared;
+  for (const svg of prepared.doc.querySelectorAll<SVGSVGElement>("svg")) {
+    svg.pauseAnimations();
+  }
   const first = nodes[0];
   const properties =
     first === undefined ? [] : snapshotProperties(computedStyleOf(first));
   const pseudoElements = pseudoElementsIn(prepared.rules);
-  const pause = slicer();
-  const t0 = performance.now();
   const observed: Observation[] = [];
   for (const node of nodes) {
     observed.push(observe(node, properties, pseudoElements));
     await pause();
   }
-  (globalThis as Record<string, unknown>)['__nb'] = { n: nodes.length, props: properties.length, pseudo: pseudoElements.length, ms: Math.round(performance.now() - t0) };
   return { nodes, properties, pseudoElements, baseline: observed };
 }
 
 async function unchanged(probe: Probe): Promise<boolean> {
-  const pause = slicer();
   for (let i = 0; i < probe.nodes.length; i++) {
     if (
       observe(probe.nodes[i] as Element, probe.properties, probe.pseudoElements) !==

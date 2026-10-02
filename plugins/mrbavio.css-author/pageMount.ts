@@ -8,7 +8,8 @@
 // A mount is the live face core renders (`ctx.mountViewport`, the page's
 // own text in an iframe, each live sheet a `<style>` of its own), bare —
 // nothing the measurer adds for its own read — and motion pinned off: a
-// remove-and-read is synchronous, and a transition would answer it with
+// remove-and-read is made inside one frame (its reads may give the event
+// loop a turn, never a frame), and a transition would answer it with
 // its start value.
 // What a condition answers is the mounted window's own — the one the page
 // renders with.
@@ -149,7 +150,7 @@ export async function readWithoutReloading<T>(
     doc.documentElement.getBoundingClientRect();
     if (doc.fonts.status === "loading") await doc.fonts.ready;
     // Awaited, so a read that yields to the event loop (necessity.ts
-    // `slicer`) is put back after it ends, not when it first yields.
+    // `pause` in slices.ts) is put back after it ends, not when it first yields.
     return await read();
   } finally {
     restore();
