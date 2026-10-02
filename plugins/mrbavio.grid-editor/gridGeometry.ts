@@ -89,9 +89,6 @@ export interface PlaceOptions {
   /** The columns of an rtl grid: physical `left` / `right` name the
    * opposite ends of the logical axis. */
   rtl?: boolean;
-  /** A scroll container: free space below zero never moves the tracks
-   * before the start, where they could not be scrolled to. */
-  scrolls?: boolean;
 }
 
 /** `justify-content` / `align-content` over `free` layout px and `count`
@@ -100,8 +97,9 @@ export interface PlaceOptions {
  * `space-*` keywords fall back as the spec says (`space-between` to
  * start, `space-around` and `space-evenly` to a safe center); `center`
  * and `end` keep their negative offset, as the tracks overflow both
- * sides or the start — unless `safe` was written or the grid scrolls,
- * which hold them at the start. */
+ * sides or the start, in a scroll container too (Chromium places them
+ * there, and `scrollLeft` moves them on) — unless `safe` was written,
+ * which holds them at the start. */
 export function distribute(
   keyword: string,
   free: number,
@@ -110,7 +108,7 @@ export function distribute(
 ): Placement {
   const none = { offset: 0, between: 0 };
   if (count === 0) return none;
-  const safe = /^safe\s/.test(keyword) || options.scrolls === true;
+  const safe = /^safe\s/.test(keyword);
   let word = keyword.replace(/^(safe|unsafe)\s+/, "");
   // `left` and `right` are physical; the axis' end is the right in ltr
   // and the left in rtl.
@@ -142,10 +140,6 @@ export function distribute(
       return none;
   }
 }
-
-/** Whether an `overflow` value makes a scroll container (`clip` does not). */
-const scrolls = (overflow: string): boolean =>
-  overflow !== "visible" && overflow !== "clip";
 
 /** The tracks laid along an axis: from `origin` (overlay px, the content
  * box's start) over `extent` layout px, with the placement's offset
@@ -214,21 +208,22 @@ export function readGridGeometry(
   const colGap = parseGap(style.columnGap, contentWidth);
   const rowGap = parseGap(style.rowGap, contentHeight);
   if (colGap === null || rowGap === null) return null;
-  const contentX = rect.x + (bl! + pl!) * zoom;
-  const contentY = rect.y + (bt! + pt!) * zoom;
+  // A scrolled grid carries its tracks with its content.
+  const contentX = rect.x + (bl! + pl! - node.scrollLeft) * zoom;
+  const contentY = rect.y + (bt! + pt! - node.scrollTop) * zoom;
   const used = (sizes: number[], gap: number) =>
     sizes.reduce((a, v) => a + v, 0) + gap * Math.max(0, sizes.length - 1);
   const cols = distribute(
     style.justifyContent,
     contentWidth - used(colSizes, colGap),
     colSizes.length,
-    { rtl: style.direction === "rtl", scrolls: scrolls(style.overflowX) },
+    { rtl: style.direction === "rtl" },
   );
   const rows = distribute(
     style.alignContent,
     contentHeight - used(rowSizes, rowGap),
     rowSizes.length,
-    { scrolls: scrolls(style.overflowY) },
+    {},
   );
   const rtl = style.direction === "rtl";
   return {
@@ -255,4 +250,65 @@ export function readGridGeometry(
     rect,
     zoom,
   };
+}
+
+/** A child's start or end line as the explicit grid numbers it, or null
+ * when it is `auto`, a `span` or a name: an integer, positive from the
+ * start, negative from the end (`-1` is the line after the last of
+ * `explicit` tracks). */
+function lineNumber(value: string, explicit: number): number | null {
+  const match = /^(-?\d+)$/.exec(value.trim());
+  if (match === null) return null;
+  const n = Number(match[1]);
+  return n < 0 ? explicit + 2 + n : n;
+}
+
+/** The grid items under `node`: its children that take part in the
+ * layout (not `display: none`, not absolutely positioned) and, through a
+ * `display: contents` child, that child's own. */
+function gridItems(node: Element): Element[] {
+  const items: Element[] = [];
+  for (const child of node.children) {
+    const style = getComputedStyle(child);
+    if (style.display === "none") continue;
+    if (style.display === "contents") items.push(...gridItems(child));
+    else if (style.position !== "absolute" && style.position !== "fixed")
+      items.push(child);
+  }
+  return items;
+}
+
+/**
+ * Whether an item can start before the first explicit line of an axis
+ * (`grid-column: -5` on three tracks, `span 2 / 1`, `auto / 1`):
+ * Chromium then resolves implicit tracks BEFORE the explicit ones, and
+ * the resolved sizes no longer pair with the authored list from the
+ * start. Read from the computed start and end of every grid item.
+ * Names are not followed — an unknown name lands after the explicit
+ * tracks, and a known one is a line the author numbered.
+ */
+export function startsBeforeFirst(
+  node: Element,
+  axis: "cols" | "rows",
+  explicit: number,
+): boolean {
+  const [startProperty, endProperty] =
+    axis === "cols"
+      ? ["grid-column-start", "grid-column-end"]
+      : ["grid-row-start", "grid-row-end"];
+  for (const child of gridItems(node)) {
+    const style = getComputedStyle(child);
+    const startText = style.getPropertyValue(startProperty).trim();
+    const endText = style.getPropertyValue(endProperty).trim();
+    const start = lineNumber(startText, explicit);
+    const end = lineNumber(endText, explicit);
+    // Where the item starts: the lower of two numbered lines; else the
+    // numbered end less the span the start asks for (one when it is auto).
+    const span = /^span\s+(\d+)$/.exec(startText);
+    let first: number | null = null;
+    if (start !== null) first = end === null ? start : Math.min(start, end);
+    else if (end !== null) first = end - (span === null ? 1 : Number(span[1]));
+    if (first !== null && first < 1) return true;
+  }
+  return false;
 }

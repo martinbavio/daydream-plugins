@@ -313,8 +313,8 @@ export default function createGridHandles(dd: DaydreamApi): JSX.Element {
     const line = untrack(box).line;
     const text = untrack(() =>
       event.shiftKey
-        ? removeBefore(dd, v.gridId, axis, line)
-        : insertEqualAt(dd, v.gridId, axis, line),
+        ? removeBefore(dd, v.gridId, v.geometry, axis, line)
+        : insertEqualAt(dd, v.gridId, v.geometry, axis, line),
     );
     showNote(event.clientX, event.clientY, text);
     window.clearTimeout(flashTimer);

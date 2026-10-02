@@ -67,12 +67,8 @@ describe("distribute", () => {
       offset: -50,
       between: 0,
     });
-    // `safe`, and a scroll container, hold them at the start.
+    // `safe` holds them at the start.
     expect(distribute("safe center", -100, 3)).toEqual({
-      offset: 0,
-      between: 0,
-    });
-    expect(distribute("end", -100, 3, { scrolls: true })).toEqual({
       offset: 0,
       between: 0,
     });

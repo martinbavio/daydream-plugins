@@ -115,7 +115,10 @@ export function withDeclaration(
   const text = `${property}: ${value}${winner?.important === true ? " !important" : ""};`;
   if (winner === null) {
     const kept = declarations.replace(/\s+$/, "");
-    return kept === "" ? text : `${kept}\n${text}`;
+    if (kept === "") return text;
+    // The last declaration may have no `;` (the last of a block need
+    // not): without one the new line would be part of its value.
+    return `${kept}${kept.endsWith(";") ? "" : ";"}\n${text}`;
   }
   return (
     declarations.slice(0, winner.range[0]) +

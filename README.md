@@ -77,6 +77,10 @@ Daydream sees the change and every tab picks it up.
 `daydream plugin uninstall <id>` removes the link, the trust and the
 enabled entry.
 
+`mrbavio.grid-editor` replaces `mrbavio.grid` (the overlay alone): an
+install that has the old one runs `daydream plugin uninstall mrbavio.grid`
+first, or both draw the guides.
+
 ## Install by hand
 
 The same two steps, one plugin at a time:

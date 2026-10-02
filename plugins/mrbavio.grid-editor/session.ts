@@ -1,6 +1,6 @@
 import type { DaydreamApi, ElementId } from "@daydream/plugin-api";
 
-import type { GridGeometry } from "./gridGeometry";
+import { startsBeforeFirst, type GridGeometry } from "./gridGeometry";
 import { createWriter, findTarget, type WritableTarget } from "./ruleWrite";
 import {
   formatLength,
@@ -92,6 +92,7 @@ const blockedNote = (
 function openTracks(
   dd: DaydreamApi,
   gridId: ElementId,
+  geometry: GridGeometry,
   axis: Axis,
   implicitHint: string,
 ): Tracks | string {
@@ -112,55 +113,17 @@ function openTracks(
   if (list === null) {
     return `${NOUN[axis]} use a value only the CSS panel can edit`;
   }
-  if (startsBeforeFirst(dd, gridId, axis, list.tracks.length)) {
+  // More authored tracks than the grid resolved: the rule read is not the
+  // one in force (a `@container` or media condition the page is not
+  // under), and the file would change with nothing moving.
+  if (list.tracks.length > geometry[axis].sizes.length) {
+    return `${NOUN[axis]} come from a rule that is not in force here`;
+  }
+  const node = dd.geometry.node(gridId);
+  if (node !== undefined && startsBeforeFirst(node, axis, list.tracks.length)) {
     return `${NOUN[axis]} start before the first — the CSS panel edits that`;
   }
   return { target, list, property };
-}
-
-/** A child's start or end line as the explicit grid numbers it, or null
- * when it is `auto`, a `span` or a name: an integer, positive from the
- * start, negative from the end (`-1` is the line after the last of
- * `explicit` tracks). */
-function lineNumber(value: string, explicit: number): number | null {
-  const match = /^(-?\d+)$/.exec(value.trim());
-  if (match === null) return null;
-  const n = Number(match[1]);
-  return n < 0 ? explicit + 2 + n : n;
-}
-
-/** Whether a child can start before the first explicit line
- * (`grid-column: -5` on three tracks, or `span 2 / 1`): Chromium then
- * resolves implicit tracks BEFORE the explicit ones, and the resolved
- * sizes no longer pair with the authored list from the start. Read at the
- * press, from the computed start and end of every child. */
-function startsBeforeFirst(
-  dd: DaydreamApi,
-  gridId: ElementId,
-  axis: Axis,
-  explicit: number,
-): boolean {
-  const node = dd.geometry.node(gridId);
-  if (node === undefined) return false;
-  const [startProperty, endProperty] =
-    axis === "cols"
-      ? ["grid-column-start", "grid-column-end"]
-      : ["grid-row-start", "grid-row-end"];
-  for (const child of node.children) {
-    const style = getComputedStyle(child);
-    const startText = style.getPropertyValue(startProperty).trim();
-    const endText = style.getPropertyValue(endProperty).trim();
-    const start = lineNumber(startText, explicit);
-    const end = lineNumber(endText, explicit);
-    // Where the item starts: the lower of two numbered lines; else the
-    // numbered end less the span the start asks for (one when it is auto).
-    const span = /^span\s+(\d+)$/.exec(startText);
-    let first: number | null = null;
-    if (start !== null) first = end === null ? start : Math.min(start, end);
-    else if (end !== null) first = end - (span === null ? 1 : Number(span[1]));
-    if (first !== null && first < 1) return true;
-  }
-  return false;
 }
 
 /** Read the authored track list and the rule, then trade across the
@@ -177,7 +140,13 @@ function beginTrade(
   if (line === 0 || line >= sizes.length) {
     return inert(`pull inward to open a ${ONE[axis]}`, line);
   }
-  const opened = openTracks(dd, gridId, axis, "⌘-drag adjusts the gap");
+  const opened = openTracks(
+    dd,
+    gridId,
+    geometry,
+    axis,
+    "⌘-drag adjusts the gap",
+  );
   if (typeof opened === "string") return inert(opened, line);
   const { target, list, property } = opened;
   const a = list.tracks[line - 1];
@@ -223,6 +192,7 @@ function beginInsert(
   const opened = openTracks(
     dd,
     gridId,
+    geometry,
     axis,
     `a ${ONE[axis]} is born from content`,
   );
@@ -261,12 +231,14 @@ function beginInsert(
 export function insertEqualAt(
   dd: DaydreamApi,
   gridId: ElementId,
+  geometry: GridGeometry,
   axis: Axis,
   line: number,
 ): string {
   const opened = openTracks(
     dd,
     gridId,
+    geometry,
     axis,
     `a ${ONE[axis]} is born from content`,
   );
@@ -284,10 +256,11 @@ export function insertEqualAt(
 export function removeBefore(
   dd: DaydreamApi,
   gridId: ElementId,
+  geometry: GridGeometry,
   axis: Axis,
   line: number,
 ): string {
-  const opened = openTracks(dd, gridId, axis, "nothing to remove");
+  const opened = openTracks(dd, gridId, geometry, axis, "nothing to remove");
   if (typeof opened === "string") return opened;
   const index = Math.max(0, line - 1);
   const without = removeTrack(opened.list, index);

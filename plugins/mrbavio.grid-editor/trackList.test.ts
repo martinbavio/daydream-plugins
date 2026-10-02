@@ -298,6 +298,38 @@ describe("insertEqual", () => {
   });
 });
 
+describe("tradeAcross beside a fixed track between shares", () => {
+  test("the share is scaled with the fixed track, so the line follows the pointer", () => {
+    const list = parseTrackList("1fr 200px 1fr")!;
+    const trade = tradeAcross(list, [380, 200, 380], 0, 40) as Trade;
+    // 200px alone would move the line by 20: the free space splits two ways.
+    expect(trade.list).toBe("1.11fr 160px 1fr");
+  });
+
+  test("shares that measured nothing are not rewritten in px", () => {
+    const list = parseTrackList("1fr 1fr")!;
+    expect(tradeAcross(list, [0, 0], 0, 30)).toBeNull();
+  });
+});
+
+describe("parseTrackList keywords", () => {
+  test("subgrid with names is no list of tracks", () => {
+    expect(parseTrackList("subgrid [a] [b]")).toBeNull();
+    expect(parseTrackList("masonry")).toBeNull();
+  });
+});
+
+describe("removeTrack through a repeat", () => {
+  test("the names left side by side are merged, as a plain removal merges them", () => {
+    expect(removeTrack(parseTrackList("[b] repeat(2, [a] 1fr)")!, 0)).toBe(
+      "[b a] 1fr",
+    );
+    expect(removeTrack(parseTrackList("[a] repeat(1, 1fr) [b] 2fr")!, 0)).toBe(
+      "[a b] 2fr",
+    );
+  });
+});
+
 describe("removeTrack", () => {
   test("drops the track and merges the names it stood between", () => {
     expect(removeTrack(parseTrackList("1fr 2fr 1fr")!, 1)).toBe("1fr 1fr");

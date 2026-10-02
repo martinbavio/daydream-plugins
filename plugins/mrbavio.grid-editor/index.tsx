@@ -18,7 +18,7 @@
 //   end; double-click a band for a track equal to the one before it
 //   (`repeat(3, 1fr)` → `repeat(4, 1fr)`), ⇧-double-click to remove that
 //   track. Every frame writes real CSS into the page's own rule through
-//   `dd.writePage`, and the note beside the pointer shows exactly what was
+//   a page transaction (`dd.beginItemTransaction`), and the note beside the pointer shows exactly what was
 //   written. Nothing else is created here — a grid comes from the page or
 //   from an agent.
 //

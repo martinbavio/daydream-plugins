@@ -107,9 +107,8 @@ export function parseTrackList(value: string): TrackList | null {
   const text = value.trim();
   if (
     text === "" ||
-    /^(none|subgrid|masonry|inherit|initial|unset|revert|revert-layer)$/i.test(
-      text,
-    )
+    /^(none|inherit|initial|unset|revert|revert-layer)$/i.test(text) ||
+    /^(subgrid|masonry)\b/i.test(text)
   )
     return null;
   if (/var\(/i.test(text)) return null;
@@ -219,8 +218,14 @@ export function writeTrackList(
     }
   }
   if (!inserted && insert !== undefined) out.push(insert.text);
-  // Two name groups left adjacent by a removal are one line's names.
-  return out.join(" ").replace(/\]\s+\[/g, " ");
+  return joinList(out);
+}
+
+/** A list's parts written as one value. Two name groups left adjacent
+ * (by a removal, a repeat's last copy dropped) are one line's names:
+ * `[b] [a] 1fr` is no track list, `[b a] 1fr` is. */
+function joinList(parts: string[]): string {
+  return parts.join(" ").replace(/\]\s+\[/g, " ");
 }
 
 /** `12.5px`, `1.33fr`: px to a tenth, everything else to a hundredth,
@@ -318,7 +323,10 @@ export function tradeAcross(
     isShare(share) && other.length === null && shares === 1;
   let first: string;
   let second: string;
-  if (isShare(a) && isShare(b) && pa + pb > 0) {
+  // Shares that resolved to nothing (empty cells in an auto-height grid)
+  // have no price: a drag would write the px they measured, 0px.
+  if ((isShare(a) || isShare(b)) && pa + pb <= 0) return null;
+  if (isShare(a) && isShare(b)) {
     const total = a.length!.value + b.length!.value;
     const k = total / (pa + pb);
     const fa = Number((na * k).toFixed(2));
@@ -336,6 +344,28 @@ export function tradeAcross(
       if (fn !== null) return { refused: fn };
       first = formatLength(na, "px");
       second = formatLength(nb, "px");
+    } else if (top === 2 && shares >= 2 && (isShare(a) || isShare(b))) {
+      // A fixed track beside a share, with other shares in the grid: the
+      // free space is split among them all, so writing the fixed length
+      // alone moves the line by a fraction of the drag. The share scaled
+      // by the same ratio as its px keeps the free space's price, and the
+      // others where they are.
+      const share = isShare(a) ? a : b;
+      const sharePx = isShare(a) ? pa : pb;
+      const shareNext = isShare(a) ? na : nb;
+      if (sharePx > 0 && shareNext > 0) {
+        const scaled = scaleLength(share.text, sharePx, shareNext);
+        const fixed = isShare(a)
+          ? scaleLength(b.text, pb, nb)
+          : scaleLength(a.text, pa, na);
+        first = isShare(a) ? scaled : fixed;
+        second = isShare(a) ? fixed : scaled;
+      } else {
+        first =
+          precedence(a, pa) === top ? scaleLength(a.text, pa, na) : a.text;
+        second =
+          precedence(b, pb) === top ? scaleLength(b.text, pb, nb) : b.text;
+      }
     } else {
       first = precedence(a, pa) === top ? scaleLength(a.text, pa, na) : a.text;
       second = precedence(b, pb) === top ? scaleLength(b.text, pb, nb) : b.text;
@@ -438,7 +468,7 @@ function bumpRepeat(
     } else out.push(segment.text);
     index = last;
   }
-  return hit ? out.join(" ") : null;
+  return hit ? joinList(out) : null;
 }
 
 /** A track equal to the one before `line` (the first, at the start
