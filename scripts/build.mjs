@@ -14,7 +14,23 @@ import { build } from "vite";
 import solid from "@solidjs/vite-plugin";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const isExposed = (id) => /^(solid-js|@solidjs\/web)(\/|$)/.test(id);
+// The page's import map has the two roots and nothing under them, so only
+// they stay external; a subpath is refused here (as Daydream's
+// `pnpm plugin:build` does) instead of shipping an import the page cannot load.
+const ROOTS = new Set(["solid-js", "@solidjs/web"]);
+const isExposed = (id) => ROOTS.has(id);
+const refuseSolidSubpaths = {
+  name: "refuse-solid-subpaths",
+  enforce: "pre",
+  resolveId(id) {
+    if (/^(solid-js|@solidjs\/web)\//.test(id)) {
+      throw new Error(
+        `${id}: only solid-js and @solidjs/web are provided by the Daydream page; import from those roots`,
+      );
+    }
+    return null;
+  },
+};
 
 async function buildPlugin(folder) {
   const entry = ["index.tsx", "index.ts"].find((f) => existsSync(path.join(folder, f)));
@@ -23,7 +39,7 @@ async function buildPlugin(folder) {
     configFile: false,
     root: folder,
     logLevel: "warn",
-    plugins: [solid()],
+    plugins: [refuseSolidSubpaths, solid()],
     build: {
       outDir: path.join(folder, "dist"),
       emptyOutDir: true,
