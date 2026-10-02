@@ -122,7 +122,7 @@ test("disabling text keeps its data, removes interactions and styles, and re-ena
   store.setSelectedId("annotation");
   flush();
   const item = host.querySelector<HTMLElement>("[data-text-item]")!;
-  expect(getComputedStyle(item).fontFamily).toContain("Georgia");
+  expect(getComputedStyle(item).fontFamily).toContain("system-ui");
   expect(getComputedStyle(item).color).toBe("rgb(255, 255, 255)");
   expect(getComputedStyle(item).lineHeight).toBe("39.2px");
   const before = JSON.stringify(store.document);

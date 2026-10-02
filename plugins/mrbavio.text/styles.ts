@@ -7,7 +7,7 @@ export const textStyles = `
   min-width: 1rem;
   min-height: 1rem;
   color: #fff;
-  font-family: Georgia, "Times New Roman", serif;
+  font-family: system-ui, -apple-system, sans-serif;
   font-size: 1.5rem;
   font-weight: 400;
   line-height: 1.4;

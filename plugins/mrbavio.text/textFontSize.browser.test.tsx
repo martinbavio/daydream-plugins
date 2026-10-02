@@ -105,7 +105,7 @@ test("plus/minus adjust white text and proportional width, preserving lines, pos
   const originalHeight = node.firstElementChild!.getBoundingClientRect().height;
   expect(getComputedStyle(node).color).toBe("rgb(255, 255, 255)");
   expect(getComputedStyle(node).fontFamily).toBe(
-    'Georgia, "Times New Roman", serif',
+    "system-ui, -apple-system, sans-serif",
   );
   expect(parseFloat(getComputedStyle(node).lineHeight)).toBeCloseTo(24 * 1.4);
   expect(chord("+", document.body, true).defaultPrevented).toBe(true);
@@ -188,7 +188,7 @@ test("font sizing during native editing keeps the caret, persists through typing
   );
   const editor = host.querySelector<HTMLElement>("[data-text-editor]")!;
   expect(getComputedStyle(editor).fontFamily).toBe(
-    'Georgia, "Times New Roman", serif',
+    "system-ui, -apple-system, sans-serif",
   );
   expect(parseFloat(getComputedStyle(editor).lineHeight)).toBeCloseTo(24 * 1.4);
   await userEvent.keyboard(" world");
