@@ -1,0 +1,11 @@
+{
+  "id": "mrbavio.pages",
+  "name": "Pages",
+  "version": "0.1.0",
+  "api": "1.2",
+  "contributes": {
+    "panels": ["pages"],
+    "instructions": "The Pages panel lists every page of the open project (daydream.json's pages), by path, with its <title>, how many viewports of it the canvas shows, and a page whose file is gone marked missing. Dragging a page's name onto the canvas lands a viewport of it where it is let go: the drag carries the viewport's outline at the canvas's zoom, held by its top-left, and the viewport takes the frame of the page's last viewport (else 960 wide, full page) and is selected, as one undo step. A click on a page's name selects its viewport, and clicking again steps through its others. New page asks for a title and makes an empty page of the project through Daydream (named after the title, at the project's root), places it at the view's center and selects it. It renames, moves and deletes no file: those stay the user's and the agent's file tools'. A viewport it lands is an ordinary viewport: move, resize and remove it as any other."
+  },
+  "built": "dist/index.js"
+}
