@@ -164,6 +164,25 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
 
+  plugins/mrbavio.pages:
+    dependencies:
+      '@daydream/plugin-api':
+        specifier: github:mbavio-phota/daydream#c6ab8eee63be310eb0921276cedf501470cc754d&path:packages/plugin-api
+        version: git+https://github.com/mbavio-phota/daydream.git#c6ab8eee63be310eb0921276cedf501470cc754d&path:packages/plugin-api(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
+      '@solidjs/web':
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9(solid-js@2.0.0-rc.9)
+      solid-js:
+        specifier: 2.0.0-rc.9
+        version: 2.0.0-rc.9
+    devDependencies:
+      '@daydream/plugin-testing':
+        specifier: 'catalog:'
+        version: git+https://github.com/mbavio-phota/daydream.git#c6ab8eee63be310eb0921276cedf501470cc754d&path:packages/plugin-testing(@solidjs/web@2.0.0-rc.9(solid-js@2.0.0-rc.9))(solid-js@2.0.0-rc.9)(zod@4.6.5)
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
+
   plugins/mrbavio.text:
     dependencies:
       '@daydream/plugin-api':

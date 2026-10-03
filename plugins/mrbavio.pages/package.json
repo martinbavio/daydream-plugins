@@ -1,0 +1,17 @@
+{
+  "name": "@mrbavio/plugin-pages",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "peerDependencies": {
+    "@solidjs/web": "2.0.0-rc.9",
+    "solid-js": "2.0.0-rc.9"
+  },
+  "dependencies": {
+    "@daydream/plugin-api": "catalog:"
+  },
+  "devDependencies": {
+    "@daydream/plugin-testing": "catalog:",
+    "vitest": "^4.1.11"
+  }
+}
